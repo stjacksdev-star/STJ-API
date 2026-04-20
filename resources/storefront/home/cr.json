@@ -1,0 +1,101 @@
+{
+  "hero_slides": [
+    {
+      "desktop": "/images/slider/sv/slider-desk-verano-01.jpg",
+      "mobile": "/images/slider/sv/slider-movil-verano-01.jpg",
+      "link": ""
+    },
+    {
+      "desktop": "/images/slider/sv/slider-desk-verano-02.jpg",
+      "mobile": "/images/slider/sv/slider-movil-verano-02.jpg",
+      "link": ""
+    },
+    {
+      "desktop": "/images/slider/sv/slider-desk-verano-03.jpg",
+      "mobile": "/images/slider/sv/slider-movil-verano-03.jpg",
+      "link": ""
+    }
+  ],
+  "banners": [
+    {
+      "desktop": "/images/banner/cr/1825banner_home.jpeg?v=2",
+      "mobile": "/images/banner/cr/1825banner_home.jpeg?v=2",
+      "link": "Promociones/?idPromocion=1825&Promo"
+    },
+    {
+      "desktop": "/images/banner/cr/1829banner_home.jpeg",
+      "mobile": "/images/banner/cr/1829banner_home.jpeg",
+      "link": "Promociones/?idPromocion=1829&Promo"
+    }
+  ],
+  "new_arrivals": {
+    "left": [
+      {
+        "image": "/images/lo-mas-nuevo/sv/lo-mas-nuevo-verano-01.jpg",
+        "link": ""
+      }
+    ],
+    "center": [
+      {
+        "image": "/images/lo-mas-nuevo/sv/lo-mas-nuevo-verano-02-1.jpg",
+        "link": ""
+      }
+    ],
+    "right": [
+      {
+        "image": "/images/lo-mas-nuevo/sv/lo-mas-nuevo-verano-02.jpg",
+        "link": ""
+      }
+    ]
+  ],
+  "best_sellers": [
+    {
+      "pro_id": "8012",
+      "pro_codigo": "4080114002",
+      "pro_nombre": "PIJAMA- SNOOPY ESPACIO",
+      "pro_marca": "ST JACKS",
+      "cat_nombre": "Damas",
+      "sca_nombre": "Pijamas",
+      "ppa_precio": "25.95045",
+      "pro_thumbs": "4080114002.jpg",
+      "ppa_promo_nombre": "",
+      "ppa_es_popular": "1"
+    },
+    {
+      "pro_id": "8022",
+      "pro_codigo": "4080114701",
+      "pro_nombre": "PIJAMA- BLUEY FAMILIAR 2",
+      "pro_marca": "ST JACKS",
+      "cat_nombre": "Damas",
+      "sca_nombre": "Pijamas",
+      "ppa_precio": "25.95045",
+      "pro_thumbs": "4080114701-5.jpg",
+      "ppa_promo_nombre": "",
+      "ppa_es_popular": "1"
+    },
+    {
+      "pro_id": "6030",
+      "pro_codigo": "3050025201",
+      "pro_nombre": "SUDADERA - ESCOLAR",
+      "pro_marca": "ST JACKS",
+      "cat_nombre": "Niños",
+      "sca_nombre": "Sudaderas",
+      "ppa_precio": "24.95",
+      "pro_thumbs": "3050025201.jpg",
+      "ppa_promo_nombre": "20% DE DESCUENTO",
+      "ppa_es_popular": "1"
+    },
+    {
+      "pro_id": "7643",
+      "pro_codigo": "2430011401",
+      "pro_nombre": "TRAJE DE BAÑO - HELLO  KITTY BESTIES",
+      "pro_marca": "ST JACKS",
+      "cat_nombre": "Niñas",
+      "sca_nombre": "Traje de baño",
+      "ppa_precio": "19.95015",
+      "pro_thumbs": "2430011401.jpg",
+      "ppa_promo_nombre": "20% DE DESCUENTO",
+      "ppa_es_popular": "1"
+    }
+  ]
+}
