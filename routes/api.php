@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontOrderController;
+use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
+use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
 
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -30,6 +32,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/productos', [ProductoController::class, 'listar']);
     Route::get('/pedido/detalle', [PedidoController::class, 'getPedidoById']);
+
+    Route::prefix('dashboard')->group(function () {
+        Route::get('/collections', [DashboardCollectionController::class, 'index']);
+        Route::post('/collections', [DashboardCollectionController::class, 'store']);
+        Route::post('/collections/{collection}', [DashboardCollectionController::class, 'update']);
+        Route::get('/collections/{collection}/assets', [DashboardCollectionAssetController::class, 'index']);
+        Route::post('/collections/{collection}/assets', [DashboardCollectionAssetController::class, 'store']);
+        Route::post('/assets/{asset}', [DashboardCollectionAssetController::class, 'update']);
+    });
 });
 
 Route::get('/debug-db', function () {
