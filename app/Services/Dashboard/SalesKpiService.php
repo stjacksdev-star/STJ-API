@@ -206,7 +206,7 @@ class SalesKpiService
             ->whereRaw('DATE(ped_fecha) <= ?', [$end])
             ->where('ppa_estado', 'APROBADA')
             ->where('ped_id_pais', $countryId)
-            ->groupByRaw("CASE WHEN ped_checkout = 'DOMICILIO' THEN 'Domicilio' ELSE tie_nombre END")
+            ->groupBy('ped_checkout', 'tie_nombre')
             ->orderByDesc('monto')
             ->selectRaw("CASE WHEN ped_checkout = 'DOMICILIO' THEN 'Domicilio' ELSE tie_nombre END AS nombreT, COUNT(*) AS total, SUM(ppa_articulos) AS cantidad, SUM(ppa_monto_senv) AS monto")
             ->get()
@@ -233,7 +233,7 @@ class SalesKpiService
             })
             ->where('ped_estatus', 'RECIBIDO')
             ->where('ped_id_pais', $countryId)
-            ->groupByRaw("CASE WHEN ped_checkout = 'DOMICILIO' THEN 'Domicilio' ELSE tie_nombre END, tie_correo, tie_codigo")
+            ->groupBy('ped_checkout', 'tie_nombre', 'tie_correo', 'tie_codigo')
             ->selectRaw("CASE WHEN ped_checkout = 'DOMICILIO' THEN 'Domicilio' ELSE tie_nombre END AS nombreT, tie_correo AS correo, COUNT(*) AS total, SUM(ppa_articulos) AS articulos, SUM(ppa_monto_senv) AS venta, tie_codigo")
             ->get()
             ->map(fn ($row) => [
