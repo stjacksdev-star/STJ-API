@@ -48,9 +48,10 @@ Artisan::command('sanctum:rotate-token {email : Correo del usuario tecnico} {--n
     return self::SUCCESS;
 })->purpose('Genera un nuevo token Sanctum para un usuario tecnico y opcionalmente revoca los anteriores');
 
-Artisan::command('dashboard:issue-token {email=dashboard@stjacks.local : Correo del usuario tecnico del dashboard} {--name=stj_dashboard_token : Nombre del token}', function () {
+Artisan::command('dashboard:issue-token {email=dashboard@stjacks.local : Correo del usuario tecnico del dashboard} {--name=stj_dashboard_token : Nombre del token} {--days=90 : Dias de vigencia del token}', function () {
     $email = (string) $this->argument('email');
     $tokenName = (string) $this->option('name');
+    $expirationDays = max(1, (int) $this->option('days'));
 
     /** @var User $user */
     $user = User::firstOrCreate(
@@ -65,10 +66,7 @@ Artisan::command('dashboard:issue-token {email=dashboard@stjacks.local : Correo 
         ->where('name', $tokenName)
         ->delete();
 
-    $expirationMinutes = (int) config('sanctum.expiration', 0);
-    $expiresAt = $expirationMinutes > 0
-        ? Carbon::now()->addMinutes($expirationMinutes)
-        : null;
+    $expiresAt = Carbon::now()->addDays($expirationDays);
     $token = $user->createToken($tokenName, ['dashboard'], $expiresAt);
 
     $this->info('Token dashboard generado correctamente.');

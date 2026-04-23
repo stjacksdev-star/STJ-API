@@ -12,6 +12,10 @@ use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
+use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
+use App\Http\Controllers\Api\Dashboard\PromotionAssetController as DashboardPromotionAssetController;
+use App\Http\Controllers\Api\Dashboard\PromotionController as DashboardPromotionController;
+use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
 
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -40,6 +44,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/collections/{collection}/assets', [DashboardCollectionAssetController::class, 'index']);
         Route::post('/collections/{collection}/assets', [DashboardCollectionAssetController::class, 'store']);
         Route::post('/assets/{asset}', [DashboardCollectionAssetController::class, 'update']);
+        Route::get('/promotions', [DashboardPromotionController::class, 'index']);
+        Route::post('/promotions', [DashboardPromotionController::class, 'store']);
+        Route::post('/promotions/{promotion}/schedule', [DashboardPromotionController::class, 'updateSchedule']);
+        Route::get('/promotions/{promotion}/assets', [DashboardPromotionAssetController::class, 'index']);
+        Route::post('/promotions/{promotion}/assets', [DashboardPromotionAssetController::class, 'store']);
+        Route::post('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'update']);
+        Route::delete('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'destroy']);
+        Route::post('/promotions/{promotion}/header', [DashboardPromotionAssetController::class, 'updateHeader']);
+        Route::get('/sales/kpi', [DashboardSalesKpiController::class, 'show']);
+        Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
+        Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
+        Route::get('/orders/product', [DashboardOrderReferenceController::class, 'product']);
+        Route::post('/orders/lines/{line}', [DashboardOrderReferenceController::class, 'updateLine']);
+        Route::post('/orders/process', [DashboardOrderReferenceController::class, 'process']);
     });
 });
 

@@ -28,6 +28,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'smtp2go' => [
+        'url' => env('SMTP2GO_API_URL', 'https://api.smtp2go.com/v3/email/send'),
+        'key' => env('SMTP2GO_API_KEY'),
+        'sender' => env('SMTP2GO_SENDER', '"St. Jack\'s" Online <no-reply@stjacks.online>'),
+        'timeout' => env('SMTP2GO_TIMEOUT', 15),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

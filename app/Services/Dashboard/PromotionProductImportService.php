@@ -6,16 +6,16 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 use SimpleXMLElement;
 
-class ProductCodeImportService
+class PromotionProductImportService
 {
     /**
-     * @return array<int, string>
+     * @return array<int, array{code: string, discount: ?float, price: ?float}>
      */
     public function read(UploadedFile $file): array
     {
         $extension = strtolower((string) $file->getClientOriginalExtension());
 
-        $codes = match ($extension) {
+        $rows = match ($extension) {
             'csv', 'txt' => $this->readCsv($file->getRealPath()),
             'xlsx' => $this->readXlsx($file->getRealPath()),
             default => throw ValidationException::withMessages([
@@ -23,32 +23,28 @@ class ProductCodeImportService
             ]),
         };
 
-        $codes = collect($codes)
-            ->map(fn (string $code) => trim($code))
-            ->filter()
-            ->unique()
+        $rows = collect($rows)
+            ->map(fn (array $row) => [
+                'code' => $this->normalizeCode($row['code'] ?? ''),
+                'discount' => $this->numberOrNull($row['discount'] ?? null),
+                'price' => $this->numberOrNull($row['price'] ?? null),
+            ])
+            ->filter(fn (array $row) => $row['code'] !== '')
+            ->unique('code')
             ->values()
             ->all();
 
-        if ($codes === []) {
+        if ($rows === []) {
             throw ValidationException::withMessages([
                 'products' => 'El archivo debe incluir al menos un codigo de producto en la columna A.',
             ]);
         }
 
-        $joined = implode(',', $codes);
-
-        if (strlen($joined) > 5000) {
-            throw ValidationException::withMessages([
-                'products' => 'La lista de codigos excede el limite permitido para la coleccion.',
-            ]);
-        }
-
-        return $codes;
+        return $rows;
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, array{code: string, discount: mixed, price: mixed}>
      */
     private function readCsv(string $path): array
     {
@@ -60,7 +56,7 @@ class ProductCodeImportService
             ]);
         }
 
-        $codes = [];
+        $rows = [];
         $row = 0;
 
         while (($data = fgetcsv($handle)) !== false) {
@@ -70,16 +66,20 @@ class ProductCodeImportService
                 continue;
             }
 
-            $codes[] = (string) ($data[0] ?? '');
+            $rows[] = [
+                'code' => $data[0] ?? '',
+                'discount' => $data[1] ?? null,
+                'price' => $data[2] ?? null,
+            ];
         }
 
         fclose($handle);
 
-        return $codes;
+        return $rows;
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, array{code: string, discount: mixed, price: mixed}>
      */
     private function readXlsx(string $path): array
     {
@@ -109,7 +109,7 @@ class ProductCodeImportService
             ]);
         }
 
-        $codes = [];
+        $rows = [];
 
         foreach ($sheet->sheetData->row as $row) {
             $rowNumber = (int) ($row['r'] ?? 0);
@@ -118,19 +118,59 @@ class ProductCodeImportService
                 continue;
             }
 
+            $values = ['A' => '', 'B' => null, 'C' => null];
+
             foreach ($row->c as $cell) {
                 $reference = strtoupper((string) ($cell['r'] ?? ''));
+                $column = preg_replace('/\d+/', '', $reference);
 
-                if (! str_starts_with($reference, 'A')) {
+                if (! in_array($column, ['A', 'B', 'C'], true)) {
                     continue;
                 }
 
-                $codes[] = $this->cellValue($cell, $sharedStrings, $styleFormats);
-                break;
+                $values[$column] = $this->cellValue($cell, $sharedStrings, $styleFormats);
             }
+
+            $rows[] = [
+                'code' => $values['A'],
+                'discount' => $values['B'],
+                'price' => $values['C'],
+            ];
         }
 
-        return $codes;
+        return $rows;
+    }
+
+    private function normalizeCode(mixed $code): string
+    {
+        $code = trim((string) $code);
+
+        if ($code === '') {
+            return '';
+        }
+
+        if (preg_match('/^\d+(\.0+)?$/', $code)) {
+            $code = (string) (int) $code;
+        }
+
+        if (preg_match('/^\d+$/', $code) && strlen($code) < 10) {
+            return str_pad($code, 10, '0', STR_PAD_LEFT);
+        }
+
+        return $code;
+    }
+
+    private function numberOrNull(mixed $value): ?float
+    {
+        $value = trim((string) $value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $value = str_replace(',', '.', $value);
+
+        return is_numeric($value) ? (float) $value : null;
     }
 
     /**
@@ -219,9 +259,6 @@ class ProductCodeImportService
     }
 
     /**
-     * Minimal ZIP reader for XLSX files. It avoids ext-zip, which is not enabled
-     * in this local PHP runtime.
-     *
      * @param array<int, string> $wanted
      * @return array<string, string>
      */
