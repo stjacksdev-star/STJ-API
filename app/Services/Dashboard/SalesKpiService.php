@@ -17,7 +17,28 @@ class SalesKpiService
         $pending = filter_var($filters['pending'] ?? false, FILTER_VALIDATE_BOOL);
 
         if ($pending) {
-            return $this->pendingOrderDetails($countryId, $filters['store'] ?? null);
+            $storeInfo = $this->resolveStore($countryId, $filters['store'] ?? null);
+            $start = $this->nullableDate($filters['startDate'] ?? null);
+            $end = $this->nullableDate($filters['endDate'] ?? null);
+
+            if (($start && ! $end) || (! $start && $end)) {
+                throw ValidationException::withMessages([
+                    'endDate' => 'Debe enviar ambas fechas o ninguna para pedidos pendientes.',
+                ]);
+            }
+
+            if ($start !== null && $end !== null && $start > $end) {
+                throw ValidationException::withMessages([
+                    'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+                ]);
+            }
+
+            return $this->pendingOrderDetails(
+                $countryId,
+                $storeInfo,
+                $start,
+                $end,
+            );
         }
 
         $start = Carbon::parse((string) ($filters['startDate'] ?? now()->toDateString()))->toDateString();
@@ -234,7 +255,7 @@ class SalesKpiService
             ->where('ped_estatus', 'RECIBIDO')
             ->where('ped_id_pais', $countryId)
             ->groupBy('ped_checkout', 'tie_nombre', 'tie_correo', 'tie_codigo')
-            ->selectRaw("CASE WHEN ped_checkout = 'DOMICILIO' THEN 'Domicilio' ELSE tie_nombre END AS nombreT, tie_correo AS correo, COUNT(*) AS total, SUM(ppa_articulos) AS articulos, SUM(ppa_monto_senv) AS venta, tie_codigo")
+            ->selectRaw("CASE WHEN ped_checkout = 'DOMICILIO' THEN 'Domicilio' ELSE tie_nombre END AS nombreT, tie_correo AS correo, COUNT(*) AS total, SUM(ppa_articulos) AS articulos, SUM(ppa_monto_senv) AS venta, tie_codigo, MAX(tie_id) AS tie_id")
             ->get()
             ->map(fn ($row) => [
                 'store' => (string) ($row->nombreT ?: 'N/D'),
@@ -243,6 +264,7 @@ class SalesKpiService
                 'items' => (int) ($row->articulos ?? 0),
                 'amount' => (float) ($row->venta ?? 0),
                 'storeCode' => (string) $row->tie_codigo,
+                'storeId' => (int) ($row->tie_id ?? 0),
             ])
             ->values()
             ->all();
@@ -284,15 +306,17 @@ class SalesKpiService
         ];
     }
 
-    private function pendingOrderDetails(int $countryId, mixed $store): array
+    /**
+     * @param array{code: ?string, id: ?int, name: ?string}|null $store
+     */
+    private function pendingOrderDetails(int $countryId, ?array $store, ?string $start, ?string $end): array
     {
-        $store = $this->stringOrNull($store);
-
         $query = $this->orderDetailBaseQuery($countryId)
             ->where('pay.ppa_estado', 'APROBADA')
             ->where('p.ped_estatus', 'RECIBIDO')
             ->where('p.ped_id_pais', $countryId)
-            ->when($store !== null, fn ($builder) => $builder->where('p.ped_tienda', $store))
+            ->when($store['code'] ?? null, fn ($builder, $code) => $builder->where('p.ped_tienda', $code))
+            ->when($start !== null && $end !== null, fn ($builder) => $builder->whereRaw('DATE(pay.ppa_fecha) BETWEEN ? AND ?', [$start, $end]))
             ->orderByDesc('pay.ppa_fecha');
 
         $rows = $query->get()->map(fn ($row) => $this->normalizeOrderDetail($row))->values()->all();
@@ -300,12 +324,14 @@ class SalesKpiService
         return [
             'filters' => [
                 'country' => $countryId,
-                'startDate' => null,
-                'endDate' => null,
+                'startDate' => $start,
+                'endDate' => $end,
                 'origin' => null,
                 'checkout' => null,
                 'pending' => true,
-                'store' => $store,
+                'store' => $store['code'] ?? null,
+                'storeId' => $store['id'] ?? null,
+                'storeName' => $store['name'] ?? null,
             ],
             'summary' => $this->orderDetailTotals($rows),
             'orders' => $rows,
@@ -330,6 +356,8 @@ class SalesKpiService
             ->selectRaw("
                 p.ped_id_pais,
                 COALESCE(order_store.tie_nombre, pending_store.tie_nombre) AS tie_nombre,
+                COALESCE(order_store.tie_codigo, pending_store.tie_codigo, p.ped_tienda) AS tie_codigo,
+                COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id,
                 p.ped_checkout,
                 p.ped_origen,
                 pay.ppa_ref AS ref,
@@ -355,6 +383,9 @@ class SalesKpiService
 
         return [
             'countryId' => (int) $row->ped_id_pais,
+            'storeCode' => (string) ($row->tie_codigo ?? ''),
+            'storeId' => $row->tie_id !== null ? (int) $row->tie_id : null,
+            'storeName' => (string) ($row->tie_nombre ?? ''),
             'origin' => (string) ($row->ped_origen ?? ''),
             'checkout' => (string) ($row->ped_checkout ?? ''),
             'ref' => (string) ($row->ref ?? ''),
@@ -592,6 +623,47 @@ class SalesKpiService
         }
 
         return (int) $resolved->pai_id;
+    }
+
+    private function nullableDate(mixed $value): ?string
+    {
+        $value = $this->stringOrNull($value);
+
+        return $value !== null ? Carbon::parse($value)->toDateString() : null;
+    }
+
+    /**
+     * @return array{code: ?string, id: ?int, name: ?string}|null
+     */
+    private function resolveStore(int $countryId, mixed $store): ?array
+    {
+        $store = $this->stringOrNull($store);
+
+        if ($store === null) {
+            return null;
+        }
+
+        $query = DB::table('stj_tiendas')
+            ->select(['tie_id', 'tie_codigo', 'tie_nombre'])
+            ->where('tie_pais', $countryId);
+
+        $resolved = (clone $query)->where('tie_codigo', $store)->first();
+
+        if (! $resolved && is_numeric($store)) {
+            $resolved = (clone $query)->where('tie_id', (int) $store)->first();
+        }
+
+        if (! $resolved) {
+            throw ValidationException::withMessages([
+                'store' => 'La tienda seleccionada no existe para el pais indicado.',
+            ]);
+        }
+
+        return [
+            'id' => (int) $resolved->tie_id,
+            'code' => (string) $resolved->tie_codigo,
+            'name' => trim((string) $resolved->tie_nombre),
+        ];
     }
 
     private function stringOrNull(mixed $value): ?string
