@@ -105,4 +105,68 @@ class OrderReferenceController extends BaseController
             'Pedido procesado'
         );
     }
+
+    public function deliver(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'reference' => ['required', 'string', 'max:60'],
+            'actor' => ['nullable', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:150'],
+            'actor.username' => ['nullable', 'string', 'max:100'],
+            'actor.countryId' => ['nullable'],
+            'actor.storeId' => ['nullable'],
+            'actor.storeCode' => ['nullable', 'string', 'max:20'],
+            'actor.permissions' => ['nullable', 'array'],
+            'actor.ip' => ['nullable', 'string', 'max:45'],
+            'actor.userAgent' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return $this->success(
+            $this->orders->deliverOrder(
+                $validated['reference'],
+                $validated['country'],
+                $validated['actor'] ?? [],
+            ),
+            'Pedido entregado'
+        );
+    }
+
+    public function markInRoute(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'reference' => ['required', 'string', 'max:60'],
+            'actor' => ['nullable', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:150'],
+            'actor.username' => ['nullable', 'string', 'max:100'],
+            'actor.countryId' => ['nullable'],
+            'actor.storeId' => ['nullable'],
+            'actor.storeCode' => ['nullable', 'string', 'max:20'],
+            'actor.permissions' => ['nullable', 'array'],
+            'actor.ip' => ['nullable', 'string', 'max:45'],
+            'actor.userAgent' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return $this->success(
+            $this->orders->markOrderInRoute(
+                $validated['reference'],
+                $validated['country'],
+                $validated['actor'] ?? [],
+            ),
+            'Pedido en ruta'
+        );
+    }
 }

@@ -8,6 +8,18 @@ use Illuminate\Validation\ValidationException;
 
 class SalesKpiService
 {
+    private const PROCESSED_ORDER_STATUSES = [
+        'PREPARADO',
+        'EN-RUTA',
+        'ENTREGADO',
+        'ANULADO-ERROR',
+        'ANULADO-PRUEBA',
+        'ANULADO-CLIENTE',
+        'ANULADO-INVENTARIO',
+        'DEVOLUCION',
+        'ANULADO-EFECTIVO',
+    ];
+
     /**
      * @param array<string, mixed> $filters
      */
@@ -15,6 +27,33 @@ class SalesKpiService
     {
         $countryId = $this->resolveCountryId((string) ($filters['country'] ?? ''));
         $pending = filter_var($filters['pending'] ?? false, FILTER_VALIDATE_BOOL);
+        $statuses = $this->statuses($filters['statuses'] ?? null);
+
+        if ($statuses !== []) {
+            $storeInfo = $this->resolveStore($countryId, $filters['store'] ?? null);
+            $start = $this->nullableDate($filters['startDate'] ?? null);
+            $end = $this->nullableDate($filters['endDate'] ?? null);
+
+            if (($start && ! $end) || (! $start && $end)) {
+                throw ValidationException::withMessages([
+                    'endDate' => 'Debe enviar ambas fechas o ninguna para pedidos procesados.',
+                ]);
+            }
+
+            if ($start !== null && $end !== null && $start > $end) {
+                throw ValidationException::withMessages([
+                    'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+                ]);
+            }
+
+            return $this->orderDetailsByStatuses(
+                $countryId,
+                $storeInfo,
+                $start,
+                $end,
+                $statuses,
+            );
+        }
 
         if ($pending) {
             $storeInfo = $this->resolveStore($countryId, $filters['store'] ?? null);
@@ -66,6 +105,7 @@ class SalesKpiService
         if (! filled($country) || ! filled($startDate) || ! filled($endDate)) {
             return [
                 'countries' => $countries,
+                'stores' => [],
                 'filters' => [
                     'country' => null,
                     'startDate' => $startDate,
@@ -107,6 +147,7 @@ class SalesKpiService
 
         return [
             'countries' => $countries,
+            'stores' => $this->stores($countryId),
             'filters' => [
                 'country' => $countryId,
                 'startDate' => $start,
@@ -338,6 +379,40 @@ class SalesKpiService
         ];
     }
 
+    /**
+     * @param array{code: ?string, id: ?int, name: ?string}|null $store
+     * @param array<int, string> $statuses
+     */
+    private function orderDetailsByStatuses(int $countryId, ?array $store, ?string $start, ?string $end, array $statuses): array
+    {
+        $query = $this->orderDetailBaseQuery($countryId)
+            ->where('pay.ppa_estado', 'APROBADA')
+            ->whereIn('p.ped_estatus', $statuses)
+            ->where('p.ped_id_pais', $countryId)
+            ->when($store['code'] ?? null, fn ($builder, $code) => $builder->where('p.ped_tienda', $code))
+            ->when($start !== null && $end !== null, fn ($builder) => $builder->whereRaw('DATE(pay.ppa_fecha) BETWEEN ? AND ?', [$start, $end]))
+            ->orderByDesc('pay.ppa_fecha');
+
+        $rows = $query->get()->map(fn ($row) => $this->normalizeOrderDetail($row))->values()->all();
+
+        return [
+            'filters' => [
+                'country' => $countryId,
+                'startDate' => $start,
+                'endDate' => $end,
+                'origin' => null,
+                'checkout' => null,
+                'pending' => false,
+                'statuses' => $statuses,
+                'store' => $store['code'] ?? null,
+                'storeId' => $store['id'] ?? null,
+                'storeName' => $store['name'] ?? null,
+            ],
+            'summary' => $this->orderDetailTotals($rows),
+            'orders' => $rows,
+        ];
+    }
+
     private function orderDetailBaseQuery(int $countryId)
     {
         return DB::table('stj_pedidos as p')
@@ -360,6 +435,7 @@ class SalesKpiService
                 COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id,
                 p.ped_checkout,
                 p.ped_origen,
+                p.ped_estatus,
                 pay.ppa_ref AS ref,
                 pay.ppa_fecha,
                 p.ped_nombres,
@@ -388,6 +464,7 @@ class SalesKpiService
             'storeName' => (string) ($row->tie_nombre ?? ''),
             'origin' => (string) ($row->ped_origen ?? ''),
             'checkout' => (string) ($row->ped_checkout ?? ''),
+            'status' => (string) ($row->ped_estatus ?? ''),
             'ref' => (string) ($row->ref ?? ''),
             'paidAt' => (string) ($row->ppa_fecha ?? ''),
             'customer' => trim((string) ($row->ped_nombres ?? '').' '.(string) ($row->ped_apellidos ?? '')),
@@ -607,6 +684,22 @@ class SalesKpiService
             ->all();
     }
 
+    private function stores(int $countryId): array
+    {
+        return DB::table('stj_tiendas')
+            ->select(['tie_id', 'tie_codigo', 'tie_nombre'])
+            ->where('tie_pais', $countryId)
+            ->orderBy('tie_nombre')
+            ->get()
+            ->map(fn ($store) => [
+                'storeId' => (int) $store->tie_id,
+                'storeCode' => (string) $store->tie_codigo,
+                'store' => trim((string) $store->tie_nombre).' ('.(string) $store->tie_codigo.')',
+            ])
+            ->values()
+            ->all();
+    }
+
     private function resolveCountryId(string $country): int
     {
         $country = trim($country);
@@ -671,5 +764,36 @@ class SalesKpiService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function statuses(mixed $value): array
+    {
+        $rawStatuses = is_array($value)
+            ? $value
+            : explode(',', (string) $value);
+
+        $statuses = collect($rawStatuses)
+            ->map(fn ($status) => strtoupper(trim((string) $status)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($statuses === []) {
+            return [];
+        }
+
+        $invalid = array_values(array_diff($statuses, self::PROCESSED_ORDER_STATUSES));
+
+        if ($invalid !== []) {
+            throw ValidationException::withMessages([
+                'statuses' => 'Uno o mas estados de pedido no son validos.',
+            ]);
+        }
+
+        return $statuses;
     }
 }

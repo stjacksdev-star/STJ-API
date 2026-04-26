@@ -58,6 +58,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/orders/product', [DashboardOrderReferenceController::class, 'product']);
         Route::post('/orders/lines/{line}', [DashboardOrderReferenceController::class, 'updateLine']);
         Route::post('/orders/process', [DashboardOrderReferenceController::class, 'process']);
+        Route::post('/orders/route', [DashboardOrderReferenceController::class, 'markInRoute']);
+        Route::post('/orders/deliver', [DashboardOrderReferenceController::class, 'deliver']);
     });
 });
 

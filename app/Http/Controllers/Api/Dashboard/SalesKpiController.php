@@ -48,6 +48,7 @@ class SalesKpiController extends BaseController
             'origin' => ['nullable', 'string', 'max:20'],
             'checkout' => ['nullable', 'string', 'max:20'],
             'pending' => ['nullable', 'boolean'],
+            'statuses' => ['nullable', 'string', 'max:255'],
             'store' => ['nullable', 'string', 'max:20'],
         ]);
 

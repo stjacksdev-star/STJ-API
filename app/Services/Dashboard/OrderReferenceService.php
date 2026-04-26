@@ -218,6 +218,118 @@ class OrderReferenceService
         return $processed;
     }
 
+    /**
+     * @param array<string, mixed> $actor
+     */
+    public function deliverOrder(string $reference, string $country, array $actor = []): array
+    {
+        $delivered = DB::transaction(function () use ($reference, $country, $actor) {
+            $countryId = $this->resolveCountryId($country);
+            $order = $this->orderForDelivery($reference, $countryId);
+
+            if (! $order) {
+                throw ValidationException::withMessages([
+                    'reference' => 'No se encontro la referencia indicada.',
+                ]);
+            }
+
+            $canDeliverStore = (string) $order->ped_checkout === 'TIENDA' && (string) $order->ped_estatus === 'PREPARADO';
+            $canDeliverHome = (string) $order->ped_checkout === 'DOMICILIO' && (string) $order->ped_estatus === 'EN-RUTA';
+
+            if (! $canDeliverStore && ! $canDeliverHome) {
+                throw ValidationException::withMessages([
+                    'order' => 'Solo se pueden entregar pedidos de tienda en estado PREPARADO o pedidos a domicilio en estado EN-RUTA.',
+                ]);
+            }
+
+            if ($canDeliverStore) {
+                $this->ensureActorCanDeliverStore($order, $actor);
+            } else {
+                $this->ensureActorCountry($order, $actor);
+            }
+
+            $now = now();
+            $actorName = $this->actorName($actor);
+
+            DB::table('stj_pedidos_pago')
+                ->where('ppa_id', (int) $order->ppa_id)
+                ->update([
+                    'ppa_pagado' => 'SI',
+                    'ppa_fecha_entregado' => $now,
+                    'ppa_a_usuario' => $actorName,
+                    'ppa_a_ip' => $actor['ip'] ?? Request::ip(),
+                    'ppa_a_fecha' => $now,
+                ]);
+
+            DB::table('stj_pedidos')
+                ->where('ped_id', (int) $order->ped_id)
+                ->update([
+                    'ped_estatus' => 'ENTREGADO',
+                    'ped_a_usuario' => $actorName,
+                    'ped_a_ip' => $actor['ip'] ?? Request::ip(),
+                    'ped_a_fecha' => $now,
+                ]);
+
+            return $this->show((string) $order->ppa_ref, (string) $countryId);
+        });
+
+        $delivered['mail'] = $this->sendDeliveredOrderEmail($delivered);
+
+        return $delivered;
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     */
+    public function markOrderInRoute(string $reference, string $country, array $actor = []): array
+    {
+        $routed = DB::transaction(function () use ($reference, $country, $actor) {
+            $countryId = $this->resolveCountryId($country);
+            $order = $this->orderForRouting($reference, $countryId);
+
+            if (! $order) {
+                throw ValidationException::withMessages([
+                    'reference' => 'No se encontro la referencia indicada.',
+                ]);
+            }
+
+            if ((string) $order->ped_checkout !== 'DOMICILIO' || (string) $order->ped_estatus !== 'PREPARADO') {
+                throw ValidationException::withMessages([
+                    'order' => 'Solo se pueden marcar en ruta pedidos a domicilio en estado PREPARADO.',
+                ]);
+            }
+
+            $this->ensureActorCountry($order, $actor);
+
+            $now = now();
+            $actorName = $this->actorName($actor);
+
+            DB::table('stj_pedidos')
+                ->where('ped_id', (int) $order->ped_id)
+                ->update([
+                    'ped_estatus' => 'EN-RUTA',
+                    'ped_a_usuario' => $actorName,
+                    'ped_a_ip' => $actor['ip'] ?? Request::ip(),
+                    'ped_a_fecha' => $now,
+                ]);
+
+            DB::table('stj_pedidos_direccion')
+                ->where('pdi_pedido', (int) $order->ped_id)
+                ->update([
+                    'pdi_fecha_ruta' => $now,
+                    'pdi_a_usuario' => $actorName,
+                    'pdi_a_ip' => $actor['ip'] ?? Request::ip(),
+                    'pdi_a_fecha' => $now,
+                ]);
+
+            return $this->show((string) $order->ppa_ref, (string) $countryId);
+        });
+
+        $routed['mail'] = $this->sendInRouteOrderEmail($routed);
+
+        return $routed;
+    }
+
     private function editableLine(int $lineId): ?object
     {
         return DB::table('stj_pedidos_detalle as detail')
@@ -268,6 +380,125 @@ class OrderReferenceService
             ->first();
     }
 
+    private function orderForRouting(string $reference, int $countryId): ?object
+    {
+        return DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', function ($join) use ($reference) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_ref', '=', $reference)
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->leftJoin('stj_pedidos_direccion as pd', 'pd.pdi_pedido', '=', 'p.ped_id')
+            ->where('p.ped_id_pais', $countryId)
+            ->select([
+                'p.ped_id',
+                'p.ped_id_pais',
+                'p.ped_estatus',
+                'p.ped_checkout',
+                'pay.ppa_ref',
+                'pd.pdi_id',
+            ])
+            ->lockForUpdate()
+            ->first();
+    }
+
+    private function orderForDelivery(string $reference, int $countryId): ?object
+    {
+        return DB::table('stj_pedidos as p')
+            ->leftJoin('stj_pedidos_tienda as pt', 'p.ped_id', '=', 'pt.pti_pedido')
+            ->leftJoin('stj_tiendas as store', function ($join) use ($countryId) {
+                $join->on('store.tie_codigo', '=', 'pt.pti_tienda')
+                    ->orOn('store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('store.tie_pais', '=', $countryId);
+            })
+            ->join('stj_pedidos_pago as pay', function ($join) use ($reference) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_ref', '=', $reference)
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->where('p.ped_id_pais', $countryId)
+            ->selectRaw('
+                p.ped_id,
+                p.ped_id_pais,
+                p.ped_estatus,
+                p.ped_checkout,
+                p.ped_tienda,
+                pay.ppa_id,
+                pay.ppa_ref,
+                COALESCE(pt.pti_tienda, p.ped_tienda, store.tie_codigo) AS store_code,
+                store.tie_nombre AS store_name
+            ')
+            ->lockForUpdate()
+            ->first();
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     */
+    private function ensureActorCanDeliverStore(object $order, array $actor): void
+    {
+        $this->ensureActorCountry($order, $actor);
+
+        $actorStore = $this->normalizeStoreCode($actor['storeCode'] ?? '');
+
+        if ($actorStore === '' && filled($actor['storeId'] ?? null)) {
+            $actorStore = $this->storeCodeById((int) $actor['storeId'], (int) $order->ped_id_pais);
+        }
+
+        if ($actorStore === '' || $actorStore === '0') {
+            return;
+        }
+
+        $orderStore = $this->normalizeStoreCode($order->store_code ?? $order->ped_tienda ?? '');
+
+        if ($orderStore === '' || $actorStore !== $orderStore) {
+            throw ValidationException::withMessages([
+                'store' => 'El pedido no corresponde a la tienda de la sesion.',
+            ]);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     */
+    private function ensureActorCountry(object $order, array $actor): void
+    {
+        $actorCountry = trim((string) ($actor['countryId'] ?? ''));
+
+        if ($actorCountry !== '' && (int) $actorCountry !== (int) $order->ped_id_pais) {
+            throw ValidationException::withMessages([
+                'country' => 'El pedido no pertenece al pais de la sesion.',
+            ]);
+        }
+    }
+
+    private function storeCodeById(int $storeId, int $countryId): string
+    {
+        if ($storeId <= 0) {
+            return '';
+        }
+
+        $store = DB::table('stj_tiendas')
+            ->where('tie_id', $storeId)
+            ->where('tie_pais', $countryId)
+            ->value('tie_codigo');
+
+        return $this->normalizeStoreCode($store);
+    }
+
+    private function normalizeStoreCode(mixed $value): string
+    {
+        $code = trim((string) $value);
+
+        if ($code === '') {
+            return '';
+        }
+
+        $normalized = ltrim($code, '0');
+
+        return $normalized === '' ? '0' : $normalized;
+    }
+
     /**
      * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $processed
      * @return array{sent: bool, skipped: bool, reason: string|null}
@@ -309,6 +540,114 @@ class OrderReferenceService
             ];
         } catch (Throwable $exception) {
             Log::warning('No fue posible enviar correo de pedido procesado.', [
+                'reference' => data_get($order, 'reference'),
+                'email' => $email,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [
+                'sent' => false,
+                'skipped' => false,
+                'reason' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $delivered
+     * @return array{sent: bool, skipped: bool, reason: string|null}
+     */
+    private function sendDeliveredOrderEmail(array $delivered): array
+    {
+        $order = $delivered['order'];
+        $email = trim((string) data_get($order, 'customer.email'));
+
+        if ($email === '') {
+            return [
+                'sent' => false,
+                'skipped' => true,
+                'reason' => 'Pedido sin correo de cliente.',
+            ];
+        }
+
+        if ($this->isBouncedEmail($email)) {
+            return [
+                'sent' => false,
+                'skipped' => true,
+                'reason' => 'Correo en lista de rebotes.',
+            ];
+        }
+
+        try {
+            $message = $this->deliveredOrderMail($delivered);
+
+            $this->mailer->sendHtml(
+                to: $email,
+                subject: $message['subject'],
+                html: $message['html'],
+            );
+
+            return [
+                'sent' => true,
+                'skipped' => false,
+                'reason' => null,
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('No fue posible enviar correo de pedido entregado.', [
+                'reference' => data_get($order, 'reference'),
+                'email' => $email,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [
+                'sent' => false,
+                'skipped' => false,
+                'reason' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $routed
+     * @return array{sent: bool, skipped: bool, reason: string|null}
+     */
+    private function sendInRouteOrderEmail(array $routed): array
+    {
+        $order = $routed['order'];
+        $email = trim((string) data_get($order, 'customer.email'));
+
+        if ($email === '') {
+            return [
+                'sent' => false,
+                'skipped' => true,
+                'reason' => 'Pedido sin correo de cliente.',
+            ];
+        }
+
+        if ($this->isBouncedEmail($email)) {
+            return [
+                'sent' => false,
+                'skipped' => true,
+                'reason' => 'Correo en lista de rebotes.',
+            ];
+        }
+
+        try {
+            $message = $this->processedOrderMail($routed);
+
+            $this->mailer->sendHtml(
+                to: $email,
+                subject: $message['subject'],
+                html: $message['html'],
+            );
+
+            return [
+                'sent' => true,
+                'skipped' => false,
+                'reason' => null,
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('No fue posible enviar correo de pedido en ruta.', [
                 'reference' => data_get($order, 'reference'),
                 'email' => $email,
                 'message' => $exception->getMessage(),
@@ -401,19 +740,24 @@ class OrderReferenceService
         $countryId = (int) data_get($order, 'countryId');
         $currency = $this->currency($countryId);
         $refund = (float) data_get($order, 'totals.refund', 0);
-        $subject = $status === 'ANULADO-INVENTARIO'
-            ? "Pedido #{$reference} no disponible"
-            : ($checkout === 'DOMICILIO'
-            ? "Pedido #{$reference} en ruta"
-            : "Pedido #{$reference} preparado");
-        $title = $status === 'ANULADO-INVENTARIO'
-            ? 'Pedido no disponible'
-            : ($checkout === 'DOMICILIO' ? 'Pedido en ruta' : 'Pedido preparado');
-        $intro = $status === 'ANULADO-INVENTARIO'
-            ? "No podemos facturar tu pedido con numero de referencia {$reference} debido a disponibilidad de inventario."
-            : ($checkout === 'DOMICILIO'
-            ? "Tu pedido con numero de referencia {$reference} se encuentra en ruta."
-            : "Tu pedido con numero de referencia {$reference} esta listo para retirarlo.");
+
+        if ($status === 'ANULADO-INVENTARIO') {
+            $subject = "Pedido #{$reference} no disponible";
+            $title = 'Pedido no disponible';
+            $intro = "No podemos facturar tu pedido con numero de referencia {$reference} debido a disponibilidad de inventario.";
+        } elseif ($checkout === 'DOMICILIO' && $status === 'EN-RUTA') {
+            $subject = "Pedido #{$reference} en ruta";
+            $title = 'Pedido en ruta';
+            $intro = "Tu pedido con numero de referencia {$reference} se encuentra en ruta.";
+        } elseif ($checkout === 'DOMICILIO') {
+            $subject = "Pedido #{$reference} en preparacion";
+            $title = 'Pedido en preparacion';
+            $intro = "Tu pedido con numero de referencia {$reference} ya fue preparado y pronto estara en ruta.";
+        } else {
+            $subject = "Pedido #{$reference} preparado";
+            $title = 'Pedido preparado';
+            $intro = "Tu pedido con numero de referencia {$reference} esta listo para retirarlo.";
+        }
 
         $deliveryRows = $checkout === 'DOMICILIO'
             ? [
@@ -452,6 +796,73 @@ class OrderReferenceService
                                         '.$this->mailKeyValueTable($deliveryRows).'
                                         '.$changeNotice.'
                                         '.$tracking.'
+                                        <p style="margin-top:24px;font-size:13px;color:#6b7280;">Gracias por comprar en St. Jack\'s Online.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </body>
+            </html>';
+
+        return [
+            'subject' => $subject,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $delivered
+     * @return array{subject: string, html: string}
+     */
+    private function deliveredOrderMail(array $delivered): array
+    {
+        $order = $delivered['order'];
+        $reference = (string) data_get($order, 'reference');
+        $customer = e((string) data_get($order, 'customer.name', 'cliente'));
+        $currency = $this->currency((int) data_get($order, 'countryId'));
+        $checkout = (string) data_get($order, 'checkout');
+        $subject = "Pedido #{$reference} entregado";
+        $deliveryLabel = $checkout === 'DOMICILIO'
+            ? 'Domicilio'
+            : trim('Retiro en tienda '.(string) data_get($order, 'storePickup.storeName', ''));
+        $intro = $checkout === 'DOMICILIO'
+            ? 'Tu pedido fue entregado en la direccion indicada.'
+            : 'Tu pedido fue entregado en tienda.';
+        $rows = $checkout === 'DOMICILIO'
+            ? [
+                'Tipo de entrega' => $deliveryLabel,
+                'Fecha de compra' => $this->mailDate((string) data_get($order, 'createdAt')),
+                'Direccion' => (string) data_get($order, 'shipping.address', ''),
+                'Costo de envio' => $currency.' '.number_format((float) data_get($order, 'shipping.cost', 0), 2),
+                'Total de productos' => (string) data_get($order, 'totals.itemsBilled', data_get($order, 'totals.items')),
+                'Total de la compra' => $currency.' '.number_format((float) data_get($order, 'totals.billed', 0), 2),
+            ]
+            : [
+                'Tipo de entrega' => $deliveryLabel,
+                'Fecha de compra' => $this->mailDate((string) data_get($order, 'createdAt')),
+                'Total de productos' => (string) data_get($order, 'totals.itemsBilled', data_get($order, 'totals.items')),
+                'Total de la compra' => $currency.' '.number_format((float) data_get($order, 'totals.billed', 0), 2),
+            ];
+
+        $html = '<!doctype html>
+            <html>
+            <body style="margin:0;padding:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#1f2937;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fb;padding:24px 0;">
+                    <tr>
+                        <td align="center">
+                            <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #e5e7eb;">
+                                <tr>
+                                    <td style="padding:24px 28px;border-bottom:1px solid #e5e7eb;">
+                                        <h1 style="margin:0;font-size:24px;color:#111827;">Pedido entregado</h1>
+                                        <p style="margin:12px 0 0;font-size:15px;">Hola <strong>'.$customer.'</strong>,</p>
+                                        <p style="margin:8px 0 0;font-size:15px;">Tu pedido con numero de referencia '.e($reference).' ha sido entregado. '.e($intro).'</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:22px 28px;">
+                                        '.$this->mailKeyValueTable($rows).'
                                         <p style="margin-top:24px;font-size:13px;color:#6b7280;">Gracias por comprar en St. Jack\'s Online.</p>
                                     </td>
                                 </tr>
