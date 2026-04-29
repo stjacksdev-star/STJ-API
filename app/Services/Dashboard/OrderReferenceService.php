@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Services\Mail\Smtp2GoMailer;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Request;
@@ -38,6 +39,127 @@ class OrderReferenceService
         ];
     }
 
+    /**
+     * @param array<string, mixed> $filters
+     */
+    public function search(array $filters): array
+    {
+        $countryId = $this->resolveCountryId((string) ($filters['country'] ?? ''));
+        $store = $this->resolveStore($countryId, $filters['store'] ?? null);
+        $text = trim((string) ($filters['query'] ?? ''));
+
+        if (mb_strlen($text) < 2) {
+            throw ValidationException::withMessages([
+                'query' => 'Escriba al menos 2 caracteres para buscar.',
+            ]);
+        }
+
+        $tokens = collect(preg_split('/\s+/', $text) ?: [])
+            ->map(fn (string $token) => trim($token))
+            ->filter(fn (string $token) => $token !== '')
+            ->unique()
+            ->take(8)
+            ->values()
+            ->all();
+        $limit = max(1, min(100, (int) ($filters['limit'] ?? 50)));
+
+        $query = DB::table('stj_pedidos as p')
+            ->leftJoin('stj_pedidos_pago as pay', function ($join) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->whereRaw('pay.ppa_id = (SELECT spp.ppa_id FROM stj_pedidos_pago spp WHERE spp.ppa_pedido = p.ped_id ORDER BY spp.ppa_id DESC LIMIT 1)');
+            })
+            ->leftJoin('stj_pedidos_direccion as pd', 'pd.pdi_pedido', '=', 'p.ped_id')
+            ->leftJoin('stj_direcciones as d', 'pd.pdi_direccion', '=', 'd.dir_id')
+            ->leftJoin('stj_pedidos_tienda as pt', 'pt.pti_pedido', '=', 'p.ped_id')
+            ->leftJoin('stj_tiendas as order_store', function ($join) use ($countryId) {
+                $join->on('order_store.tie_codigo', '=', 'pt.pti_tienda')
+                    ->where('order_store.tie_pais', '=', $countryId);
+            })
+            ->leftJoin('stj_tiendas as pending_store', function ($join) use ($countryId) {
+                $join->on('pending_store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('pending_store.tie_pais', '=', $countryId);
+            })
+            ->where('p.ped_id_pais', $countryId)
+            ->when($store['code'] ?? null, function ($builder, string $storeCode) {
+                $builder->where(function ($storeQuery) use ($storeCode) {
+                    $storeQuery
+                        ->where('pt.pti_tienda', $storeCode)
+                        ->orWhere('p.ped_tienda', $storeCode);
+                });
+            })
+            ->where(function ($builder) use ($text, $tokens) {
+                $builder->where(function ($fullQuery) use ($text) {
+                    $like = '%'.$text.'%';
+                    $this->applyOrderSearchTerm($fullQuery, $like);
+                });
+
+                foreach ($tokens as $token) {
+                    $builder->orWhere(function ($tokenQuery) use ($token) {
+                        $this->applyOrderSearchTerm($tokenQuery, '%'.$token.'%');
+                    });
+                }
+            })
+            ->selectRaw("
+                p.ped_id,
+                p.ped_id_pais,
+                p.ped_fecha,
+                p.ped_checkout,
+                p.ped_origen,
+                p.ped_estatus,
+                p.ped_estatus_productos,
+                p.ped_nombres,
+                p.ped_apellidos,
+                p.ped_identificacion,
+                p.ped_email,
+                p.ped_telefono,
+                p.ped_whatsapp,
+                p.ped_sesion,
+                p.ped_direccion,
+                p.ped_ciudad,
+                p.ped_estado,
+                p.ped_pais,
+                pay.ppa_id,
+                pay.ppa_ref,
+                pay.ppa_estado,
+                pay.ppa_fecha,
+                pay.ppa_tipo,
+                pay.ppa_emisor,
+                pay.ppa_tarjeta,
+                pay.ppa_monto,
+                pay.ppa_monto_senv,
+                pay.ppa_articulos,
+                pay.ppa_cambio,
+                COALESCE(order_store.tie_nombre, pending_store.tie_nombre) AS tie_nombre,
+                COALESCE(order_store.tie_codigo, pending_store.tie_codigo, p.ped_tienda) AS tie_codigo,
+                COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id,
+                CONCAT_WS(', ', d.dir_direccion, d.dir_municipio_txt, d.dir_departamento_txt, d.dir_referencia) AS direccion_envio
+            ")
+            ->orderByRaw('COALESCE(pay.ppa_fecha, p.ped_fecha) DESC')
+            ->limit($limit);
+
+        $rows = $query->get()
+            ->map(fn ($row) => $this->normalizeSearchOrder($row))
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'country' => $countryId,
+                'query' => $text,
+                'store' => $store['code'] ?? null,
+                'storeId' => $store['id'] ?? null,
+                'storeName' => $store['name'] ?? null,
+                'limit' => $limit,
+            ],
+            'summary' => [
+                'orders' => count($rows),
+                'items' => array_sum(array_column($rows, 'items')),
+                'amount' => array_sum(array_column($rows, 'amount')),
+            ],
+            'orders' => $rows,
+        ];
+    }
+
     public function lookupProduct(string $sku, string $country, ?string $size = null): array
     {
         $countryId = $this->resolveCountryId($country);
@@ -48,6 +170,211 @@ class OrderReferenceService
         }
 
         return $product;
+    }
+
+    public function paymentAttempts(int $orderId, string $country, mixed $store = null): array
+    {
+        $countryId = $this->resolveCountryId($country);
+        $storeInfo = $this->resolveStore($countryId, $store);
+
+        $order = DB::table('stj_pedidos as p')
+            ->leftJoin('stj_pedidos_tienda as pt', 'pt.pti_pedido', '=', 'p.ped_id')
+            ->leftJoin('stj_tiendas as order_store', function ($join) use ($countryId) {
+                $join->on('order_store.tie_codigo', '=', 'pt.pti_tienda')
+                    ->where('order_store.tie_pais', '=', $countryId);
+            })
+            ->leftJoin('stj_tiendas as pending_store', function ($join) use ($countryId) {
+                $join->on('pending_store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('pending_store.tie_pais', '=', $countryId);
+            })
+            ->where('p.ped_id', $orderId)
+            ->where('p.ped_id_pais', $countryId)
+            ->when($storeInfo['code'] ?? null, function ($builder, string $storeCode) {
+                $builder->where(function ($storeQuery) use ($storeCode) {
+                    $storeQuery
+                        ->where('pt.pti_tienda', $storeCode)
+                        ->orWhere('p.ped_tienda', $storeCode);
+                });
+            })
+            ->selectRaw("
+                p.ped_id,
+                p.ped_id_pais,
+                p.ped_nombres,
+                p.ped_apellidos,
+                p.ped_email,
+                p.ped_tipo_identificacion,
+                p.ped_identificacion,
+                COALESCE(order_store.tie_nombre, pending_store.tie_nombre) AS tie_nombre,
+                COALESCE(order_store.tie_codigo, pending_store.tie_codigo, p.ped_tienda) AS tie_codigo,
+                COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id
+            ")
+            ->first();
+
+        if (! $order) {
+            throw ValidationException::withMessages([
+                'order' => 'No se encontro el pedido indicado para el pais y tienda seleccionados.',
+            ]);
+        }
+
+        $attempts = DB::table('stj_pedidos_pago as pay')
+            ->leftJoin('stj_mensajes_fac as mf', function ($join) {
+                $join->on('mf.mfa_tarjeta', '=', 'pay.ppa_emisor')
+                    ->on('mf.mfa_codigo', '=', 'pay.ppa_rsp_codigo');
+            })
+            ->where('pay.ppa_pedido', $orderId)
+            ->orderByDesc('pay.ppa_fecha')
+            ->select([
+                'pay.ppa_id',
+                'pay.ppa_ref',
+                'pay.ppa_monto',
+                'pay.ppa_fecha',
+                'pay.ppa_tarjeta',
+                'pay.ppa_emisor',
+                'pay.ppa_estado',
+                'pay.ppa_autorizacion',
+                'pay.ppa_rsp_codigo',
+                'pay.ppa_rsp_mensaje',
+                'pay.ppa_detalle',
+                'mf.mfa_mensaje',
+            ])
+            ->get()
+            ->map(fn ($attempt, int $index) => [
+                'number' => $index + 1,
+                'id' => (int) $attempt->ppa_id,
+                'reference' => (string) ($attempt->ppa_ref ?? ''),
+                'amount' => (float) ($attempt->ppa_monto ?? 0),
+                'date' => (string) ($attempt->ppa_fecha ?? ''),
+                'card' => (string) ($attempt->ppa_tarjeta ?? ''),
+                'issuer' => (string) ($attempt->ppa_emisor ?? ''),
+                'status' => (string) ($attempt->ppa_estado ?? ''),
+                'authorization' => (string) ($attempt->ppa_autorizacion ?? ''),
+                'code' => (string) ($attempt->ppa_rsp_codigo ?? ''),
+                'message' => (string) ($attempt->mfa_mensaje ?? $attempt->ppa_rsp_mensaje ?? ''),
+                'bankResponse' => $this->paymentAttemptDetail($attempt->ppa_detalle ?? null),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'order' => [
+                'id' => (int) $order->ped_id,
+                'countryId' => (int) $order->ped_id_pais,
+                'customer' => trim((string) ($order->ped_nombres ?? '').' '.(string) ($order->ped_apellidos ?? '')),
+                'email' => (string) ($order->ped_email ?? ''),
+                'identificationType' => (string) ($order->ped_tipo_identificacion ?? 'Identificacion'),
+                'identification' => (string) ($order->ped_identificacion ?? ''),
+                'storeCode' => (string) ($order->tie_codigo ?? ''),
+                'storeId' => $order->tie_id !== null ? (int) $order->tie_id : null,
+                'storeName' => (string) ($order->tie_nombre ?? ''),
+            ],
+            'summary' => [
+                'attempts' => count($attempts),
+            ],
+            'attempts' => $attempts,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    public function refunds(array $filters): array
+    {
+        $countryId = $this->resolveCountryId((string) ($filters['country'] ?? ''));
+        $store = $this->resolveStore($countryId, $filters['store'] ?? null);
+        $status = $this->refundStatus($filters['status'] ?? null);
+        $start = $this->nullableDate($filters['startDate'] ?? null);
+        $end = $this->nullableDate($filters['endDate'] ?? null);
+
+        if (($start && ! $end) || (! $start && $end)) {
+            throw ValidationException::withMessages([
+                'endDate' => 'Debe enviar ambas fechas o ninguna.',
+            ]);
+        }
+
+        if ($start !== null && $end !== null && $start > $end) {
+            throw ValidationException::withMessages([
+                'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+            ]);
+        }
+
+        $query = DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', function ($join) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->leftJoin('stj_pedidos_tienda as pt', 'pt.pti_pedido', '=', 'p.ped_id')
+            ->leftJoin('stj_tiendas as order_store', function ($join) use ($countryId) {
+                $join->on('order_store.tie_codigo', '=', 'pt.pti_tienda')
+                    ->where('order_store.tie_pais', '=', $countryId);
+            })
+            ->leftJoin('stj_tiendas as pending_store', function ($join) use ($countryId) {
+                $join->on('pending_store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('pending_store.tie_pais', '=', $countryId);
+            })
+            ->where('p.ped_id_pais', $countryId)
+            ->whereIn('p.ped_devolucion_realizada', ['SI', 'NO'])
+            ->when($status, fn ($builder, string $value) => $builder->where('p.ped_devolucion_realizada', $value))
+            ->when($store['code'] ?? null, function ($builder, string $storeCode) {
+                $builder->where(function ($storeQuery) use ($storeCode) {
+                    $storeQuery
+                        ->where('pt.pti_tienda', $storeCode)
+                        ->orWhere('p.ped_tienda', $storeCode);
+                });
+            })
+            ->when($start !== null && $end !== null, function ($builder) use ($start, $end) {
+                $builder->whereRaw('DATE(COALESCE(p.ped_fecha_devolucion, pay.ppa_fecha)) BETWEEN ? AND ?', [$start, $end]);
+            })
+            ->selectRaw("
+                p.ped_id,
+                p.ped_id_pais,
+                p.ped_checkout,
+                p.ped_origen,
+                p.ped_estatus,
+                p.ped_devolucion_realizada,
+                p.ped_rsp_servicio,
+                p.ped_monto_devolucion,
+                p.ped_fecha_devolucion,
+                p.ped_nombres,
+                p.ped_apellidos,
+                p.ped_identificacion,
+                p.ped_email,
+                p.ped_telefono,
+                p.ped_whatsapp,
+                pay.ppa_ref,
+                pay.ppa_fecha,
+                pay.ppa_tipo,
+                pay.ppa_monto,
+                pay.ppa_monto_senv,
+                pay.ppa_articulos,
+                COALESCE(order_store.tie_nombre, pending_store.tie_nombre) AS tie_nombre,
+                COALESCE(order_store.tie_codigo, pending_store.tie_codigo, p.ped_tienda) AS tie_codigo,
+                COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id
+            ")
+            ->orderByRaw('COALESCE(p.ped_fecha_devolucion, pay.ppa_fecha) DESC');
+
+        $rows = $query->get()
+            ->map(fn ($row) => $this->normalizeRefund($row))
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'country' => $countryId,
+                'startDate' => $start,
+                'endDate' => $end,
+                'status' => $status,
+                'store' => $store['code'] ?? null,
+                'storeId' => $store['id'] ?? null,
+                'storeName' => $store['name'] ?? null,
+            ],
+            'summary' => [
+                'orders' => count($rows),
+                'pending' => count(array_filter($rows, fn (array $row) => $row['refundStatus'] === 'NO')),
+                'processed' => count(array_filter($rows, fn (array $row) => $row['refundStatus'] === 'SI')),
+                'amount' => array_sum(array_column($rows, 'refundAmount')),
+            ],
+            'refunds' => $rows,
+        ];
     }
 
     /**
@@ -1097,6 +1424,221 @@ class OrderReferenceService
             ->first();
     }
 
+    private function applyOrderSearchTerm($query, string $like): void
+    {
+        $query
+            ->orWhere('pay.ppa_ref', 'like', $like)
+            ->orWhere('p.ped_id', 'like', $like)
+            ->orWhere('pay.ppa_id', 'like', $like)
+            ->orWhere('p.ped_nombres', 'like', $like)
+            ->orWhere('p.ped_apellidos', 'like', $like)
+            ->orWhereRaw("CONCAT_WS(' ', p.ped_nombres, p.ped_apellidos) LIKE ?", [$like])
+            ->orWhere('p.ped_email', 'like', $like)
+            ->orWhere('p.ped_identificacion', 'like', $like)
+            ->orWhere('p.ped_telefono', 'like', $like)
+            ->orWhere('p.ped_whatsapp', 'like', $like)
+            ->orWhere('p.ped_sesion', 'like', $like)
+            ->orWhere('pay.ppa_tarjeta', 'like', $like)
+            ->orWhere('d.dir_direccion', 'like', $like)
+            ->orWhere('d.dir_municipio_txt', 'like', $like)
+            ->orWhere('d.dir_departamento_txt', 'like', $like)
+            ->orWhere('d.dir_referencia', 'like', $like)
+            ->orWhere('p.ped_direccion', 'like', $like)
+            ->orWhere('p.ped_ciudad', 'like', $like)
+            ->orWhere('p.ped_estado', 'like', $like);
+    }
+
+    private function normalizeSearchOrder(object $row): array
+    {
+        $paymentType = (string) ($row->ppa_tipo ?? '');
+        $shippingAddress = $this->joinAddress([$row->direccion_envio ?? null]);
+        $billingAddress = $this->joinAddress([
+            $row->ped_direccion ?? null,
+            $row->ped_ciudad ?? null,
+            $row->ped_estado ?? null,
+            $row->ped_pais ?? null,
+        ]);
+
+        return [
+            'id' => (int) $row->ped_id,
+            'paymentId' => $row->ppa_id !== null ? (int) $row->ppa_id : null,
+            'countryId' => (int) $row->ped_id_pais,
+            'storeCode' => (string) ($row->tie_codigo ?? ''),
+            'storeId' => $row->tie_id !== null ? (int) $row->tie_id : null,
+            'storeName' => (string) ($row->tie_nombre ?? ''),
+            'origin' => (string) ($row->ped_origen ?? ''),
+            'checkout' => (string) ($row->ped_checkout ?? ''),
+            'status' => (string) ($row->ped_estatus ?? ''),
+            'productStatus' => (string) ($row->ped_estatus_productos ?? ''),
+            'ref' => (string) ($row->ppa_ref ?? ''),
+            'paymentStatus' => (string) ($row->ppa_estado ?? ''),
+            'createdAt' => (string) ($row->ped_fecha ?? ''),
+            'paidAt' => (string) ($row->ppa_fecha ?? $row->ped_fecha ?? ''),
+            'customer' => trim((string) ($row->ped_nombres ?? '').' '.(string) ($row->ped_apellidos ?? '')),
+            'identification' => (string) ($row->ped_identificacion ?? ''),
+            'email' => (string) ($row->ped_email ?? ''),
+            'phone' => (string) ($row->ped_telefono ?? ''),
+            'whatsapp' => (string) ($row->ped_whatsapp ?? ''),
+            'session' => (string) ($row->ped_sesion ?? ''),
+            'paymentType' => $paymentType,
+            'issuer' => $paymentType === 'EFECTIVO' ? 'EFECTIVO' : (string) ($row->ppa_emisor ?? ''),
+            'cardOrChange' => $paymentType === 'EFECTIVO'
+                ? 'Cambio: '.(string) ($row->ppa_cambio ?? '')
+                : (string) ($row->ppa_tarjeta ?? ''),
+            'amount' => (float) ($row->ppa_monto_senv ?? $row->ppa_monto ?? 0),
+            'items' => (int) ($row->ppa_articulos ?? 0),
+            'address' => (string) ($row->ped_checkout ?? '') === 'DOMICILIO' ? $shippingAddress : $billingAddress,
+            'destination' => (string) ($row->ped_checkout ?? '') === 'DOMICILIO'
+                ? $shippingAddress
+                : 'Tienda: '.(string) ($row->tie_nombre ?? ''),
+        ];
+    }
+
+    private function normalizeRefund(object $row): array
+    {
+        $payload = $this->servicePayload($row->ped_rsp_servicio ?? null);
+        $approved = $this->serviceApproved($payload);
+        $raw = $this->servicePayloadText($row->ped_rsp_servicio ?? null, $payload);
+        $refundStatus = strtoupper((string) ($row->ped_devolucion_realizada ?? ''));
+
+        return [
+            'id' => (int) $row->ped_id,
+            'countryId' => (int) $row->ped_id_pais,
+            'ref' => (string) ($row->ppa_ref ?? ''),
+            'paidAt' => (string) ($row->ppa_fecha ?? ''),
+            'refundAt' => (string) ($row->ped_fecha_devolucion ?? ''),
+            'status' => (string) ($row->ped_estatus ?? ''),
+            'refundStatus' => in_array($refundStatus, ['SI', 'NO'], true) ? $refundStatus : '',
+            'refundLabel' => $refundStatus === 'SI' ? 'Devolucion procesada' : 'Devolucion pendiente',
+            'serviceApproved' => $approved,
+            'serviceRejected' => $refundStatus === 'SI' && $approved === false,
+            'origin' => (string) ($row->ped_origen ?? ''),
+            'checkout' => (string) ($row->ped_checkout ?? ''),
+            'storeCode' => (string) ($row->tie_codigo ?? ''),
+            'storeId' => $row->tie_id !== null ? (int) $row->tie_id : null,
+            'storeName' => (string) ($row->tie_nombre ?? ''),
+            'customer' => trim((string) ($row->ped_nombres ?? '').' '.(string) ($row->ped_apellidos ?? '')),
+            'identification' => (string) ($row->ped_identificacion ?? ''),
+            'email' => (string) ($row->ped_email ?? ''),
+            'phone' => (string) ($row->ped_telefono ?? ''),
+            'whatsapp' => (string) ($row->ped_whatsapp ?? ''),
+            'paymentType' => (string) ($row->ppa_tipo ?? ''),
+            'items' => (int) ($row->ppa_articulos ?? 0),
+            'paidAmount' => (float) ($row->ppa_monto ?? 0),
+            'amount' => (float) ($row->ppa_monto_senv ?? $row->ppa_monto ?? 0),
+            'refundAmount' => (float) ($row->ped_monto_devolucion ?? 0),
+            'servicePayload' => $payload,
+            'serviceRaw' => $raw,
+        ];
+    }
+
+    private function refundStatus(mixed $value): ?string
+    {
+        $value = strtoupper(trim((string) $value));
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (! in_array($value, ['SI', 'NO'], true)) {
+            throw ValidationException::withMessages([
+                'status' => 'El estado de devolucion no es valido.',
+            ]);
+        }
+
+        return $value;
+    }
+
+    private function nullableDate(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? Carbon::parse($value)->toDateString() : null;
+    }
+
+    /**
+     * @return mixed
+     */
+    private function servicePayload(mixed $value): mixed
+    {
+        $raw = trim((string) $value);
+
+        if ($raw === '') {
+            return null;
+        }
+
+        try {
+            $unserialized = @unserialize($raw);
+
+            if ($unserialized !== false || $raw === 'b:0;') {
+                return json_decode(json_encode($unserialized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: 'null', true);
+            }
+        } catch (Throwable) {
+        }
+
+        $json = json_decode($raw, true);
+
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $json;
+        }
+
+        return $raw;
+    }
+
+    private function servicePayloadText(mixed $value, mixed $payload): string
+    {
+        if (is_array($payload)) {
+            return (string) json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        return trim((string) $value);
+    }
+
+    private function serviceApproved(mixed $payload): ?bool
+    {
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        $approved = data_get($payload, 'Approved')
+            ?? data_get($payload, 'approved')
+            ?? data_get($payload, 'Response.Approved')
+            ?? data_get($payload, 'response.Approved')
+            ?? data_get($payload, 'response.approved');
+
+        if ($approved === null) {
+            return null;
+        }
+
+        return filter_var($approved, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+    }
+
+    private function paymentAttemptDetail(mixed $value): string
+    {
+        $raw = trim((string) $value);
+
+        if ($raw === '') {
+            return '';
+        }
+
+        try {
+            $unserialized = @unserialize($raw);
+
+            if ($unserialized !== false || $raw === 'b:0;') {
+                return print_r($unserialized, true);
+            }
+        } catch (Throwable) {
+        }
+
+        $json = json_decode($raw, true);
+
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return (string) json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        return $raw;
+    }
+
     private function products(string $reference, int $countryId): array
     {
         return DB::table('stj_pedidos_detalle as detail')
@@ -1135,6 +1677,10 @@ class OrderReferenceService
         $productsOriginal = round((float) ($order->ppa_monto_senv ?? 0), 2);
         $paid = round((float) ($order->ppa_monto ?? 0), 2);
         $paidCalculated = round($chargedSubtotal + ((string) ($order->ped_checkout ?? '') === 'DOMICILIO' ? $shipping : 0), 2);
+        $refundStatus = strtoupper((string) ($order->ped_devolucion_realizada ?? ''));
+        $refundAmount = (float) ($order->ped_monto_devolucion ?? 0);
+        $refundPayload = $this->servicePayload($order->ped_rsp_servicio ?? null);
+        $billed = round(max(0, $billedSubtotal + ((string) ($order->ped_checkout ?? '') === 'DOMICILIO' ? $shipping : 0)), 2);
 
         return [
             'id' => (int) $order->ped_id,
@@ -1175,6 +1721,16 @@ class OrderReferenceService
                 'responseCode' => (string) ($order->ppa_rsp_codigo ?? ''),
                 'message' => (string) ($order->mfa_mensaje ?? ''),
             ],
+            'refund' => [
+                'hasRefund' => in_array($refundStatus, ['SI', 'NO'], true) && $refundAmount > 0,
+                'status' => in_array($refundStatus, ['SI', 'NO'], true) ? $refundStatus : 'N/A',
+                'label' => $refundStatus === 'SI' ? 'Devolucion procesada' : ($refundStatus === 'NO' ? 'Devolucion pendiente' : 'N/A'),
+                'amount' => $refundAmount,
+                'date' => (string) ($order->ped_fecha_devolucion ?? ''),
+                'approved' => $this->serviceApproved($refundPayload),
+                'servicePayload' => $refundPayload,
+                'serviceRaw' => $this->servicePayloadText($order->ped_rsp_servicio ?? null, $refundPayload),
+            ],
             'shipping' => [
                 'id' => $order->pdi_id !== null ? (int) $order->pdi_id : null,
                 'shippingId' => (string) ($order->pdi_id_shipping ?? ''),
@@ -1214,8 +1770,9 @@ class OrderReferenceService
                 'paidCalculated' => $paidCalculated,
                 'paidDifference' => round($paidCalculated - $paid, 2),
                 'discount' => (float) ($order->ppa_promo_descuento ?? 0),
-                'refund' => (float) ($order->ped_monto_devolucion ?? 0),
-                'billed' => round(max(0, $billedSubtotal + ((string) ($order->ped_checkout ?? '') === 'DOMICILIO' ? $shipping : 0)), 2),
+                'refund' => $refundAmount,
+                'billed' => $billed,
+                'billedNet' => round(max(0, $billed - $refundAmount), 2),
             ],
         ];
     }
@@ -1341,5 +1898,39 @@ class OrderReferenceService
         }
 
         return (int) $resolved->pai_id;
+    }
+
+    /**
+     * @return array{code: ?string, id: ?int, name: ?string}|null
+     */
+    private function resolveStore(int $countryId, mixed $store): ?array
+    {
+        $store = trim((string) $store);
+
+        if ($store === '') {
+            return null;
+        }
+
+        $query = DB::table('stj_tiendas')
+            ->select(['tie_id', 'tie_codigo', 'tie_nombre'])
+            ->where('tie_pais', $countryId);
+
+        $resolved = (clone $query)->where('tie_codigo', $store)->first();
+
+        if (! $resolved && is_numeric($store)) {
+            $resolved = (clone $query)->where('tie_id', (int) $store)->first();
+        }
+
+        if (! $resolved) {
+            throw ValidationException::withMessages([
+                'store' => 'La tienda seleccionada no existe para el pais indicado.',
+            ]);
+        }
+
+        return [
+            'id' => (int) $resolved->tie_id,
+            'code' => (string) $resolved->tie_codigo,
+            'name' => trim((string) $resolved->tie_nombre),
+        ];
     }
 }

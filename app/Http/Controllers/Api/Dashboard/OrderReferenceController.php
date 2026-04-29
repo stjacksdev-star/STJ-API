@@ -30,6 +30,63 @@ class OrderReferenceController extends BaseController
         );
     }
 
+    public function search(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'query' => ['required', 'string', 'min:2', 'max:120'],
+            'store' => ['nullable', 'string', 'max:20'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        return $this->success(
+            $this->orders->search($validated),
+            'Pedidos encontrados'
+        );
+    }
+
+    public function paymentAttempts(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'order' => ['required', 'integer', 'min:1'],
+            'store' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        return $this->success(
+            $this->orders->paymentAttempts((int) $validated['order'], $validated['country'], $validated['store'] ?? null),
+            'Intentos de pago obtenidos'
+        );
+    }
+
+    public function refunds(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'store' => ['nullable', 'string', 'max:20'],
+            'status' => ['nullable', 'in:SI,NO'],
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date'],
+        ]);
+
+        return $this->success(
+            $this->orders->refunds($validated),
+            'Devoluciones obtenidas'
+        );
+    }
+
     public function product(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {

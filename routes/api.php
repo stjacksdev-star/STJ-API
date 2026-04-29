@@ -55,6 +55,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/sales/kpi', [DashboardSalesKpiController::class, 'show']);
         Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
+        Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);
+        Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
+        Route::get('/orders/refunds', [DashboardOrderReferenceController::class, 'refunds']);
         Route::get('/orders/product', [DashboardOrderReferenceController::class, 'product']);
         Route::post('/orders/lines/{line}', [DashboardOrderReferenceController::class, 'updateLine']);
         Route::post('/orders/process', [DashboardOrderReferenceController::class, 'process']);
