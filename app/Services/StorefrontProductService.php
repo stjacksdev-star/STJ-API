@@ -142,7 +142,7 @@ class StorefrontProductService
                 'brand' => trim((string) ($related->pro_marca ?: 'ST JACKS')),
                 'sizes' => trim((string) ($related->pro_tallas ?: '')),
                 'imageUrl' => $related->pro_thumbs
-                    ? self::LEGACY_HOST.'/images/p400/'.ltrim((string) $related->pro_thumbs, '/')
+                    ? $this->productImageUrl((string) $related->pro_thumbs, 'p400')
                     : null,
             ])
             ->values()
@@ -211,11 +211,28 @@ class StorefrontProductService
         }
 
         return [
-            'imageUrl' => self::LEGACY_HOST.'/images/productos/'.$filename,
-            'thumbUrl' => self::LEGACY_HOST.'/images/p400/'.$filename,
+            'imageUrl' => $this->productImageUrl($filename, 'productos'),
+            'thumbUrl' => $this->productImageUrl($filename, 'p400'),
             'filename' => $filename,
             'order' => $order,
             'isCover' => $isCover,
         ];
+    }
+
+    private function productImageUrl(string $filename, string $folder): string
+    {
+        $filename = trim($filename);
+
+        if (str_starts_with($filename, 'http://') || str_starts_with($filename, 'https://')) {
+            return $filename;
+        }
+
+        $spacesUrl = rtrim((string) config('filesystems.disks.spaces.url'), '/');
+
+        if ($spacesUrl !== '') {
+            return $spacesUrl.'/images/'.$folder.'/'.ltrim($filename, '/');
+        }
+
+        return self::LEGACY_HOST.'/images/'.$folder.'/'.ltrim($filename, '/');
     }
 }

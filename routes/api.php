@@ -16,6 +16,8 @@ use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrde
 use App\Http\Controllers\Api\Dashboard\PromotionAssetController as DashboardPromotionAssetController;
 use App\Http\Controllers\Api\Dashboard\PromotionController as DashboardPromotionController;
 use App\Http\Controllers\Api\Dashboard\ProductCategoryController as DashboardProductCategoryController;
+use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProductCountryController;
+use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProductMasterController;
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
 
 
@@ -57,6 +59,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/product-categories', [DashboardProductCategoryController::class, 'store']);
         Route::post('/product-categories/{category}', [DashboardProductCategoryController::class, 'update']);
         Route::delete('/product-categories/{category}', [DashboardProductCategoryController::class, 'destroy']);
+        Route::get('/products/master', [DashboardProductMasterController::class, 'index']);
+        Route::post('/products/master/import', [DashboardProductMasterController::class, 'import']);
+        Route::post('/products/master/photos/import', [DashboardProductMasterController::class, 'importPhotos']);
+        Route::get('/products/master/{product}', [DashboardProductMasterController::class, 'show']);
+        Route::get('/products/master/{product}/photos', [DashboardProductMasterController::class, 'photos']);
+        Route::get('/products/master/{product}/countries', [DashboardProductMasterController::class, 'countries']);
+        Route::get('/products/country/countries', [DashboardProductCountryController::class, 'countries']);
+        Route::post('/products/country/import', [DashboardProductCountryController::class, 'import']);
+        Route::post('/products/country/deactivate', [DashboardProductCountryController::class, 'deactivate']);
         Route::get('/sales/kpi', [DashboardSalesKpiController::class, 'show']);
         Route::get('/sales/regional-chart', [DashboardSalesKpiController::class, 'regionalSalesChart']);
         Route::get('/sales/conversion', [DashboardSalesKpiController::class, 'conversionChart']);
