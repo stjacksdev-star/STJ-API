@@ -164,6 +164,309 @@ class SalesKpiService
         ];
     }
 
+    public function regionalSalesChart(?string $startDate = null, ?string $endDate = null): array
+    {
+        $end = Carbon::parse($endDate ?: now()->toDateString())->toDateString();
+        $start = Carbon::parse($startDate ?: Carbon::parse($end)->subDays(7)->toDateString())->toDateString();
+
+        if ($start > $end) {
+            throw ValidationException::withMessages([
+                'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+            ]);
+        }
+
+        $previousStart = Carbon::parse($start)->subYear()->toDateString();
+        $previousEnd = Carbon::parse($end)->subYear()->toDateString();
+        $currentYear = Carbon::parse($end)->year;
+        $previousYear = Carbon::parse($previousEnd)->year;
+        $dates = $this->dateRange($start, $end);
+        $hnlUsdRate = $this->latestHnlUsdRate();
+
+        $currentRows = $this->regionalSalesRows($start, $end, $hnlUsdRate['rate']);
+        $previousRows = $this->regionalSalesRows($previousStart, $previousEnd, $hnlUsdRate['rate']);
+
+        $countrySeries = [
+            [
+                'key' => 'sv',
+                'countryId' => 1,
+                'country' => 'El Salvador',
+                'current' => 'ElSalvador',
+                'previous' => 'ElSalvador',
+            ],
+            [
+                'key' => 'gt',
+                'countryId' => 2,
+                'country' => 'Guatemala',
+                'current' => 'Guatemala',
+                'previous' => 'Guatemala',
+            ],
+            [
+                'key' => 'cr',
+                'countryId' => 3,
+                'country' => 'Costa Rica',
+                'current' => 'CostaRica',
+                'previous' => 'CostaRica',
+            ],
+            [
+                'key' => 'hn',
+                'countryId' => 7,
+                'country' => 'Honduras',
+                'current' => 'Honduras',
+                'previous' => 'Honduras',
+            ],
+        ];
+
+        $series = [];
+
+        foreach ($countrySeries as $country) {
+            $series[] = [
+                'key' => $country['key'].'_current',
+                'countryId' => $country['countryId'],
+                'country' => $country['country'],
+                'period' => 'current',
+                'year' => $currentYear,
+                'label' => $country['country'].' ('.$currentYear.')',
+                'data' => $this->regionalSalesValues($dates, $currentRows, $country['current']),
+            ];
+
+            $series[] = [
+                'key' => $country['key'].'_previous',
+                'countryId' => $country['countryId'],
+                'country' => $country['country'],
+                'period' => 'previous',
+                'year' => $previousYear,
+                'label' => $country['country'].' ('.$previousYear.')',
+                'data' => $this->regionalSalesValues($dates, $previousRows, $country['previous'], $previousStart),
+            ];
+        }
+
+        $series[] = [
+            'key' => 'total_current',
+            'countryId' => 0,
+            'country' => 'Consolidado',
+            'period' => 'current',
+            'year' => $currentYear,
+            'label' => 'Consolidado ('.$currentYear.')',
+            'data' => $this->consolidatedValues($dates, $currentRows),
+        ];
+
+        $series[] = [
+            'key' => 'total_previous',
+            'countryId' => 0,
+            'country' => 'Consolidado',
+            'period' => 'previous',
+            'year' => $previousYear,
+            'label' => 'Consolidado ('.$previousYear.')',
+            'data' => $this->consolidatedValues($dates, $previousRows, $previousStart),
+        ];
+
+        return [
+            'filters' => [
+                'startDate' => $start,
+                'endDate' => $end,
+                'previousStartDate' => $previousStart,
+                'previousEndDate' => $previousEnd,
+            ],
+            'categories' => $dates,
+            'series' => $series,
+            'notes' => [
+                'currency' => 'USD',
+                'exchangeRates' => [
+                    'GT' => 0.13049,
+                    'CR' => 0.0017594,
+                    'HN' => $hnlUsdRate,
+                ],
+            ],
+        ];
+    }
+
+    public function conversionChart(?string $startDate = null, ?string $endDate = null, ?string $country = null): array
+    {
+        $end = Carbon::parse($endDate ?: now()->toDateString())->toDateString();
+        $start = Carbon::parse($startDate ?: Carbon::parse($end)->subDays(7)->toDateString())->toDateString();
+
+        if ($start > $end) {
+            throw ValidationException::withMessages([
+                'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+            ]);
+        }
+
+        $countryInfo = $this->conversionCountry($country);
+        $previousStart = Carbon::parse($start)->subYear()->toDateString();
+        $previousEnd = Carbon::parse($end)->subYear()->toDateString();
+        $dates = $this->dateRange($start, $end);
+        $previousDates = $this->dateRange($previousStart, $previousEnd);
+
+        $currentVisits = $this->visitsByDate($start, $end, $countryInfo['visitCountry']);
+        $previousVisits = $this->visitsByDate($previousStart, $previousEnd, $countryInfo['visitCountry']);
+        $currentOrders = $this->approvedOrdersByDate($start, $end, $countryInfo['countryId']);
+        $previousOrders = $this->approvedOrdersByDate($previousStart, $previousEnd, $countryInfo['countryId']);
+
+        $rows = collect($dates)
+            ->map(function (string $date, int $index) use ($previousDates, $currentVisits, $previousVisits, $currentOrders, $previousOrders) {
+                $previousDate = $previousDates[$index] ?? null;
+                $visits = (int) ($currentVisits[$date] ?? 0);
+                $orders = (int) ($currentOrders[$date] ?? 0);
+                $previousVisitCount = $previousDate ? (int) ($previousVisits[$previousDate] ?? 0) : 0;
+                $previousOrderCount = $previousDate ? (int) ($previousOrders[$previousDate] ?? 0) : 0;
+
+                return [
+                    'date' => $date,
+                    'previousDate' => $previousDate,
+                    'visits' => $visits,
+                    'orders' => $orders,
+                    'rate' => $visits > 0 ? round(($orders / $visits) * 100, 2) : 0.0,
+                    'previousVisits' => $previousVisitCount,
+                    'previousOrders' => $previousOrderCount,
+                    'previousRate' => $previousVisitCount > 0 ? round(($previousOrderCount / $previousVisitCount) * 100, 2) : 0.0,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'startDate' => $start,
+                'endDate' => $end,
+                'previousStartDate' => $previousStart,
+                'previousEndDate' => $previousEnd,
+                'country' => $countryInfo['key'],
+                'countryLabel' => $countryInfo['label'],
+            ],
+            'categories' => $dates,
+            'series' => [
+                [
+                    'key' => 'conversion_current',
+                    'period' => 'current',
+                    'label' => 'Conversion '.Carbon::parse($end)->year,
+                    'data' => array_column($rows, 'rate'),
+                ],
+                [
+                    'key' => 'conversion_previous',
+                    'period' => 'previous',
+                    'label' => 'Conversion '.Carbon::parse($previousEnd)->year,
+                    'data' => array_column($rows, 'previousRate'),
+                ],
+            ],
+            'rows' => $rows,
+            'totals' => [
+                'visits' => array_sum(array_column($rows, 'visits')),
+                'orders' => array_sum(array_column($rows, 'orders')),
+                'rate' => $this->conversionRate(
+                    array_sum(array_column($rows, 'orders')),
+                    array_sum(array_column($rows, 'visits')),
+                ),
+                'previousVisits' => array_sum(array_column($rows, 'previousVisits')),
+                'previousOrders' => array_sum(array_column($rows, 'previousOrders')),
+                'previousRate' => $this->conversionRate(
+                    array_sum(array_column($rows, 'previousOrders')),
+                    array_sum(array_column($rows, 'previousVisits')),
+                ),
+            ],
+        ];
+    }
+
+    public function visitsChart(?string $startDate = null, ?string $endDate = null, ?string $country = null, ?string $previousStartDate = null, ?string $previousEndDate = null): array
+    {
+        $end = Carbon::parse($endDate ?: now()->toDateString())->toDateString();
+        $start = Carbon::parse($startDate ?: Carbon::parse($end)->subDays(7)->toDateString())->toDateString();
+
+        if ($start > $end) {
+            throw ValidationException::withMessages([
+                'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+            ]);
+        }
+
+        $countryInfo = $this->conversionCountry($country);
+
+        if ($countryInfo['key'] === 'general') {
+            $dates = $this->dateRange($start, $end);
+            $platformRows = $this->visitsByPlatform($start, $end);
+
+            return [
+                'mode' => 'general',
+                'filters' => [
+                    'startDate' => $start,
+                    'endDate' => $end,
+                    'country' => 'general',
+                    'countryLabel' => 'General',
+                ],
+                'categories' => $dates,
+                'series' => collect([
+                    ['key' => 'visits_web', 'label' => 'WEB', 'column' => 'web'],
+                    ['key' => 'visits_android', 'label' => 'Android', 'column' => 'android'],
+                    ['key' => 'visits_ios', 'label' => 'iOS', 'column' => 'ios'],
+                ])->map(fn ($serie) => [
+                    'key' => $serie['key'],
+                    'label' => $serie['label'],
+                    'data' => collect($dates)->map(fn ($date) => (int) ($platformRows[$date][$serie['column']] ?? 0))->all(),
+                ])->all(),
+                'rows' => $this->visitTotalsByCountry($start, $end),
+            ];
+        }
+
+        $previousEnd = Carbon::parse($previousEndDate ?: Carbon::parse($end)->subYear()->toDateString())->toDateString();
+        $previousStart = Carbon::parse($previousStartDate ?: Carbon::parse($start)->subYear()->toDateString())->toDateString();
+
+        if ($previousStart > $previousEnd) {
+            throw ValidationException::withMessages([
+                'previousEndDate' => 'La fecha anterior fin debe ser mayor o igual a la fecha anterior inicio.',
+            ]);
+        }
+
+        $dates = $this->dateRange($start, $end);
+        $previousDates = $this->dateRange($previousStart, $previousEnd);
+        $currentVisits = $this->visitsByDate($start, $end, $countryInfo['visitCountry']);
+        $previousVisits = $this->visitsByDate($previousStart, $previousEnd, $countryInfo['visitCountry']);
+
+        $rows = collect($dates)
+            ->map(function (string $date, int $index) use ($previousDates, $currentVisits, $previousVisits) {
+                $previousDate = $previousDates[$index] ?? null;
+
+                return [
+                    'index' => $index + 1,
+                    'date' => $date,
+                    'visits' => (int) ($currentVisits[$date] ?? 0),
+                    'previousDate' => $previousDate,
+                    'previousVisits' => $previousDate ? (int) ($previousVisits[$previousDate] ?? 0) : 0,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'mode' => 'country',
+            'filters' => [
+                'startDate' => $start,
+                'endDate' => $end,
+                'previousStartDate' => $previousStart,
+                'previousEndDate' => $previousEnd,
+                'country' => $countryInfo['key'],
+                'countryLabel' => $countryInfo['label'],
+            ],
+            'categories' => $dates,
+            'series' => [
+                [
+                    'key' => 'visits_current',
+                    'period' => 'current',
+                    'label' => 'Visitas actuales',
+                    'data' => array_column($rows, 'visits'),
+                ],
+                [
+                    'key' => 'visits_previous',
+                    'period' => 'previous',
+                    'label' => 'Visitas anteriores',
+                    'data' => array_column($rows, 'previousVisits'),
+                ],
+            ],
+            'rows' => $rows,
+            'totals' => [
+                'visits' => array_sum(array_column($rows, 'visits')),
+                'previousVisits' => array_sum(array_column($rows, 'previousVisits')),
+            ],
+        ];
+    }
+
     private function summary(int $countryId, string $start, string $end): array
     {
         $rows = DB::select(
@@ -199,6 +502,216 @@ class SalesKpiService
             ])
             ->values()
             ->all();
+    }
+
+    private function regionalSalesRows(string $start, string $end, float $hnlUsdRate): array
+    {
+        $rows = DB::select(
+            "SELECT
+                DATE(ppa_fecha) AS date,
+                IFNULL(SUM(CASE WHEN ped_id_pais = 1 THEN ppa_monto_senv END), 0) AS ElSalvador,
+                IFNULL(SUM(CASE WHEN ped_id_pais = 2 THEN ppa_monto_senv END), 0) * 0.13049 AS Guatemala,
+                IFNULL(SUM(CASE WHEN ped_id_pais = 3 THEN ppa_monto_senv END), 0) * 0.0017594 AS CostaRica,
+                IFNULL(SUM(CASE WHEN ped_id_pais = 7 THEN ppa_monto_senv END), 0) * ? AS Honduras
+            FROM stj_pedidos
+            INNER JOIN stj_pedidos_pago ON ppa_pedido = ped_id AND ppa_estado = 'APROBADA'
+            WHERE DATE(ppa_fecha) BETWEEN ? AND ?
+            GROUP BY DATE(ppa_fecha)
+            ORDER BY DATE(ppa_fecha)",
+            [$hnlUsdRate, $start, $end],
+        );
+
+        return collect($rows)
+            ->mapWithKeys(fn ($row) => [
+                (string) $row->date => [
+                    'ElSalvador' => (float) ($row->ElSalvador ?? 0),
+                    'Guatemala' => (float) ($row->Guatemala ?? 0),
+                    'CostaRica' => (float) ($row->CostaRica ?? 0),
+                    'Honduras' => (float) ($row->Honduras ?? 0),
+                ],
+            ])
+            ->all();
+    }
+
+    private function latestHnlUsdRate(): array
+    {
+        $row = DB::table('tasa_hnl_usd')
+            ->select(['id', 'fecha', 'tasa', 'fuente'])
+            ->orderByDesc('fecha')
+            ->orderByDesc('id')
+            ->first();
+
+        return [
+            'id' => $row ? (int) $row->id : null,
+            'date' => $row ? (string) $row->fecha : null,
+            'rate' => $row ? (float) $row->tasa : 0.0,
+            'source' => $row ? (string) ($row->fuente ?? '') : null,
+        ];
+    }
+
+    private function visitsByDate(string $start, string $end, ?string $country): array
+    {
+        return DB::table('stj_visitas')
+            ->whereRaw('DATE(vis_fecha) BETWEEN ? AND ?', [$start, $end])
+            ->when($country !== null, fn ($builder) => $builder->where('vis_pais', $country))
+            ->groupBy('vis_fecha')
+            ->orderBy('vis_fecha')
+            ->selectRaw('vis_fecha AS date, COUNT(*) AS visits')
+            ->get()
+            ->mapWithKeys(fn ($row) => [(string) $row->date => (int) $row->visits])
+            ->all();
+    }
+
+    private function visitsByPlatform(string $start, string $end): array
+    {
+        return DB::table('stj_visitas')
+            ->whereRaw('DATE(vis_fecha) BETWEEN ? AND ?', [$start, $end])
+            ->groupBy('vis_fecha')
+            ->orderBy('vis_fecha')
+            ->selectRaw("
+                vis_fecha AS date,
+                IFNULL(SUM(CASE WHEN vis_plataforma = 'WEB' THEN 1 ELSE 0 END), 0) AS web,
+                IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-ANDROID' THEN 1 ELSE 0 END), 0) AS android,
+                IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-IOS' THEN 1 ELSE 0 END), 0) AS ios
+            ")
+            ->get()
+            ->mapWithKeys(fn ($row) => [
+                (string) $row->date => [
+                    'web' => (int) $row->web,
+                    'android' => (int) $row->android,
+                    'ios' => (int) $row->ios,
+                ],
+            ])
+            ->all();
+    }
+
+    private function visitTotalsByCountry(string $start, string $end): array
+    {
+        return DB::table('stj_visitas')
+            ->whereRaw('DATE(vis_fecha) BETWEEN ? AND ?', [$start, $end])
+            ->groupBy('vis_pais')
+            ->orderByDesc('visits')
+            ->selectRaw("COALESCE(NULLIF(vis_pais, ''), 'N/D') AS country, COUNT(*) AS visits")
+            ->get()
+            ->map(fn ($row) => [
+                'country' => (string) $row->country,
+                'visits' => (int) $row->visits,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function approvedOrdersByDate(string $start, string $end, ?int $countryId): array
+    {
+        return DB::table('stj_pedidos')
+            ->join('stj_pedidos_pago', 'ppa_pedido', '=', 'ped_id')
+            ->where('ppa_estado', 'APROBADA')
+            ->where('ped_estatus', '!=', 'ANULADO-PRUEBA')
+            ->whereRaw('DATE(ppa_fecha) BETWEEN ? AND ?', [$start, $end])
+            ->when($countryId !== null, fn ($builder) => $builder->where('ped_id_pais', $countryId))
+            ->groupByRaw('DATE(ppa_fecha)')
+            ->orderByRaw('DATE(ppa_fecha)')
+            ->selectRaw('DATE(ppa_fecha) AS date, COUNT(ppa_ref) AS orders')
+            ->get()
+            ->mapWithKeys(fn ($row) => [(string) $row->date => (int) $row->orders])
+            ->all();
+    }
+
+    private function conversionCountry(?string $country): array
+    {
+        return match (strtolower(trim((string) $country))) {
+            '1', 'sv', 'elsalvador' => [
+                'key' => 'sv',
+                'label' => 'El Salvador',
+                'visitCountry' => 'ElSalvador',
+                'countryId' => 1,
+            ],
+            '2', 'gt', 'guatemala' => [
+                'key' => 'gt',
+                'label' => 'Guatemala',
+                'visitCountry' => 'Guatemala',
+                'countryId' => 2,
+            ],
+            '3', 'cr', 'costarica' => [
+                'key' => 'cr',
+                'label' => 'Costa Rica',
+                'visitCountry' => 'CostaRica',
+                'countryId' => 3,
+            ],
+            '7', 'hn', 'honduras' => [
+                'key' => 'hn',
+                'label' => 'Honduras',
+                'visitCountry' => 'Honduras',
+                'countryId' => 7,
+            ],
+            default => [
+                'key' => 'general',
+                'label' => 'General',
+                'visitCountry' => null,
+                'countryId' => null,
+            ],
+        };
+    }
+
+    private function conversionRate(int|float $orders, int|float $visits): float
+    {
+        return $visits > 0 ? round(($orders / $visits) * 100, 2) : 0.0;
+    }
+
+    private function regionalSalesValues(array $dates, array $rows, string $column, ?string $sourceStart = null): array
+    {
+        $sourceDate = $sourceStart ? Carbon::parse($sourceStart) : null;
+
+        return collect($dates)
+            ->map(function (string $date) use ($rows, $column, &$sourceDate) {
+                $lookupDate = $sourceDate ? $sourceDate->toDateString() : $date;
+                $value = (float) ($rows[$lookupDate][$column] ?? 0);
+
+                if ($sourceDate) {
+                    $sourceDate = $sourceDate->copy()->addDay();
+                }
+
+                return round($value, 2);
+            })
+            ->all();
+    }
+
+    private function consolidatedValues(array $dates, array $rows, ?string $sourceStart = null): array
+    {
+        $sourceDate = $sourceStart ? Carbon::parse($sourceStart) : null;
+
+        return collect($dates)
+            ->map(function (string $date) use ($rows, &$sourceDate) {
+                $lookupDate = $sourceDate ? $sourceDate->toDateString() : $date;
+                $row = $rows[$lookupDate] ?? [];
+
+                if ($sourceDate) {
+                    $sourceDate = $sourceDate->copy()->addDay();
+                }
+
+                return round(
+                    (float) ($row['ElSalvador'] ?? 0)
+                    + (float) ($row['Guatemala'] ?? 0)
+                    + (float) ($row['CostaRica'] ?? 0)
+                    + (float) ($row['Honduras'] ?? 0),
+                    2,
+                );
+            })
+            ->all();
+    }
+
+    private function dateRange(string $start, string $end): array
+    {
+        $dates = [];
+        $cursor = Carbon::parse($start);
+        $last = Carbon::parse($end);
+
+        while ($cursor <= $last) {
+            $dates[] = $cursor->toDateString();
+            $cursor->addDay();
+        }
+
+        return $dates;
     }
 
     private function margin(int $countryId, string $start, string $end): array

@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollecti
 use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
 use App\Http\Controllers\Api\Dashboard\PromotionAssetController as DashboardPromotionAssetController;
 use App\Http\Controllers\Api\Dashboard\PromotionController as DashboardPromotionController;
+use App\Http\Controllers\Api\Dashboard\ProductCategoryController as DashboardProductCategoryController;
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
 
 
@@ -52,7 +53,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'update']);
         Route::delete('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'destroy']);
         Route::post('/promotions/{promotion}/header', [DashboardPromotionAssetController::class, 'updateHeader']);
+        Route::get('/product-categories', [DashboardProductCategoryController::class, 'index']);
+        Route::post('/product-categories', [DashboardProductCategoryController::class, 'store']);
+        Route::post('/product-categories/{category}', [DashboardProductCategoryController::class, 'update']);
+        Route::delete('/product-categories/{category}', [DashboardProductCategoryController::class, 'destroy']);
         Route::get('/sales/kpi', [DashboardSalesKpiController::class, 'show']);
+        Route::get('/sales/regional-chart', [DashboardSalesKpiController::class, 'regionalSalesChart']);
+        Route::get('/sales/conversion', [DashboardSalesKpiController::class, 'conversionChart']);
+        Route::get('/sales/visits', [DashboardSalesKpiController::class, 'visitsChart']);
         Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
         Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);

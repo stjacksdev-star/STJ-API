@@ -35,6 +35,74 @@ class SalesKpiController extends BaseController
         );
     }
 
+    public function regionalSalesChart(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date'],
+        ]);
+
+        return $this->success(
+            $this->sales->regionalSalesChart(
+                $validated['startDate'] ?? null,
+                $validated['endDate'] ?? null,
+            ),
+            'Grafico regional de ventas obtenido'
+        );
+    }
+
+    public function conversionChart(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date'],
+            'country' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        return $this->success(
+            $this->sales->conversionChart(
+                $validated['startDate'] ?? null,
+                $validated['endDate'] ?? null,
+                $validated['country'] ?? null,
+            ),
+            'Conversion de ventas obtenida'
+        );
+    }
+
+    public function visitsChart(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date'],
+            'country' => ['nullable', 'string', 'max:20'],
+            'previousStartDate' => ['nullable', 'date'],
+            'previousEndDate' => ['nullable', 'date'],
+        ]);
+
+        return $this->success(
+            $this->sales->visitsChart(
+                $validated['startDate'] ?? null,
+                $validated['endDate'] ?? null,
+                $validated['country'] ?? null,
+                $validated['previousStartDate'] ?? null,
+                $validated['previousEndDate'] ?? null,
+            ),
+            'Visitas obtenidas'
+        );
+    }
+
     public function orders(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {
