@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontOrderController;
+use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
 use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
@@ -19,6 +20,7 @@ use App\Http\Controllers\Api\Dashboard\ProductCategoryController as DashboardPro
 use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProductCountryController;
 use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProductMasterController;
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
+use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
 
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -73,6 +75,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/sales/conversion', [DashboardSalesKpiController::class, 'conversionChart']);
         Route::get('/sales/visits', [DashboardSalesKpiController::class, 'visitsChart']);
         Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
+        Route::get('/reports/store/catalog', [DashboardStoreReportController::class, 'catalog']);
+        Route::get('/reports/store/virtual-cut', [DashboardStoreReportController::class, 'virtualCut']);
+        Route::get('/reports/store/pending-items', [DashboardStoreReportController::class, 'pendingItems']);
+        Route::get('/reports/store/pending-items-by-order', [DashboardStoreReportController::class, 'pendingItemsByOrder']);
+        Route::get('/reports/accounting/3/count', [DashboardAccountingReportController::class, 'count3']);
+        Route::get('/reports/accounting/3/export', [DashboardAccountingReportController::class, 'export3']);
+        Route::get('/reports/accounting/sales-by-store', [DashboardAccountingReportController::class, 'salesByStore']);
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
         Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);
         Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
