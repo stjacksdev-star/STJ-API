@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
+use App\Http\Controllers\Api\Dashboard\AppointmentController as DashboardAppointmentController;
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
 use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProd
 use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProductMasterController;
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
 use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
+use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -74,7 +76,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/sales/regional-chart', [DashboardSalesKpiController::class, 'regionalSalesChart']);
         Route::get('/sales/conversion', [DashboardSalesKpiController::class, 'conversionChart']);
         Route::get('/sales/visits', [DashboardSalesKpiController::class, 'visitsChart']);
+        Route::get('/sales/satisfaction', [DashboardSalesKpiController::class, 'satisfaction']);
+        Route::get('/sales/categories', [DashboardSalesKpiController::class, 'categories']);
+        Route::get('/sales/segments', [DashboardSalesKpiController::class, 'segments']);
+        Route::get('/sales/payment-forms', [DashboardSalesKpiController::class, 'paymentForms']);
+        Route::get('/sales/geographic', [DashboardSalesKpiController::class, 'geographic']);
+        Route::get('/sales/app', [DashboardSalesKpiController::class, 'app']);
         Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
+        Route::get('/appointments/catalog', [DashboardAppointmentController::class, 'catalog']);
+        Route::get('/appointments', [DashboardAppointmentController::class, 'index']);
+        Route::get('/subscribers', [DashboardSubscriberController::class, 'index']);
+        Route::post('/subscribers', [DashboardSubscriberController::class, 'store']);
+        Route::post('/subscribers/{subscriber}', [DashboardSubscriberController::class, 'update']);
+        Route::delete('/subscribers/{subscriber}', [DashboardSubscriberController::class, 'destroy']);
         Route::get('/reports/store/catalog', [DashboardStoreReportController::class, 'catalog']);
         Route::get('/reports/store/virtual-cut', [DashboardStoreReportController::class, 'virtualCut']);
         Route::get('/reports/store/pending-items', [DashboardStoreReportController::class, 'pendingItems']);

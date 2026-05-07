@@ -103,6 +103,90 @@ class SalesKpiController extends BaseController
         );
     }
 
+    public function satisfaction(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        return $this->success(
+            $this->sales->satisfaction(),
+            'Indicadores de satisfaccion obtenidos'
+        );
+    }
+
+    public function categories(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date'],
+        ]);
+
+        return $this->success(
+            $this->sales->categorySales(
+                $validated['startDate'] ?? null,
+                $validated['endDate'] ?? null,
+            ),
+            'Venta por categorias obtenida'
+        );
+    }
+
+    public function segments(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        return $this->success(
+            $this->sales->segments(),
+            'Segmentos obtenidos'
+        );
+    }
+
+    public function paymentForms(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        return $this->success(
+            $this->sales->paymentForms(),
+            'Formas de pago obtenidas'
+        );
+    }
+
+    public function geographic(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        return $this->success(
+            $this->sales->geographicSales(),
+            'Venta geografica obtenida'
+        );
+    }
+
+    public function app(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'year' => ['nullable', 'integer', 'min:2020', 'max:2100'],
+        ]);
+
+        return $this->success(
+            $this->sales->appInstallations($validated['year'] ?? null),
+            'Instalaciones APP obtenidas'
+        );
+    }
+
     public function orders(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {

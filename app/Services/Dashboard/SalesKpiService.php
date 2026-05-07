@@ -467,6 +467,424 @@ class SalesKpiService
         ];
     }
 
+    public function satisfaction(): array
+    {
+        $now = now();
+
+        $byCountry = $this->otifRows([
+            'select' => 'countries.pai_nombre AS country, p.ped_origen AS origin',
+            'groupBy' => ['countries.pai_nombre', 'p.ped_origen'],
+            'orderBy' => ['countries.pai_nombre', 'otif DESC'],
+        ])->map(fn (object $row) => [
+            'country' => (string) $row->country,
+            'origin' => (string) $row->origin,
+            'otif' => round((float) $row->otif, 2),
+        ])->values()->all();
+
+        $byPaymentType = $this->otifRows([
+            'select' => 'countries.pai_nombre AS country, p.ped_origen AS origin, pay.ppa_tipo AS paymentType',
+            'groupBy' => ['pay.ppa_tipo', 'countries.pai_nombre', 'p.ped_origen'],
+            'orderBy' => ['countries.pai_nombre', 'otif DESC'],
+        ])->map(fn (object $row) => [
+            'country' => (string) $row->country,
+            'origin' => (string) $row->origin,
+            'paymentType' => (string) $row->paymentType,
+            'otif' => round((float) $row->otif, 2),
+        ])->values()->all();
+
+        $byCheckout = $this->otifRows([
+            'select' => 'countries.pai_nombre AS country, p.ped_origen AS origin, p.ped_checkout AS checkout',
+            'groupBy' => ['p.ped_checkout', 'countries.pai_nombre', 'p.ped_origen'],
+            'orderBy' => ['countries.pai_nombre', 'otif DESC'],
+        ])->map(fn (object $row) => [
+            'country' => (string) $row->country,
+            'origin' => (string) $row->origin,
+            'checkout' => (string) $row->checkout,
+            'otif' => round((float) $row->otif, 2),
+        ])->values()->all();
+
+        $byStore = $this->otifRows([
+            'joinStores' => true,
+            'select' => 'countries.pai_nombre AS country, stores.tie_nombre AS store',
+            'groupBy' => ['countries.pai_nombre', 'stores.tie_nombre'],
+            'orderBy' => ['countries.pai_nombre', 'otif DESC'],
+        ])->map(fn (object $row) => [
+            'country' => (string) $row->country,
+            'store' => (string) $row->store,
+            'otif' => round((float) $row->otif, 2),
+        ])->values()->all();
+
+        return [
+            'filters' => [
+                'month' => $now->month,
+                'year' => $now->year,
+                'monthLabel' => $now->translatedFormat('F Y'),
+                'deliveryDays' => 7,
+            ],
+            'legend' => [
+                ['label' => '0% - 25%', 'class' => 'range25', 'color' => '#ef4444'],
+                ['label' => '25% - 50%', 'class' => 'range50', 'color' => '#f59e0b'],
+                ['label' => '50% - 75%', 'class' => 'range75', 'color' => '#facc15'],
+                ['label' => '75% - 100%', 'class' => 'range100', 'color' => '#16a34a'],
+            ],
+            'byCountry' => $byCountry,
+            'byPaymentType' => $byPaymentType,
+            'byCheckout' => $byCheckout,
+            'byStore' => [
+                'countries' => collect($byStore)->pluck('country')->unique()->values()->all(),
+                'rows' => $byStore,
+            ],
+        ];
+    }
+
+    public function categorySales(?string $startDate = null, ?string $endDate = null): array
+    {
+        $end = Carbon::parse($endDate ?: now()->toDateString())->toDateString();
+        $start = Carbon::parse($startDate ?: Carbon::parse($end)->subDays(3)->toDateString())->toDateString();
+
+        if ($start > $end) {
+            throw ValidationException::withMessages([
+                'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+            ]);
+        }
+
+        $rows = collect(DB::select(
+            "SELECT *
+            FROM (
+                SELECT
+                    p.ped_id_pais AS countryId,
+                    countries.pai_nombre AS country,
+                    DATE(pay.ppa_fecha) AS date,
+                    categories.cat_nombre AS category,
+                    CONVERT(SUM(detail.car_cantidad * ((detail.car_precio * (CASE WHEN p.ped_id_pais = 2 THEN 0.13049 WHEN p.ped_id_pais = 3 THEN 0.0017594 ELSE 1 END)) * (1 - (detail.car_descuento / 100)))) / 1000, DECIMAL(10, 2)) AS sale
+                FROM stj_pedidos AS p
+                INNER JOIN stj_pedidos_pago AS pay ON pay.ppa_pedido = p.ped_id AND pay.ppa_estado = 'APROBADA'
+                INNER JOIN stj_paises AS countries ON countries.pai_id = p.ped_id_pais
+                INNER JOIN stj_pedidos_detalle AS detail ON detail.car_ref = pay.ppa_ref
+                INNER JOIN stj_productos AS products ON detail.car_producto = products.pro_id
+                INNER JOIN stj_categorias AS categories ON categories.cat_id = products.pro_categoria
+                INNER JOIN stj_sub_categorias AS subcategories ON subcategories.sca_id = products.pro_sub_categoria
+                WHERE detail.car_accion = 'AGREGADO'
+                    AND DATE(pay.ppa_fecha) BETWEEN ? AND ?
+                GROUP BY p.ped_id_pais, countries.pai_nombre, DATE(pay.ppa_fecha), categories.cat_nombre
+                UNION
+                SELECT
+                    0 AS countryId,
+                    'REGIONAL' AS country,
+                    DATE(pay.ppa_fecha) AS date,
+                    categories.cat_nombre AS category,
+                    CONVERT(SUM(detail.car_cantidad * ((detail.car_precio * (CASE WHEN p.ped_id_pais = 2 THEN 0.13049 WHEN p.ped_id_pais = 3 THEN 0.0017594 ELSE 1 END)) * (1 - (detail.car_descuento / 100)))) / 1000, DECIMAL(10, 2)) AS sale
+                FROM stj_pedidos AS p
+                INNER JOIN stj_pedidos_pago AS pay ON pay.ppa_pedido = p.ped_id AND pay.ppa_estado = 'APROBADA'
+                INNER JOIN stj_paises AS countries ON countries.pai_id = p.ped_id_pais
+                INNER JOIN stj_pedidos_detalle AS detail ON detail.car_ref = pay.ppa_ref
+                INNER JOIN stj_productos AS products ON detail.car_producto = products.pro_id
+                INNER JOIN stj_categorias AS categories ON categories.cat_id = products.pro_categoria
+                INNER JOIN stj_sub_categorias AS subcategories ON subcategories.sca_id = products.pro_sub_categoria
+                WHERE detail.car_accion = 'AGREGADO'
+                    AND DATE(pay.ppa_fecha) BETWEEN ? AND ?
+                GROUP BY DATE(pay.ppa_fecha), categories.cat_nombre
+            ) AS sales
+            ORDER BY sale DESC",
+            [$start, $end, $start, $end],
+        ))
+            ->map(fn (object $row) => [
+                'countryId' => (int) $row->countryId,
+                'country' => (string) $row->country,
+                'date' => (string) $row->date,
+                'category' => (string) $row->category,
+                'sale' => (float) $row->sale,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'startDate' => $start,
+                'endDate' => $end,
+                'currency' => 'USD',
+                'unit' => 'thousands',
+            ],
+            'countries' => [
+                ['id' => 0, 'label' => 'Regional', 'country' => 'REGIONAL'],
+                ['id' => 1, 'label' => 'El Salvador', 'country' => 'El Salvador'],
+                ['id' => 2, 'label' => 'Guatemala', 'country' => 'Guatemala'],
+                ['id' => 3, 'label' => 'Costa Rica', 'country' => 'Costa Rica'],
+                ['id' => 7, 'label' => 'Honduras', 'country' => 'Honduras'],
+            ],
+            'dates' => $this->dateRange($start, $end),
+            'categories' => collect($rows)->pluck('category')->unique()->values()->all(),
+            'rows' => $rows,
+        ];
+    }
+
+    public function segments(): array
+    {
+        $hnlUsdRate = $this->latestHnlUsdRate();
+
+        $countries = [
+            1 => ['label' => 'El Salvador', 'rate' => 1.0, 'splitOrigin' => true],
+            2 => ['label' => 'Guatemala', 'rate' => 0.13049, 'splitOrigin' => false],
+            3 => ['label' => 'Costa Rica', 'rate' => 0.0017594, 'splitOrigin' => false],
+            7 => ['label' => 'Honduras', 'rate' => $hnlUsdRate['rate'], 'splitOrigin' => false],
+        ];
+
+        $rows = DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', function ($join) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->whereMonth('pay.ppa_fecha', now()->month)
+            ->whereYear('pay.ppa_fecha', now()->year)
+            ->whereIn('p.ped_id_pais', array_keys($countries))
+            ->groupBy('p.ped_id_pais', 'p.ped_origen', 'pay.ppa_tipo', 'p.ped_checkout')
+            ->selectRaw('
+                p.ped_id_pais AS countryId,
+                p.ped_origen AS origin,
+                pay.ppa_tipo AS paymentType,
+                p.ped_checkout AS checkout,
+                SUM(pay.ppa_monto_senv) AS amount,
+                SUM(pay.ppa_articulos) AS items,
+                COUNT(*) AS orders,
+                AVG(pay.ppa_monto_senv / NULLIF(pay.ppa_articulos, 0)) AS averageTicket
+            ')
+            ->get();
+
+        $segments = [];
+
+        foreach ($rows as $row) {
+            $country = $countries[(int) $row->countryId] ?? null;
+
+            if (! $country) {
+                continue;
+            }
+
+            $rate = (float) $country['rate'];
+            $label = (bool) $country['splitOrigin']
+                ? $country['label'].' '.ucfirst(strtolower((string) $row->origin))
+                : $country['label'];
+            $key = $this->segmentKey((int) $row->countryId, (string) $row->origin, (bool) $country['splitOrigin']);
+
+            $segments[] = [
+                'key' => $key,
+                'label' => $label,
+                'countryId' => (int) $row->countryId,
+                'country' => $country['label'],
+                'origin' => (string) $row->origin,
+                'paymentType' => (string) $row->paymentType,
+                'checkout' => (string) $row->checkout,
+                'orders' => (int) $row->orders,
+                'items' => (int) $row->items,
+                'amount' => round((float) $row->amount * $rate, 2),
+                'averageTicket' => round((float) $row->averageTicket * $rate, 2),
+            ];
+        }
+
+        $matrix = $this->segmentMatrix($segments);
+        $ticketMatrix = $this->segmentTicketMatrix($segments);
+
+        return [
+            'filters' => [
+                'month' => now()->month,
+                'year' => now()->year,
+                'monthLabel' => now()->translatedFormat('F Y'),
+                'currency' => 'USD',
+                'exchangeRates' => [
+                    'GT' => 0.13049,
+                    'CR' => 0.0017594,
+                    'HN' => $hnlUsdRate,
+                ],
+            ],
+            'segments' => [
+                ['key' => 'sv_web', 'label' => 'El Salvador Web'],
+                ['key' => 'sv_app', 'label' => 'El Salvador App'],
+                ['key' => 'gt', 'label' => 'Guatemala'],
+                ['key' => 'cr', 'label' => 'Costa Rica'],
+                ['key' => 'hn', 'label' => 'Honduras'],
+            ],
+            'sales' => [
+                'rows' => $matrix,
+                'totals' => $this->segmentTotals($matrix),
+            ],
+            'averageTicket' => [
+                'rows' => $ticketMatrix,
+            ],
+            'rawRows' => $segments,
+        ];
+    }
+
+    public function paymentForms(): array
+    {
+        $hnlUsdRate = $this->latestHnlUsdRate();
+        $countries = [
+            1 => ['label' => 'El Salvador', 'rate' => 1.0, 'splitOrigin' => true],
+            2 => ['label' => 'Guatemala', 'rate' => 0.13049, 'splitOrigin' => false],
+            3 => ['label' => 'Costa Rica', 'rate' => 0.0017594, 'splitOrigin' => false],
+            7 => ['label' => 'Honduras', 'rate' => $hnlUsdRate['rate'], 'splitOrigin' => false],
+        ];
+
+        $rows = DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', function ($join) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->whereMonth('pay.ppa_fecha', now()->month)
+            ->whereYear('pay.ppa_fecha', now()->year)
+            ->whereIn('p.ped_id_pais', array_keys($countries))
+            ->groupBy('p.ped_id_pais', 'p.ped_origen', 'p.ped_checkout', 'pay.ppa_tipo', 'pay.ppa_emisor')
+            ->selectRaw('
+                p.ped_id_pais AS countryId,
+                p.ped_origen AS origin,
+                p.ped_checkout AS checkout,
+                pay.ppa_tipo AS paymentType,
+                pay.ppa_emisor AS issuer,
+                SUM(pay.ppa_monto_senv) AS amount
+            ')
+            ->get()
+            ->map(function (object $row) use ($countries) {
+                $country = $countries[(int) $row->countryId];
+                $issuer = strtoupper((string) ($row->paymentType === 'EFECTIVO' ? 'EFECTIVO' : $row->issuer));
+
+                return [
+                    'segmentKey' => $this->segmentKey((int) $row->countryId, (string) $row->origin, (bool) $country['splitOrigin']),
+                    'segment' => (bool) $country['splitOrigin']
+                        ? $country['label'].' '.ucfirst(strtolower((string) $row->origin))
+                        : $country['label'],
+                    'countryId' => (int) $row->countryId,
+                    'country' => $country['label'],
+                    'origin' => (string) $row->origin,
+                    'checkout' => (string) $row->checkout,
+                    'paymentType' => (string) $row->paymentType,
+                    'issuer' => $issuer,
+                    'amount' => round((float) $row->amount * (float) $country['rate'], 2),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'month' => now()->month,
+                'year' => now()->year,
+                'monthLabel' => now()->translatedFormat('F Y'),
+                'currency' => 'USD',
+                'exchangeRates' => [
+                    'GT' => 0.13049,
+                    'CR' => 0.0017594,
+                    'HN' => $hnlUsdRate,
+                ],
+            ],
+            'segments' => [
+                ['key' => 'sv_web', 'label' => 'El Salvador Web'],
+                ['key' => 'sv_app', 'label' => 'El Salvador App'],
+                ['key' => 'gt', 'label' => 'Guatemala'],
+                ['key' => 'cr', 'label' => 'Costa Rica'],
+                ['key' => 'hn', 'label' => 'Honduras'],
+            ],
+            'issuers' => ['VISA', 'MASTERCARD', 'AMEX', 'EFECTIVO'],
+            'store' => $this->paymentFormMatrix($rows, 'TIENDA'),
+            'delivery' => $this->paymentFormMatrix($rows, 'DOMICILIO'),
+            'rawRows' => $rows,
+        ];
+    }
+
+    public function geographicSales(): array
+    {
+        $rows = DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', function ($join) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->whereMonth('pay.ppa_fecha', now()->month)
+            ->whereYear('pay.ppa_fecha', now()->year)
+            ->where('p.ped_pais', 'El Salvador')
+            ->groupBy('p.ped_estado')
+            ->orderByDesc(DB::raw('SUM(pay.ppa_monto_senv)'))
+            ->selectRaw('p.ped_estado AS department, SUM(pay.ppa_monto_senv) AS total')
+            ->get()
+            ->map(function (object $row) {
+                $department = trim((string) $row->department);
+
+                return [
+                    'id' => $this->salvadorDepartmentId($department),
+                    'department' => $department,
+                    'total' => round((float) $row->total, 2),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'country' => 'El Salvador',
+                'countryId' => 1,
+                'month' => now()->month,
+                'year' => now()->year,
+                'monthLabel' => now()->translatedFormat('F Y'),
+                'currency' => 'USD',
+            ],
+            'summary' => [
+                'departments' => count($rows),
+                'total' => round((float) array_sum(array_column($rows, 'total')), 2),
+            ],
+            'rows' => $rows,
+        ];
+    }
+
+    public function appInstallations(?int $year = null): array
+    {
+        $selectedYear = $year ?: now()->year;
+
+        $rows = DB::table('stj_tokens')
+            ->whereYear('tok_fecha', $selectedYear)
+            ->groupByRaw('MONTH(tok_fecha)')
+            ->orderByRaw('MONTH(tok_fecha) ASC')
+            ->selectRaw("
+                MONTH(tok_fecha) AS month,
+                SUM(CASE WHEN tok_tipo = 'Android' THEN 1 ELSE 0 END) AS android,
+                SUM(CASE WHEN tok_tipo = 'Ios' THEN 1 ELSE 0 END) AS ios
+            ")
+            ->get()
+            ->map(fn (object $row) => [
+                'month' => (int) $row->month,
+                'monthLabel' => Carbon::create($selectedYear, (int) $row->month, 1)->translatedFormat('M'),
+                'android' => (int) $row->android,
+                'ios' => (int) $row->ios,
+            ])
+            ->values()
+            ->all();
+
+        $totals = [
+            'android' => (int) array_sum(array_column($rows, 'android')),
+            'ios' => (int) array_sum(array_column($rows, 'ios')),
+        ];
+
+        $years = DB::table('stj_tokens')
+            ->selectRaw('DISTINCT YEAR(tok_fecha) AS year')
+            ->whereNotNull('tok_fecha')
+            ->orderByDesc('year')
+            ->pluck('year')
+            ->map(fn ($year) => (int) $year)
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'year' => $selectedYear,
+            ],
+            'years' => $years,
+            'platforms' => [
+                ['key' => 'android', 'label' => 'Android', 'color' => '#16a34a'],
+                ['key' => 'ios', 'label' => 'iOS', 'color' => '#db2777'],
+            ],
+            'summary' => [
+                ...$totals,
+                'total' => array_sum($totals),
+            ],
+            'rows' => $rows,
+        ];
+    }
+
     private function summary(int $countryId, string $start, string $end): array
     {
         $rows = DB::select(
@@ -1041,6 +1459,214 @@ class SalesKpiService
                 'discountAmount' => array_sum(array_column($rows, 'discountAmount')) + $unassigned['discountAmount'],
             ],
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $definition
+     */
+    private function otifRows(array $definition)
+    {
+        $query = DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', 'pay.ppa_pedido', '=', 'p.ped_id')
+            ->join('stj_paises as countries', 'countries.pai_id', '=', 'p.ped_id_pais')
+            ->where('pay.ppa_estado', 'APROBADA')
+            ->whereMonth('pay.ppa_fecha', now()->month)
+            ->whereYear('pay.ppa_fecha', now()->year);
+
+        if ($definition['joinStores'] ?? false) {
+            $query->join('stj_tiendas as stores', function ($join) {
+                $join->on('stores.tie_codigo', '=', 'p.ped_tienda')
+                    ->on('stores.tie_pais', '=', 'p.ped_id_pais');
+            });
+        }
+
+        foreach ($definition['groupBy'] as $group) {
+            $query->groupByRaw($group);
+        }
+
+        foreach ($definition['orderBy'] as $order) {
+            $query->orderByRaw($order);
+        }
+
+        return $query
+            ->selectRaw($definition['select'].",
+                COALESCE(
+                    (
+                        IFNULL(SUM(CASE WHEN DATE(pay.ppa_fecha_entregado) <= DATE(DATE_ADD(pay.ppa_fecha, INTERVAL 7 DAY)) THEN pay.ppa_articulos_final END), 0)
+                        / NULLIF(IFNULL(SUM(pay.ppa_articulos), 0), 0)
+                    ) * 100,
+                    0
+                ) AS otif
+            ")
+            ->get();
+    }
+
+    private function segmentKey(int $countryId, string $origin, bool $splitOrigin): string
+    {
+        if ($countryId === 1 && $splitOrigin) {
+            return strtoupper($origin) === 'APP' ? 'sv_app' : 'sv_web';
+        }
+
+        return match ($countryId) {
+            2 => 'gt',
+            3 => 'cr',
+            7 => 'hn',
+            default => 'country_'.$countryId,
+        };
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $segments
+     * @return array<int, array<string, mixed>>
+     */
+    private function segmentMatrix(array $segments): array
+    {
+        return collect($segments)
+            ->groupBy(fn (array $row) => $row['key'].'|'.$row['paymentType'])
+            ->map(function ($rows) {
+                $first = $rows->first();
+                $store = (float) $rows
+                    ->where('checkout', 'TIENDA')
+                    ->sum('amount');
+                $delivery = (float) $rows
+                    ->where('checkout', 'DOMICILIO')
+                    ->sum('amount');
+
+                return [
+                    'key' => $first['key'],
+                    'label' => $first['label'],
+                    'paymentType' => $first['paymentType'],
+                    'store' => round($store, 2),
+                    'delivery' => round($delivery, 2),
+                    'total' => round($store + $delivery, 2),
+                ];
+            })
+            ->sortBy(fn (array $row) => $this->segmentSort($row['key']).$row['paymentType'])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $segments
+     * @return array<int, array<string, mixed>>
+     */
+    private function segmentTicketMatrix(array $segments): array
+    {
+        return collect($segments)
+            ->groupBy(fn (array $row) => $row['key'].'|'.$row['paymentType'])
+            ->map(function ($rows) {
+                $first = $rows->first();
+                $store = $rows->firstWhere('checkout', 'TIENDA');
+                $delivery = $rows->firstWhere('checkout', 'DOMICILIO');
+
+                return [
+                    'key' => $first['key'],
+                    'label' => $first['label'],
+                    'paymentType' => $first['paymentType'],
+                    'store' => round((float) ($store['averageTicket'] ?? 0), 2),
+                    'delivery' => round((float) ($delivery['averageTicket'] ?? 0), 2),
+                ];
+            })
+            ->sortBy(fn (array $row) => $this->segmentSort($row['key']).$row['paymentType'])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<string, mixed>
+     */
+    private function segmentTotals(array $rows): array
+    {
+        $byPayment = collect($rows)
+            ->groupBy('paymentType')
+            ->map(fn ($paymentRows, string $paymentType) => [
+                'paymentType' => $paymentType,
+                'store' => round((float) $paymentRows->sum('store'), 2),
+                'delivery' => round((float) $paymentRows->sum('delivery'), 2),
+                'total' => round((float) $paymentRows->sum('total'), 2),
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'byPaymentType' => $byPayment,
+            'store' => round((float) array_sum(array_column($rows, 'store')), 2),
+            'delivery' => round((float) array_sum(array_column($rows, 'delivery')), 2),
+            'total' => round((float) array_sum(array_column($rows, 'total')), 2),
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function paymentFormMatrix(array $rows, string $checkout): array
+    {
+        $segments = ['sv_web', 'sv_app', 'gt', 'cr', 'hn'];
+
+        return collect(['VISA', 'MASTERCARD', 'AMEX', 'EFECTIVO'])
+            ->map(function (string $issuer) use ($rows, $checkout, $segments) {
+                $values = [];
+
+                foreach ($segments as $segment) {
+                    $values[$segment] = round((float) collect($rows)
+                        ->where('checkout', $checkout)
+                        ->where('issuer', $issuer)
+                        ->where('segmentKey', $segment)
+                        ->sum('amount'), 2);
+                }
+
+                return [
+                    'issuer' => $issuer,
+                    'values' => $values,
+                    'total' => round((float) array_sum($values), 2),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function salvadorDepartmentId(string $department): ?string
+    {
+        $normalized = str($department)
+            ->ascii()
+            ->lower()
+            ->replaceMatches('/\s+/', ' ')
+            ->trim()
+            ->toString();
+
+        $id = match ($normalized) {
+            'ahuachapan' => 1,
+            'cabanas' => 2,
+            'chalatenango' => 3,
+            'cuscatlan' => 4,
+            'la libertad' => 5,
+            'la paz' => 6,
+            'la union' => 7,
+            'morazan' => 8,
+            'san miguel' => 9,
+            'san salvador' => 10,
+            'saint ana', 'santa ana' => 11,
+            'san vicente' => 12,
+            'sonsonate' => 13,
+            'usulutan' => 14,
+            default => null,
+        };
+
+        return $id !== null ? str_pad((string) $id, 2, '0', STR_PAD_LEFT) : null;
+    }
+
+    private function segmentSort(string $key): string
+    {
+        return match ($key) {
+            'sv_web' => '01',
+            'sv_app' => '02',
+            'gt' => '03',
+            'cr' => '04',
+            'hn' => '05',
+            default => '99'.$key,
+        };
     }
 
     private function activePromotions(int $countryId, string $start, string $end): array
