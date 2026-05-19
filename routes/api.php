@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
 use App\Http\Controllers\Api\Dashboard\AppointmentController as DashboardAppointmentController;
+use App\Http\Controllers\Api\Dashboard\ClaimController as DashboardClaimController;
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
 use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
@@ -85,6 +86,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
         Route::get('/appointments/catalog', [DashboardAppointmentController::class, 'catalog']);
         Route::get('/appointments', [DashboardAppointmentController::class, 'index']);
+        Route::get('/claims', [DashboardClaimController::class, 'index']);
+        Route::post('/claims', [DashboardClaimController::class, 'store']);
+        Route::post('/claims/{claim}', [DashboardClaimController::class, 'update']);
+        Route::delete('/claims/{claim}', [DashboardClaimController::class, 'destroy']);
         Route::get('/subscribers', [DashboardSubscriberController::class, 'index']);
         Route::post('/subscribers', [DashboardSubscriberController::class, 'store']);
         Route::post('/subscribers/{subscriber}', [DashboardSubscriberController::class, 'update']);
