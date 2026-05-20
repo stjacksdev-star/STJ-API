@@ -388,9 +388,9 @@ class PromotionService
         return [
             'origins' => ['TODO', 'WEB', 'APP'],
             'checkoutTypes' => ['TODO', 'D', 'T'],
-            'types' => ['TODO', 'CATEGORIA', 'SUB-CATEGORIA', 'SKU', 'TARJETA', 'ENTREGA'],
-            'promotionTypes' => ['DESCUENTO', 'DESCUENTO-SKU', 'PUNTO-PRECIO', 'CONDICION-SKU', 'CONDICION-ENTREGA', 'CONDICION-PAGO'],
-            'restrictions' => ['TOTAL_COMPRA', '21/2', '2x1', '3x2', '2doPrecio', 'TARJETA', 'ENTREGA', '2xPP'],
+            'types' => ['TODO', 'SKU'],
+            'promotionTypes' => ['DESCUENTO', 'CONDICION-SKU', 'PUNTO-PRECIO', 'DESCUENTO-SKU'],
+            'restrictions' => ['21/2', '2x1', '2doPrecio', '2xPP'],
         ];
     }
 

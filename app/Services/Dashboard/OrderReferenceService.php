@@ -300,6 +300,7 @@ class OrderReferenceService
         $query = DB::table('stj_pedidos as p')
             ->join('stj_pedidos_pago as pay', function ($join) {
                 $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_tipo', '=', 'TARJETA')
                     ->where('pay.ppa_estado', '=', 'APROBADA');
             })
             ->leftJoin('stj_pedidos_tienda as pt', 'pt.pti_pedido', '=', 'p.ped_id')
@@ -405,6 +406,8 @@ class OrderReferenceService
             $discount = max(0, min(100, (float) ($data['discount'] ?? 0)));
             $actorName = $this->actorName($actor);
 
+            $this->ensureCardLineDoesNotIncreasePayment($line, $product['price'], $quantity, $discount);
+
             DB::table('stj_pedidos_detalle')
                 ->where('car_id', $lineId)
                 ->update([
@@ -474,6 +477,13 @@ class OrderReferenceService
             $originalPaid = round((float) ($order->ppa_monto ?? 0), 2);
             $difference = round($calculatedPaid - $originalPaid, 2);
             $isCardPayment = strtoupper((string) ($order->ppa_tipo ?? '')) === 'TARJETA';
+
+            if ($isCardPayment && $difference > 0.009) {
+                throw ValidationException::withMessages([
+                    'order' => 'No se puede procesar un pedido pagado con tarjeta cuando el detalle supera el total aprobado.',
+                ]);
+            }
+
             $refund = $isCardPayment && $difference < 0 ? abs($difference) : 0.0;
             $originalItems = (int) ($order->ppa_articulos ?? 0);
             $originalProducts = round((float) ($order->ppa_monto_senv ?? 0), 2);
@@ -665,19 +675,51 @@ class OrderReferenceService
                     ->where('pay.ppa_estado', '=', 'APROBADA');
             })
             ->join('stj_pedidos as order', 'order.ped_id', '=', 'pay.ppa_pedido')
+            ->leftJoin('stj_pedidos_direccion as shipping', 'shipping.pdi_pedido', '=', 'order.ped_id')
             ->leftJoin('stj_productos as product', 'product.pro_id', '=', 'detail.car_producto')
             ->selectRaw('
                 detail.*,
                 pay.ppa_id,
+                pay.ppa_ref,
+                pay.ppa_tipo,
+                pay.ppa_monto,
                 order.ped_id,
                 order.ped_id_pais,
                 order.ped_estatus,
+                order.ped_checkout,
+                shipping.pdi_costo_envio_final,
                 product.pro_codigo,
                 product.pro_nombre
             ')
             ->where('detail.car_id', $lineId)
             ->where('detail.car_accion', 'AGREGADO')
+            ->lockForUpdate()
             ->first();
+    }
+
+    private function ensureCardLineDoesNotIncreasePayment(object $line, float $price, int $quantity, float $discount): void
+    {
+        if (strtoupper((string) ($line->ppa_tipo ?? '')) !== 'TARJETA') {
+            return;
+        }
+
+        $products = $this->products((string) $line->ppa_ref, (int) $line->ped_id_pais);
+        $currentSubtotal = collect($products)
+            ->sum(fn (array $product) => (float) ($product['chargedSubtotal'] ?? 0));
+        $editedLineSubtotal = collect($products)
+            ->first(fn (array $product) => (int) ($product['id'] ?? 0) === (int) $line->car_id)['chargedSubtotal'] ?? 0;
+        $newLineSubtotal = $quantity * ($price * (1 - ($discount / 100)));
+        $shipping = (string) ($line->ped_checkout ?? '') === 'DOMICILIO'
+            ? (float) ($line->pdi_costo_envio_final ?? 0)
+            : 0.0;
+        $newCalculatedPaid = round($currentSubtotal - (float) $editedLineSubtotal + $newLineSubtotal + $shipping, 2);
+        $approvedPaid = round((float) ($line->ppa_monto ?? 0), 2);
+
+        if ($newCalculatedPaid > $approvedPaid + 0.009) {
+            throw ValidationException::withMessages([
+                'line' => 'No se puede aumentar el monto de un pedido pagado con tarjeta. El detalle debe bajar o mantenerse igual al total aprobado.',
+            ]);
+        }
     }
 
     private function orderForProcessing(string $reference, int $countryId): ?object

@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProdu
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
 use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
+use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
 
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -94,6 +95,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/subscribers', [DashboardSubscriberController::class, 'store']);
         Route::post('/subscribers/{subscriber}', [DashboardSubscriberController::class, 'update']);
         Route::delete('/subscribers/{subscriber}', [DashboardSubscriberController::class, 'destroy']);
+        Route::get('/user-country-access', [DashboardUserCountryAccessController::class, 'index']);
+        Route::get('/user-country-access/current', [DashboardUserCountryAccessController::class, 'current']);
+        Route::get('/user-country-access/users', [DashboardUserCountryAccessController::class, 'users']);
+        Route::post('/user-country-access', [DashboardUserCountryAccessController::class, 'store']);
+        Route::delete('/user-country-access/{assignment}', [DashboardUserCountryAccessController::class, 'destroy']);
         Route::get('/reports/store/catalog', [DashboardStoreReportController::class, 'catalog']);
         Route::get('/reports/store/virtual-cut', [DashboardStoreReportController::class, 'virtualCut']);
         Route::get('/reports/store/pending-items', [DashboardStoreReportController::class, 'pendingItems']);
