@@ -74,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/products/country/countries', [DashboardProductCountryController::class, 'countries']);
         Route::post('/products/country/import', [DashboardProductCountryController::class, 'import']);
         Route::post('/products/country/deactivate', [DashboardProductCountryController::class, 'deactivate']);
+        Route::get('/sales/catalog', [DashboardSalesKpiController::class, 'catalog']);
         Route::get('/sales/kpi', [DashboardSalesKpiController::class, 'show']);
         Route::get('/sales/regional-chart', [DashboardSalesKpiController::class, 'regionalSalesChart']);
         Route::get('/sales/conversion', [DashboardSalesKpiController::class, 'conversionChart']);

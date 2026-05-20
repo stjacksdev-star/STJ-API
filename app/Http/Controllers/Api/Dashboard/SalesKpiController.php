@@ -35,6 +35,22 @@ class SalesKpiController extends BaseController
         );
     }
 
+    public function catalog(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['nullable', 'string', 'max:3'],
+        ]);
+
+        return $this->success(
+            $this->sales->catalog($validated['country'] ?? null),
+            'Catalogo de ventas obtenido'
+        );
+    }
+
     public function regionalSalesChart(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {

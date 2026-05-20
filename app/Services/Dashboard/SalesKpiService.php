@@ -164,6 +164,19 @@ class SalesKpiService
         ];
     }
 
+    public function catalog(?string $country = null): array
+    {
+        $countryId = filled($country) ? $this->resolveCountryId((string) $country) : null;
+
+        return [
+            'countries' => $this->countries(),
+            'stores' => $countryId ? $this->stores($countryId) : [],
+            'filters' => [
+                'country' => $countryId,
+            ],
+        ];
+    }
+
     public function regionalSalesChart(?string $startDate = null, ?string $endDate = null): array
     {
         $end = Carbon::parse($endDate ?: now()->toDateString())->toDateString();
