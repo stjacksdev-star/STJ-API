@@ -60,6 +60,7 @@ class ClaimService
         $query = DB::table('stj_reclamos')
             ->select([
                 'rec_id',
+                'rec_pais',
                 'rec_numero_gestion',
                 'rec_fecha_registro',
                 'rec_pedido',
@@ -84,6 +85,10 @@ class ClaimService
             ])
             ->orderByDesc('rec_fecha_registro')
             ->orderByDesc('rec_id');
+
+        if (filled($filters['country'] ?? null)) {
+            $query->where('rec_pais', (int) $filters['country']);
+        }
 
         if (filled($filters['status'] ?? null)) {
             $query->where('rec_estado', $filters['status']);
@@ -198,6 +203,7 @@ class ClaimService
     {
         $payload = [
             'rec_numero_gestion' => $this->nullableString($data['managementNumber'] ?? null),
+            'rec_pais' => (int) $data['country'],
             'rec_stj' => $this->nullableString($data['stj'] ?? null),
             'rec_cliente_nombre' => trim((string) $data['customerName']),
             'rec_cliente_correo' => $this->nullableString($data['customerEmail'] ?? null),
@@ -237,6 +243,7 @@ class ClaimService
     {
         return [
             'id' => (int) $claim->rec_id,
+            'country' => $claim->rec_pais !== null ? (int) $claim->rec_pais : null,
             'managementNumber' => (string) $claim->rec_numero_gestion,
             'registeredAt' => $claim->rec_fecha_registro,
             'orderId' => $claim->rec_pedido !== null ? (int) $claim->rec_pedido : null,

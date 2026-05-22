@@ -21,6 +21,7 @@ class ClaimController extends BaseController
         }
 
         $validated = $request->validate([
+            'country' => ['nullable', 'integer', 'min:1'],
             'search' => ['nullable', 'string', 'max:150'],
             'status' => ['nullable', Rule::in(ClaimService::STATUSES)],
             'type' => ['nullable', Rule::in(ClaimService::TYPES)],
@@ -84,6 +85,7 @@ class ClaimController extends BaseController
                 'max:30',
                 Rule::unique('stj_reclamos', 'rec_numero_gestion')->ignore($claim, 'rec_id'),
             ],
+            'country' => ['required', 'integer', 'min:1'],
             'registeredAt' => ['nullable', 'date'],
             'orderId' => ['nullable', 'integer', 'min:1'],
             'stj' => ['nullable', 'string', 'max:50'],
