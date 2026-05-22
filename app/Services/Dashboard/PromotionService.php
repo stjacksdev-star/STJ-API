@@ -335,18 +335,8 @@ class PromotionService
             ->whereIn('pro_codigo', $codes)
             ->pluck('pro_id', 'pro_codigo');
 
-        $missing = collect($codes)
-            ->reject(fn (string $code) => $products->has($code))
-            ->values()
-            ->all();
-
-        if ($missing !== []) {
-            throw ValidationException::withMessages([
-                'products' => 'Articulos no encontrados: '.implode(', ', array_slice($missing, 0, 10)),
-            ]);
-        }
-
         return collect($rows)
+            ->filter(fn (array $row) => $products->has($row['code']))
             ->map(function (array $row) use ($products, $countryId, $promotionType) {
                 $price = $row['price'];
 
