@@ -103,8 +103,8 @@ class ClaimController extends BaseController
             'rejectionReason' => ['nullable', 'string'],
             'resolvedAt' => ['nullable', 'date'],
             'closedAt' => ['nullable', 'date'],
-            'registeredBy' => ['nullable', 'integer', 'min:1'],
-            'assignedTo' => ['nullable', 'integer', 'min:1'],
+            'registeredBy' => ['nullable', 'string', 'max:255'],
+            'assignedTo' => ['nullable', 'string', 'max:255'],
             'actor' => ['nullable', 'array'],
         ]);
     }

@@ -219,7 +219,7 @@ class ClaimService
             'rec_motivo_rechazo' => $this->nullableString($data['rejectionReason'] ?? null),
             'rec_fecha_resolucion' => $this->nullableDateTime($data['resolvedAt'] ?? null),
             'rec_fecha_cierre' => $this->nullableDateTime($data['closedAt'] ?? null),
-            'rec_usuario_asignado' => $this->nullableInt($data['assignedTo'] ?? null),
+            'rec_usuario_asignado' => $this->nullableString($data['assignedTo'] ?? null),
         ];
 
         if (! $updating || array_key_exists('orderId', $data)) {
@@ -227,7 +227,7 @@ class ClaimService
         }
 
         if (! $updating || array_key_exists('registeredBy', $data)) {
-            $payload['rec_usuario_registro'] = $this->nullableInt($data['registeredBy'] ?? null);
+            $payload['rec_usuario_registro'] = $this->nullableString($data['registeredBy'] ?? null);
         }
 
         if (! $updating) {
@@ -266,8 +266,8 @@ class ClaimService
             'rejectionReason' => $claim->rec_motivo_rechazo,
             'resolvedAt' => $claim->rec_fecha_resolucion,
             'closedAt' => $claim->rec_fecha_cierre,
-            'registeredBy' => $claim->rec_usuario_registro !== null ? (int) $claim->rec_usuario_registro : null,
-            'assignedTo' => $claim->rec_usuario_asignado !== null ? (int) $claim->rec_usuario_asignado : null,
+            'registeredBy' => $claim->rec_usuario_registro,
+            'assignedTo' => $claim->rec_usuario_asignado,
             'updatedAt' => $claim->rec_fecha_actualizacion ?? null,
         ];
     }
