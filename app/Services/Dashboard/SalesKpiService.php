@@ -982,12 +982,15 @@ class SalesKpiService
 
     private function visitsByDate(string $start, string $end, ?string $country): array
     {
+        [$startAt, $endBefore] = $this->dateTimeRange($start, $end);
+
         return DB::table('stj_visitas')
-            ->whereRaw('DATE(vis_fecha) BETWEEN ? AND ?', [$start, $end])
+            ->where('vis_fecha', '>=', $startAt)
+            ->where('vis_fecha', '<', $endBefore)
             ->when($country !== null, fn ($builder) => $builder->where('vis_pais', $country))
-            ->groupBy('vis_fecha')
-            ->orderBy('vis_fecha')
-            ->selectRaw('vis_fecha AS date, COUNT(*) AS visits')
+            ->groupByRaw('DATE(vis_fecha)')
+            ->orderByRaw('DATE(vis_fecha)')
+            ->selectRaw('DATE(vis_fecha) AS date, COUNT(*) AS visits')
             ->get()
             ->mapWithKeys(fn ($row) => [(string) $row->date => (int) $row->visits])
             ->all();
@@ -995,12 +998,15 @@ class SalesKpiService
 
     private function visitsByPlatform(string $start, string $end): array
     {
+        [$startAt, $endBefore] = $this->dateTimeRange($start, $end);
+
         return DB::table('stj_visitas')
-            ->whereRaw('DATE(vis_fecha) BETWEEN ? AND ?', [$start, $end])
-            ->groupBy('vis_fecha')
-            ->orderBy('vis_fecha')
+            ->where('vis_fecha', '>=', $startAt)
+            ->where('vis_fecha', '<', $endBefore)
+            ->groupByRaw('DATE(vis_fecha)')
+            ->orderByRaw('DATE(vis_fecha)')
             ->selectRaw("
-                vis_fecha AS date,
+                DATE(vis_fecha) AS date,
                 IFNULL(SUM(CASE WHEN vis_plataforma = 'WEB' THEN 1 ELSE 0 END), 0) AS web,
                 IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-ANDROID' THEN 1 ELSE 0 END), 0) AS android,
                 IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-IOS' THEN 1 ELSE 0 END), 0) AS ios
@@ -1018,8 +1024,11 @@ class SalesKpiService
 
     private function visitTotalsByCountry(string $start, string $end): array
     {
+        [$startAt, $endBefore] = $this->dateTimeRange($start, $end);
+
         return DB::table('stj_visitas')
-            ->whereRaw('DATE(vis_fecha) BETWEEN ? AND ?', [$start, $end])
+            ->where('vis_fecha', '>=', $startAt)
+            ->where('vis_fecha', '<', $endBefore)
             ->groupBy('vis_pais')
             ->orderByDesc('visits')
             ->selectRaw("COALESCE(NULLIF(vis_pais, ''), 'N/D') AS country, COUNT(*) AS visits")
@@ -1030,6 +1039,17 @@ class SalesKpiService
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function dateTimeRange(string $start, string $end): array
+    {
+        return [
+            Carbon::parse($start)->startOfDay()->toDateTimeString(),
+            Carbon::parse($end)->addDay()->startOfDay()->toDateTimeString(),
+        ];
     }
 
     private function approvedOrdersByDate(string $start, string $end, ?int $countryId): array
