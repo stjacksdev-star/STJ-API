@@ -775,10 +775,13 @@ class OrderReferenceService
     {
         return DB::table('stj_pedidos as p')
             ->leftJoin('stj_pedidos_tienda as pt', 'p.ped_id', '=', 'pt.pti_pedido')
-            ->leftJoin('stj_tiendas as store', function ($join) use ($countryId) {
-                $join->on('store.tie_codigo', '=', 'pt.pti_tienda')
-                    ->orOn('store.tie_codigo', '=', 'p.ped_tienda')
-                    ->where('store.tie_pais', '=', $countryId);
+            ->leftJoin('stj_tiendas as pickup_store', function ($join) use ($countryId) {
+                $join->on('pickup_store.tie_codigo', '=', 'pt.pti_tienda')
+                    ->where('pickup_store.tie_pais', '=', $countryId);
+            })
+            ->leftJoin('stj_tiendas as order_store', function ($join) use ($countryId) {
+                $join->on('order_store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('order_store.tie_pais', '=', $countryId);
             })
             ->join('stj_pedidos_pago as pay', function ($join) use ($reference) {
                 $join->on('pay.ppa_pedido', '=', 'p.ped_id')
@@ -794,8 +797,8 @@ class OrderReferenceService
                 p.ped_tienda,
                 pay.ppa_id,
                 pay.ppa_ref,
-                COALESCE(pt.pti_tienda, p.ped_tienda, store.tie_codigo) AS store_code,
-                store.tie_nombre AS store_name
+                COALESCE(pickup_store.tie_codigo, order_store.tie_codigo, pt.pti_tienda, p.ped_tienda) AS store_code,
+                COALESCE(pickup_store.tie_nombre, order_store.tie_nombre) AS store_name
             ')
             ->lockForUpdate()
             ->first();
@@ -1441,10 +1444,13 @@ class OrderReferenceService
             ->leftJoin('stj_pedidos_direccion as pd', 'p.ped_id', '=', 'pd.pdi_pedido')
             ->leftJoin('stj_direcciones as d', 'pd.pdi_direccion', '=', 'd.dir_id')
             ->leftJoin('stj_pedidos_tienda as pt', 'p.ped_id', '=', 'pt.pti_pedido')
-            ->leftJoin('stj_tiendas as t', function ($join) use ($countryId) {
-                $join->on('pt.pti_tienda', '=', 't.tie_codigo')
-                    ->orOn('p.ped_tienda', '=', 't.tie_codigo')
-                    ->where('t.tie_pais', '=', $countryId);
+            ->leftJoin('stj_tiendas as pickup_store', function ($join) use ($countryId) {
+                $join->on('pickup_store.tie_codigo', '=', 'pt.pti_tienda')
+                    ->where('pickup_store.tie_pais', '=', $countryId);
+            })
+            ->leftJoin('stj_tiendas as order_store', function ($join) use ($countryId) {
+                $join->on('order_store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('order_store.tie_pais', '=', $countryId);
             })
             ->leftJoin('stj_pedidos_pago as pay', 'pay.ppa_pedido', '=', 'p.ped_id')
             ->leftJoin('stj_mensajes_fac as mf', function ($join) {
@@ -1459,10 +1465,13 @@ class OrderReferenceService
                 'pd.*',
                 'd.*',
                 'pt.*',
-                't.*',
                 'pay.*',
                 'mf.*',
             ])
+            ->selectRaw('
+                COALESCE(pickup_store.tie_codigo, order_store.tie_codigo, pt.pti_tienda, p.ped_tienda) AS tie_codigo,
+                COALESCE(pickup_store.tie_nombre, order_store.tie_nombre) AS tie_nombre
+            ')
             ->first();
     }
 
