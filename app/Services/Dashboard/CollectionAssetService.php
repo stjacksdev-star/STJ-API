@@ -19,13 +19,18 @@ class CollectionAssetService
     public function index(int $collectionId): array
     {
         $collection = $this->collection($collectionId);
-        $linkPrefix = $this->linkPrefix($collectionId);
+        $linkPrefix = $this->linkPrefix($collection);
+        $legacyLinkPrefix = $this->legacyLinkPrefix($collectionId);
 
         return [
             'collection' => $collection,
             'link' => $this->collectionLink($collection),
             'assets' => DB::table('stj_assets')
-                ->where('ast_link', 'like', $linkPrefix.'%')
+                ->where(function ($query) use ($linkPrefix, $legacyLinkPrefix) {
+                    $query
+                        ->where('ast_link', 'like', $linkPrefix.'%')
+                        ->orWhere('ast_link', 'like', $legacyLinkPrefix.'%');
+                })
                 ->orderByDesc('ast_id')
                 ->get()
                 ->map(fn ($asset) => $this->normalizeAsset($asset))
@@ -86,6 +91,7 @@ class CollectionAssetService
         $countryCode = strtolower((string) ($country->pai_codigo ?? 'sv'));
         $type = strtoupper((string) $data['type']);
         $collectionId = $this->collectionIdFromLink((string) $asset->ast_link);
+        $collection = $collectionId > 0 ? $this->collection($collectionId) : null;
 
         $updates = [
             'ast_plataforma' => $data['platform'] ?? $asset->ast_plataforma,
@@ -99,6 +105,10 @@ class CollectionAssetService
             'ast_idpromocion' => $collectionId,
             'ast_titulo' => $data['title'] ?? null,
         ];
+
+        if ($collection) {
+            $updates['ast_link'] = $this->collectionLink($collection);
+        }
 
         if ($image) {
             $updates['ast_imagen'] = $this->withCacheVersion(
@@ -150,12 +160,31 @@ class CollectionAssetService
 
     private function collectionLink(object $collection): string
     {
-        return $this->linkPrefix((int) $collection->col_id).$this->linkLabel((string) $collection->col_nombre);
+        return $this->linkPrefix($collection).$this->linkLabel((string) $collection->col_nombre);
     }
 
-    private function linkPrefix(int $collectionId): string
+    private function linkPrefix(object $collection): string
+    {
+        return 'https://stjacks.com/'
+            .$this->countryPath((int) $collection->col_pais)
+            .'/'
+            .$this->legacyLinkPrefix((int) $collection->col_id);
+    }
+
+    private function legacyLinkPrefix(int $collectionId): string
     {
         return "Productos/Colecciones/?id={$collectionId}&";
+    }
+
+    private function countryPath(int $countryId): string
+    {
+        return match ($countryId) {
+            2 => 'Guatemala',
+            3 => 'CostaRica',
+            5 => 'Panama',
+            7 => 'Honduras',
+            default => 'ElSalvador',
+        };
     }
 
     private function linkLabel(string $name): string
