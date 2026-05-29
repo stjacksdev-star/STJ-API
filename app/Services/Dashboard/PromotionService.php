@@ -9,10 +9,11 @@ use Illuminate\Validation\ValidationException;
 
 class PromotionService
 {
+    private const DASHBOARD_TIMEZONE = 'America/El_Salvador';
+
     public function __construct(
         private readonly PromotionProductImportService $imports,
-    ) {
-    }
+    ) {}
 
     public function index(?string $country = null, ?string $status = null, int $limit = 200): array
     {
@@ -88,18 +89,18 @@ class PromotionService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function create(array $data, ?UploadedFile $products = null): array
     {
         $country = $this->resolveCountry($data['country'] ?? null);
-        $startAt = Carbon::parse((string) $data['startAt']);
-        $endAt = Carbon::parse((string) $data['endAt']);
+        $startAt = $this->dashboardDateTime($data['startAt']);
+        $endAt = $this->dashboardDateTime($data['endAt']);
         $type = (string) $data['type'];
         $promotionType = (string) $data['promotionType'];
         $productRows = [];
 
-        if ($startAt->lessThanOrEqualTo(now())) {
+        if ($startAt->lessThanOrEqualTo($this->dashboardNow())) {
             throw ValidationException::withMessages([
                 'startAt' => 'La fecha inicial no puede ser menor o igual a la fecha y hora actual.',
             ]);
@@ -238,11 +239,11 @@ class PromotionService
         }
 
         $status = (string) $promotion->prm_estado;
-        $startAt = Carbon::parse((string) ($data['startAt'] ?? $schedule->pho_inicio));
-        $endAt = Carbon::parse((string) ($data['endAt'] ?? $schedule->pho_fin));
+        $startAt = $this->dashboardDateTime($data['startAt'] ?? $schedule->pho_inicio);
+        $endAt = $this->dashboardDateTime($data['endAt'] ?? $schedule->pho_fin);
 
         if ($status === 'PENDIENTE') {
-            if ($startAt->lessThanOrEqualTo(now())) {
+            if ($startAt->lessThanOrEqualTo($this->dashboardNow())) {
                 throw ValidationException::withMessages([
                     'startAt' => 'La fecha inicial no puede ser menor o igual a la fecha y hora actual.',
                 ]);
@@ -273,9 +274,9 @@ class PromotionService
         }
 
         if ($status === 'EN-PROCESO') {
-            $currentStart = Carbon::parse((string) $schedule->pho_inicio);
+            $currentStart = $this->dashboardDateTime($schedule->pho_inicio);
 
-            if ($endAt->lessThanOrEqualTo(now())) {
+            if ($endAt->lessThanOrEqualTo($this->dashboardNow())) {
                 throw ValidationException::withMessages([
                     'endAt' => 'La fecha final debe ser mayor a la fecha y hora actual.',
                 ]);
@@ -309,6 +310,16 @@ class PromotionService
         ]);
     }
 
+    private function dashboardDateTime(mixed $value): Carbon
+    {
+        return Carbon::parse((string) $value, self::DASHBOARD_TIMEZONE);
+    }
+
+    private function dashboardNow(): Carbon
+    {
+        return Carbon::now(self::DASHBOARD_TIMEZONE);
+    }
+
     public function find(int $id): array
     {
         $promotion = $this->baseQuery()
@@ -325,7 +336,7 @@ class PromotionService
     }
 
     /**
-     * @param array<int, array{code: string, discount: ?float, price: ?float}> $rows
+     * @param  array<int, array{code: string, discount: ?float, price: ?float}>  $rows
      * @return array<int, array{productId: int, discount: ?float, price: ?float}>
      */
     private function resolveProducts(array $rows, int $countryId, string $promotionType): array
