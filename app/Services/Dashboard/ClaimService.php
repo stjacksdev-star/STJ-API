@@ -53,7 +53,6 @@ class ClaimService
         'en_proceso',
         'resuelto',
         'rechazado',
-        'cerrado',
     ];
 
     /**
