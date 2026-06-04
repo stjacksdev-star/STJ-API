@@ -4,7 +4,14 @@ namespace App\Services\Dashboard;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ClaimService
 {
@@ -70,7 +77,9 @@ class ClaimService
                 'rec_cliente_telefono',
                 'rec_cliente_dui',
                 'rec_tipo',
+                'rec_tipo_otro',
                 'rec_origen',
+                'rec_origen_otro',
                 'rec_responsable_area',
                 'rec_tienda',
                 'rec_descripcion',
@@ -98,27 +107,15 @@ class ClaimService
             $query->where('rec_tipo', $filters['type']);
         }
 
-        if (filled($filters['search'] ?? null)) {
-            $search = trim((string) $filters['search']);
-            $query->where(function ($nested) use ($search) {
-                $nested
-                    ->where('rec_numero_gestion', 'like', "%{$search}%")
-                    ->orWhere('rec_stj', 'like', "%{$search}%")
-                    ->orWhere('rec_cliente_nombre', 'like', "%{$search}%")
-                    ->orWhere('rec_cliente_correo', 'like', "%{$search}%")
-                    ->orWhere('rec_cliente_telefono', 'like', "%{$search}%")
-                    ->orWhere('rec_cliente_dui', 'like', "%{$search}%");
+        $this->applyDateFilters($query, $filters);
+        $this->applySearchFilter($query, $filters);
 
-                if (ctype_digit($search)) {
-                    $nested->orWhere('rec_pedido', (int) $search);
-                }
-            });
-        }
-
-        $claims = $query
+        $claimRows = $query
             ->limit($limit)
-            ->get()
-            ->map(fn (object $claim) => $this->normalize($claim))
+            ->get();
+        $photoGroups = $this->photosForClaims($claimRows->pluck('rec_id')->map(fn ($id) => (int) $id)->all());
+        $claims = $claimRows
+            ->map(fn (object $claim) => $this->normalize($claim, $photoGroups[(int) $claim->rec_id] ?? []))
             ->values()
             ->all();
 
@@ -134,6 +131,88 @@ class ClaimService
     }
 
     /**
+     * @param array<string, mixed> $filters
+     * @return array{filename: string, contents: string}
+     */
+    public function export(array $filters): array
+    {
+        $columns = Schema::getColumnListing('stj_reclamos');
+        $query = DB::table('stj_reclamos')
+            ->select($columns)
+            ->orderBy('rec_fecha_registro')
+            ->orderBy('rec_id');
+
+        if (filled($filters['country'] ?? null)) {
+            $query->where('rec_pais', (int) $filters['country']);
+        }
+
+        if (filled($filters['status'] ?? null)) {
+            $query->where('rec_estado', $filters['status']);
+        }
+
+        if (filled($filters['type'] ?? null)) {
+            $query->where('rec_tipo', $filters['type']);
+        }
+
+        $this->applyDateFilters($query, $filters);
+        $this->applySearchFilter($query, $filters);
+
+        $rows = $query->get();
+        $photoGroups = $this->photosForClaims($rows->pluck('rec_id')->map(fn ($id) => (int) $id)->all());
+        $headers = [...$columns, 'fotos_urls'];
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Reclamos');
+        $sheet->fromArray($headers, null, 'A1');
+
+        $rowNumber = 2;
+        foreach ($rows as $row) {
+            $values = [];
+
+            foreach ($columns as $column) {
+                $values[] = $row->{$column} ?? null;
+            }
+
+            $values[] = collect($photoGroups[(int) $row->rec_id] ?? [])
+                ->pluck('url')
+                ->implode("\n");
+
+            $sheet->fromArray($values, null, 'A'.$rowNumber);
+            $rowNumber++;
+        }
+
+        $lastColumn = $sheet->getHighestColumn();
+        $sheet->getStyle('A1:'.$lastColumn.'1')->getFont()->setBold(true);
+        $sheet->setAutoFilter('A1:'.$lastColumn.max(1, $rowNumber - 1));
+        $sheet->freezePane('A2');
+
+        $lastColumnIndex = Coordinate::columnIndexFromString($lastColumn);
+
+        for ($columnIndex = 1; $columnIndex <= $lastColumnIndex; $columnIndex++) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($columnIndex))->setAutoSize(true);
+        }
+
+        $filename = 'reclamos-'.Carbon::parse($filters['startDate'])->format('Ymd').'-'.Carbon::parse($filters['endDate'])->format('Ymd').'.xlsx';
+        $path = tempnam(sys_get_temp_dir(), 'stj-reclamos-');
+
+        try {
+            (new Xlsx($spreadsheet))->save($path);
+
+            return [
+                'filename' => $filename,
+                'contents' => (string) file_get_contents($path),
+            ];
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public function create(array $data): array
@@ -145,7 +224,10 @@ class ClaimService
                 $payload['rec_numero_gestion'] = $this->nextManagementNumber();
             }
 
-            return DB::table('stj_reclamos')->insertGetId($payload);
+            $id = DB::table('stj_reclamos')->insertGetId($payload);
+            $this->storePhotos($id, (string) $payload['rec_numero_gestion'], $data['photos'] ?? [], $data['actor'] ?? []);
+
+            return $id;
         });
 
         return $this->find($id);
@@ -164,9 +246,14 @@ class ClaimService
             ]);
         }
 
-        DB::table('stj_reclamos')
-            ->where('rec_id', $id)
-            ->update($this->payload($data, true));
+        DB::transaction(function () use ($id, $data): void {
+            DB::table('stj_reclamos')
+                ->where('rec_id', $id)
+                ->update($this->payload($data, true));
+
+            $updated = DB::table('stj_reclamos')->where('rec_id', $id)->first();
+            $this->storePhotos($id, (string) ($updated->rec_numero_gestion ?? $id), $data['photos'] ?? [], $data['actor'] ?? []);
+        });
 
         return $this->find($id);
     }
@@ -192,7 +279,46 @@ class ClaimService
             ]);
         }
 
-        return $this->normalize($claim);
+        return $this->normalize($claim, $this->photosForClaims([$id])[$id] ?? []);
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    private function applyDateFilters($query, array $filters): void
+    {
+        if (filled($filters['startDate'] ?? null)) {
+            $query->whereDate('rec_fecha_registro', '>=', Carbon::parse($filters['startDate'])->toDateString());
+        }
+
+        if (filled($filters['endDate'] ?? null)) {
+            $query->whereDate('rec_fecha_registro', '<=', Carbon::parse($filters['endDate'])->toDateString());
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    private function applySearchFilter($query, array $filters): void
+    {
+        if (! filled($filters['search'] ?? null)) {
+            return;
+        }
+
+        $search = trim((string) $filters['search']);
+        $query->where(function ($nested) use ($search) {
+            $nested
+                ->where('rec_numero_gestion', 'like', "%{$search}%")
+                ->orWhere('rec_stj', 'like', "%{$search}%")
+                ->orWhere('rec_cliente_nombre', 'like', "%{$search}%")
+                ->orWhere('rec_cliente_correo', 'like', "%{$search}%")
+                ->orWhere('rec_cliente_telefono', 'like', "%{$search}%")
+                ->orWhere('rec_cliente_dui', 'like', "%{$search}%");
+
+            if (ctype_digit($search)) {
+                $nested->orWhere('rec_pedido', (int) $search);
+            }
+        });
     }
 
     /**
@@ -210,7 +336,9 @@ class ClaimService
             'rec_cliente_telefono' => $this->nullableString($data['customerPhone'] ?? null),
             'rec_cliente_dui' => $this->nullableString($data['customerDui'] ?? null),
             'rec_tipo' => $data['type'] ?? 'otro',
+            'rec_tipo_otro' => $this->isOther($data['type'] ?? null) ? $this->nullableString($data['typeOther'] ?? null) : null,
             'rec_origen' => $data['origin'] ?? 'web',
+            'rec_origen_otro' => $this->isOther($data['origin'] ?? null) ? $this->nullableString($data['originOther'] ?? null) : null,
             'rec_responsable_area' => $data['responsibleArea'] ?? 'atencion_cliente',
             'rec_tienda' => $this->nullableString($data['store'] ?? null),
             'rec_descripcion' => trim((string) $data['description']),
@@ -239,7 +367,7 @@ class ClaimService
         return $payload;
     }
 
-    private function normalize(object $claim): array
+    private function normalize(object $claim, array $photos = []): array
     {
         return [
             'id' => (int) $claim->rec_id,
@@ -253,9 +381,15 @@ class ClaimService
             'customerPhone' => $claim->rec_cliente_telefono,
             'customerDui' => $claim->rec_cliente_dui,
             'type' => (string) $claim->rec_tipo,
-            'typeLabel' => $this->label((string) $claim->rec_tipo),
+            'typeOther' => $claim->rec_tipo_otro ?? null,
+            'typeLabel' => $this->isOther($claim->rec_tipo ?? null) && filled($claim->rec_tipo_otro ?? null)
+                ? (string) $claim->rec_tipo_otro
+                : $this->label((string) $claim->rec_tipo),
             'origin' => (string) $claim->rec_origen,
-            'originLabel' => $this->label((string) $claim->rec_origen),
+            'originOther' => $claim->rec_origen_otro ?? null,
+            'originLabel' => $this->isOther($claim->rec_origen ?? null) && filled($claim->rec_origen_otro ?? null)
+                ? (string) $claim->rec_origen_otro
+                : $this->label((string) $claim->rec_origen),
             'responsibleArea' => (string) $claim->rec_responsable_area,
             'responsibleAreaLabel' => $this->label((string) $claim->rec_responsable_area),
             'store' => $claim->rec_tienda,
@@ -269,7 +403,109 @@ class ClaimService
             'registeredBy' => $claim->rec_usuario_registro,
             'assignedTo' => $claim->rec_usuario_asignado,
             'updatedAt' => $claim->rec_fecha_actualizacion ?? null,
+            'photos' => $photos,
+            'photosCount' => count($photos),
         ];
+    }
+
+    /**
+     * @param array<int, int> $claimIds
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function photosForClaims(array $claimIds): array
+    {
+        if ($claimIds === []) {
+            return [];
+        }
+
+        return DB::table('stj_reclamos_fotos')
+            ->whereIn('rfo_reclamo', $claimIds)
+            ->orderBy('rfo_orden')
+            ->orderBy('rfo_id')
+            ->get()
+            ->groupBy('rfo_reclamo')
+            ->map(fn ($rows) => $rows
+                ->map(fn (object $photo) => [
+                    'id' => (int) $photo->rfo_id,
+                    'claimId' => (int) $photo->rfo_reclamo,
+                    'url' => (string) $photo->rfo_url,
+                    'originalName' => $photo->rfo_nombre_original,
+                    'mime' => $photo->rfo_tipo,
+                    'size' => $photo->rfo_peso_bytes !== null ? (int) $photo->rfo_peso_bytes : null,
+                    'order' => (int) $photo->rfo_orden,
+                    'registeredAt' => $photo->rfo_fecha_registro,
+                    'registeredBy' => $photo->rfo_usuario_registro,
+                ])
+                ->values()
+                ->all())
+            ->all();
+    }
+
+    /**
+     * @param array<int, mixed> $photos
+     * @param array<string, mixed> $actor
+     */
+    private function storePhotos(int $claimId, string $managementNumber, array $photos, array $actor): void
+    {
+        $photos = array_values(array_filter($photos, fn ($photo) => $photo instanceof UploadedFile));
+
+        if ($photos === []) {
+            return;
+        }
+
+        if (! $this->shouldStoreInSpaces()) {
+            throw ValidationException::withMessages([
+                'photos' => 'DigitalOcean Spaces no esta configurado para subir fotos de reclamos.',
+            ]);
+        }
+
+        $nextOrder = (int) DB::table('stj_reclamos_fotos')
+            ->where('rfo_reclamo', $claimId)
+            ->max('rfo_orden') + 1;
+        $folder = 'reclamos/'.Str::slug($managementNumber !== '' ? $managementNumber : (string) $claimId);
+
+        foreach ($photos as $index => $photo) {
+            $extension = strtolower($photo->getClientOriginalExtension() ?: $photo->extension() ?: 'jpg');
+            $filename = now()->format('YmdHis').'-'.Str::random(10).'.'.$extension;
+            $path = $folder.'/'.$filename;
+            $mime = $photo->getMimeType() ?: 'image/jpeg';
+
+            Storage::disk('spaces')->put($path, fopen($photo->getRealPath(), 'rb'), [
+                'visibility' => 'public',
+                'ContentType' => $mime,
+                'CacheControl' => 'public, max-age=31536000, immutable',
+            ]);
+
+            DB::table('stj_reclamos_fotos')->insert([
+                'rfo_reclamo' => $claimId,
+                'rfo_url' => rtrim((string) config('filesystems.disks.spaces.url'), '/').'/'.$path,
+                'rfo_nombre_original' => $photo->getClientOriginalName(),
+                'rfo_tipo' => $mime,
+                'rfo_peso_bytes' => $photo->getSize(),
+                'rfo_orden' => $nextOrder + $index,
+                'rfo_fecha_registro' => now(),
+                'rfo_usuario_registro' => $this->actorLabel($actor),
+            ]);
+        }
+    }
+
+    private function shouldStoreInSpaces(): bool
+    {
+        return filled(config('filesystems.disks.spaces.key'))
+            && filled(config('filesystems.disks.spaces.secret'))
+            && filled(config('filesystems.disks.spaces.bucket'))
+            && filled(config('filesystems.disks.spaces.endpoint'))
+            && filled(config('filesystems.disks.spaces.url'));
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     */
+    private function actorLabel(array $actor): ?string
+    {
+        $label = trim((string) ($actor['username'] ?? $actor['email'] ?? $actor['name'] ?? ''));
+
+        return $label !== '' ? $label : null;
     }
 
     private function nextManagementNumber(): string
@@ -307,6 +543,11 @@ class ClaimService
         $value = trim((string) $value);
 
         return $value === '' ? null : Carbon::parse($value)->format('Y-m-d H:i:s');
+    }
+
+    private function isOther(mixed $value): bool
+    {
+        return in_array(trim((string) $value), ['otro', 'otros'], true);
     }
 
     /**

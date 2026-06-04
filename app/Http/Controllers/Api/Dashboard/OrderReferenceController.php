@@ -132,6 +132,37 @@ class OrderReferenceController extends BaseController
         );
     }
 
+    public function updateData(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'reference' => ['required', 'string', 'max:60'],
+            'email' => ['required', 'email', 'max:50'],
+            'phone' => ['required', 'string', 'max:30'],
+            'whatsapp' => ['nullable', 'string', 'max:30'],
+            'billingAddress' => ['required', 'string', 'max:200'],
+            'shippingAddress' => ['nullable', 'string', 'max:200'],
+            'shippingReference' => ['nullable', 'string', 'max:200'],
+            'actor' => ['nullable', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:150'],
+            'actor.username' => ['nullable', 'string', 'max:100'],
+            'actor.permissions' => ['nullable', 'array'],
+            'actor.ip' => ['nullable', 'string', 'max:45'],
+            'actor.userAgent' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return $this->success(
+            $this->orders->updateData($validated['reference'], $validated['country'], $validated, $validated['actor'] ?? []),
+            'Datos del pedido actualizados'
+        );
+    }
+
     public function process(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {
@@ -142,6 +173,7 @@ class OrderReferenceController extends BaseController
             'country' => ['required', 'string', 'max:3'],
             'reference' => ['required', 'string', 'max:60'],
             'ticket' => ['required', 'string', 'max:100'],
+            'refundObservation' => ['nullable', 'string', 'max:2000'],
             'actor' => ['nullable', 'array'],
             'actor.id' => ['nullable'],
             'actor.name' => ['nullable', 'string', 'max:150'],
@@ -157,6 +189,7 @@ class OrderReferenceController extends BaseController
                 $validated['reference'],
                 $validated['country'],
                 $validated['ticket'],
+                $validated['refundObservation'] ?? null,
                 $validated['actor'] ?? [],
             ),
             'Pedido procesado'
@@ -192,6 +225,38 @@ class OrderReferenceController extends BaseController
                 $validated['actor'] ?? [],
             ),
             'Pedido entregado'
+        );
+    }
+
+    public function markPackedForPickup(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'reference' => ['required', 'string', 'max:60'],
+            'actor' => ['nullable', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:150'],
+            'actor.username' => ['nullable', 'string', 'max:100'],
+            'actor.countryId' => ['nullable'],
+            'actor.storeId' => ['nullable'],
+            'actor.storeCode' => ['nullable', 'string', 'max:20'],
+            'actor.permissions' => ['nullable', 'array'],
+            'actor.ip' => ['nullable', 'string', 'max:45'],
+            'actor.userAgent' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return $this->success(
+            $this->orders->markOrderPackedForPickup(
+                $validated['reference'],
+                $validated['country'],
+                $validated['actor'] ?? [],
+            ),
+            'Pedido preparado para entrega'
         );
     }
 

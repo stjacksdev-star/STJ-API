@@ -335,6 +335,7 @@ class OrderReferenceService
                 p.ped_rsp_servicio,
                 p.ped_monto_devolucion,
                 p.ped_fecha_devolucion,
+                p.ped_observacion_devolucion,
                 p.ped_nombres,
                 p.ped_apellidos,
                 p.ped_identificacion,
@@ -376,6 +377,57 @@ class OrderReferenceService
             ],
             'refunds' => $rows,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public function updateData(string $reference, string $country, array $data, array $actor = []): array
+    {
+        return DB::transaction(function () use ($reference, $country, $data, $actor) {
+            $countryId = $this->resolveCountryId($country);
+            $order = $this->order($reference, $countryId);
+
+            if (! $order) {
+                throw ValidationException::withMessages([
+                    'reference' => 'No se encontro la referencia indicada.',
+                ]);
+            }
+
+            if ((string) $order->ped_estatus !== 'RECIBIDO') {
+                throw ValidationException::withMessages([
+                    'order' => 'Solo se pueden editar datos de pedidos en estado RECIBIDO.',
+                ]);
+            }
+
+            $actorName = $this->actorName($actor);
+            $actorIp = (string) ($actor['ip'] ?? Request::ip());
+
+            DB::table('stj_pedidos')
+                ->where('ped_id', (int) $order->ped_id)
+                ->where('ped_id_pais', $countryId)
+                ->update([
+                    'ped_email' => $this->trimText($data['email'] ?? '', 50),
+                    'ped_telefono' => $this->trimText($data['phone'] ?? '', 30),
+                    'ped_whatsapp' => $this->trimText($data['whatsapp'] ?? '', 30),
+                    'ped_direccion' => $this->trimText($data['billingAddress'] ?? '', 200),
+                    'ped_a_usuario' => $actorName,
+                    'ped_a_ip' => $actorIp,
+                ]);
+
+            if ($order->dir_id !== null && array_key_exists('shippingAddress', $data)) {
+                DB::table('stj_direcciones')
+                    ->where('dir_id', (int) $order->dir_id)
+                    ->update([
+                        'dir_direccion' => $this->trimText($data['shippingAddress'] ?? '', 200),
+                        'dir_referencia' => $this->trimText($data['shippingReference'] ?? '', 200),
+                        'dir_a_usuario' => $actorName,
+                        'dir_a_ip' => $actorIp,
+                    ]);
+            }
+
+            return $this->show($reference, (string) $countryId);
+        });
     }
 
     /**
@@ -439,9 +491,9 @@ class OrderReferenceService
     /**
      * @param array<string, mixed> $actor
      */
-    public function processOrder(string $reference, string $country, string $ticket, array $actor = []): array
+    public function processOrder(string $reference, string $country, string $ticket, ?string $refundObservation = null, array $actor = []): array
     {
-        $processed = DB::transaction(function () use ($reference, $country, $ticket, $actor) {
+        $processed = DB::transaction(function () use ($reference, $country, $ticket, $refundObservation, $actor) {
             $countryId = $this->resolveCountryId($country);
             $order = $this->orderForProcessing($reference, $countryId);
 
@@ -485,6 +537,14 @@ class OrderReferenceService
             }
 
             $refund = $isCardPayment && $difference < 0 ? abs($difference) : 0.0;
+            $refundObservation = trim((string) $refundObservation);
+
+            if ($refund > 0 && mb_strlen($refundObservation) < 20) {
+                throw ValidationException::withMessages([
+                    'refundObservation' => 'Debe ingresar una observacion de devolucion de al menos 20 caracteres.',
+                ]);
+            }
+
             $originalItems = (int) ($order->ppa_articulos ?? 0);
             $originalProducts = round((float) ($order->ppa_monto_senv ?? 0), 2);
             $hasLineChanges = $this->hasLineChanges((string) $order->ppa_ref);
@@ -504,6 +564,7 @@ class OrderReferenceService
                     'ped_monto_devolucion' => $refund > 0 ? $refund : null,
                     'ped_fecha_devolucion' => $refund > 0 ? $now : null,
                     'ped_fecha_devolucion_sistema' => $refund > 0 ? $now : null,
+                    'ped_observacion_devolucion' => $refund > 0 ? $refundObservation : null,
                     'ped_a_usuario' => $actorName,
                     'ped_a_ip' => $actor['ip'] ?? Request::ip(),
                     'ped_a_fecha' => $now,
@@ -613,6 +674,55 @@ class OrderReferenceService
         $delivered['mail'] = $this->sendDeliveredOrderEmail($delivered);
 
         return $delivered;
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     */
+    public function markOrderPackedForPickup(string $reference, string $country, array $actor = []): array
+    {
+        $packed = DB::transaction(function () use ($reference, $country, $actor) {
+            $countryId = $this->resolveCountryId($country);
+            $order = $this->orderForPackedPickup($reference, $countryId);
+
+            if (! $order) {
+                throw ValidationException::withMessages([
+                    'reference' => 'No se encontro la referencia indicada.',
+                ]);
+            }
+
+            if ((string) $order->ped_estatus !== 'RECIBIDO') {
+                throw ValidationException::withMessages([
+                    'order' => 'Solo se pueden marcar como preparados pedidos en estado RECIBIDO.',
+                ]);
+            }
+
+            if (strtoupper((string) ($order->ppa_tipo ?? '')) !== 'EFECTIVO') {
+                throw ValidationException::withMessages([
+                    'payment' => 'Solo se pueden marcar como preparados pedidos con pago en efectivo.',
+                ]);
+            }
+
+            $this->ensureActorCountry($order, $actor);
+
+            $now = now();
+            $actorName = $this->actorName($actor);
+
+            DB::table('stj_pedidos')
+                ->where('ped_id', (int) $order->ped_id)
+                ->update([
+                    'ped_estatus' => 'EMPACADO-ENTREGA',
+                    'ped_a_usuario' => $actorName,
+                    'ped_a_ip' => $actor['ip'] ?? Request::ip(),
+                    'ped_a_fecha' => $now,
+                ]);
+
+            return $this->show((string) $order->ppa_ref, (string) $countryId);
+        });
+
+        $packed['mail'] = $this->sendPackedForPickupEmail($packed);
+
+        return $packed;
     }
 
     /**
@@ -804,6 +914,26 @@ class OrderReferenceService
             ->first();
     }
 
+    private function orderForPackedPickup(string $reference, int $countryId): ?object
+    {
+        return DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', function ($join) use ($reference) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->where('pay.ppa_ref', '=', $reference)
+                    ->where('pay.ppa_estado', '=', 'APROBADA');
+            })
+            ->where('p.ped_id_pais', $countryId)
+            ->select([
+                'p.ped_id',
+                'p.ped_id_pais',
+                'p.ped_estatus',
+                'pay.ppa_ref',
+                'pay.ppa_tipo',
+            ])
+            ->lockForUpdate()
+            ->first();
+    }
+
     /**
      * @param array<string, mixed> $actor
      */
@@ -966,6 +1096,60 @@ class OrderReferenceService
             ];
         } catch (Throwable $exception) {
             Log::warning('No fue posible enviar correo de pedido entregado.', [
+                'reference' => data_get($order, 'reference'),
+                'email' => $email,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [
+                'sent' => false,
+                'skipped' => false,
+                'reason' => $exception->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $packed
+     * @return array{sent: bool, skipped: bool, reason: string|null}
+     */
+    private function sendPackedForPickupEmail(array $packed): array
+    {
+        $order = $packed['order'];
+        $email = trim((string) data_get($order, 'customer.email'));
+
+        if ($email === '') {
+            return [
+                'sent' => false,
+                'skipped' => true,
+                'reason' => 'Pedido sin correo de cliente.',
+            ];
+        }
+
+        if ($this->isBouncedEmail($email)) {
+            return [
+                'sent' => false,
+                'skipped' => true,
+                'reason' => 'Correo en lista de rebotes.',
+            ];
+        }
+
+        try {
+            $message = $this->packedForPickupMail($packed);
+
+            $this->mailer->sendHtml(
+                to: $email,
+                subject: $message['subject'],
+                html: $message['html'],
+            );
+
+            return [
+                'sent' => true,
+                'skipped' => false,
+                'reason' => null,
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('No fue posible enviar correo de pedido empacado para entrega.', [
                 'reference' => data_get($order, 'reference'),
                 'email' => $email,
                 'message' => $exception->getMessage(),
@@ -1168,6 +1352,61 @@ class OrderReferenceService
                                         '.$this->mailKeyValueTable($deliveryRows).'
                                         '.$changeNotice.'
                                         '.$tracking.'
+                                        <p style="margin-top:24px;font-size:13px;color:#6b7280;">Gracias por comprar en St. Jack\'s Online.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </body>
+            </html>';
+
+        return [
+            'subject' => $subject,
+            'html' => $html,
+        ];
+    }
+
+    /**
+     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $packed
+     * @return array{subject: string, html: string}
+     */
+    private function packedForPickupMail(array $packed): array
+    {
+        $order = $packed['order'];
+        $products = $this->withLoggedChanges((string) data_get($order, 'reference'), $packed['products']);
+        $reference = (string) data_get($order, 'reference');
+        $customer = e((string) data_get($order, 'customer.name', 'cliente'));
+        $storeName = trim((string) data_get($order, 'storePickup.storeName', ''));
+        $storeCode = trim((string) data_get($order, 'storePickup.storeCode', ''));
+        $store = trim($storeName.($storeCode !== '' ? " ({$storeCode})" : ''));
+        $subject = "Pedido #{$reference} listo para retirar";
+        $rows = [
+            'Numero de referencia' => $reference,
+            'Tienda de retiro' => $store !== '' ? $store : 'Tienda seleccionada',
+            'Fecha de compra' => $this->mailDate((string) data_get($order, 'createdAt')),
+            'Forma de pago' => (string) data_get($order, 'payment.type', 'EFECTIVO'),
+        ];
+
+        $html = '<!doctype html>
+            <html>
+            <body style="margin:0;padding:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#1f2937;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fb;padding:24px 0;">
+                    <tr>
+                        <td align="center">
+                            <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #e5e7eb;">
+                                <tr>
+                                    <td style="padding:24px 28px;border-bottom:1px solid #e5e7eb;">
+                                        <h1 style="margin:0;font-size:24px;color:#111827;">Pedido listo para retirar</h1>
+                                        <p style="margin:12px 0 0;font-size:15px;">Hola <strong>'.$customer.'</strong>,</p>
+                                        <p style="margin:8px 0 0;font-size:15px;">Tu pedido con numero de referencia '.e($reference).' ya esta listo para retirar en la tienda especificada.</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:22px 28px;">
+                                        '.$this->mailKeyValueTable($rows).'
+                                        '.$this->mailProductsTable($products, false).'
                                         <p style="margin-top:24px;font-size:13px;color:#6b7280;">Gracias por comprar en St. Jack\'s Online.</p>
                                     </td>
                                 </tr>
@@ -1578,6 +1817,7 @@ class OrderReferenceService
             'paidAmount' => (float) ($row->ppa_monto ?? 0),
             'amount' => (float) ($row->ppa_monto_senv ?? $row->ppa_monto ?? 0),
             'refundAmount' => (float) ($row->ped_monto_devolucion ?? 0),
+            'refundObservation' => (string) ($row->ped_observacion_devolucion ?? ''),
             'servicePayload' => $payload,
             'serviceRaw' => $raw,
         ];
@@ -1753,13 +1993,16 @@ class OrderReferenceService
                 'identification' => (string) ($order->ped_identificacion ?? ''),
                 'rtu' => (string) ($order->ped_rtu ?? ''),
                 'phone' => trim((string) ($order->ped_telefono_pais ?? '').' '.(string) ($order->ped_telefono ?? '')),
+                'phoneRaw' => (string) ($order->ped_telefono ?? ''),
                 'whatsapp' => trim((string) ($order->ped_whatsapp_pais ?? '').' '.(string) ($order->ped_whatsapp ?? '')),
+                'whatsappRaw' => (string) ($order->ped_whatsapp ?? ''),
                 'billingAddress' => $this->joinAddress([
                     $order->ped_direccion ?? null,
                     $order->ped_ciudad ?? null,
                     $order->ped_estado ?? null,
                     $order->ped_pais ?? null,
                 ]),
+                'billingAddressRaw' => (string) ($order->ped_direccion ?? ''),
             ],
             'payment' => [
                 'type' => (string) ($order->ppa_tipo ?? ''),
@@ -1778,6 +2021,7 @@ class OrderReferenceService
                 'label' => $refundStatus === 'SI' ? 'Devolucion procesada' : ($refundStatus === 'NO' ? 'Devolucion pendiente' : 'N/A'),
                 'amount' => $refundAmount,
                 'date' => (string) ($order->ped_fecha_devolucion ?? ''),
+                'observation' => (string) ($order->ped_observacion_devolucion ?? ''),
                 'approved' => $this->serviceApproved($refundPayload),
                 'servicePayload' => $refundPayload,
                 'serviceRaw' => $this->servicePayloadText($order->ped_rsp_servicio ?? null, $refundPayload),
@@ -1791,6 +2035,7 @@ class OrderReferenceService
                     $order->dir_municipio_txt ?? null,
                     $order->dir_departamento_txt ?? null,
                 ]),
+                'addressRaw' => (string) ($order->dir_direccion ?? ''),
                 'reference' => (string) ($order->dir_referencia ?? ''),
                 'lat' => (string) ($order->dir_latitud ?? ''),
                 'lng' => (string) ($order->dir_longitud ?? ''),
@@ -1931,6 +2176,11 @@ class OrderReferenceService
             ->map(fn ($part) => trim((string) $part))
             ->filter()
             ->implode(', ');
+    }
+
+    private function trimText(mixed $value, int $limit): string
+    {
+        return mb_substr(trim((string) $value), 0, $limit);
     }
 
     private function resolveCountryId(string $country): int

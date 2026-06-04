@@ -89,6 +89,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/appointments/catalog', [DashboardAppointmentController::class, 'catalog']);
         Route::get('/appointments', [DashboardAppointmentController::class, 'index']);
         Route::get('/claims', [DashboardClaimController::class, 'index']);
+        Route::get('/claims/export', [DashboardClaimController::class, 'export']);
         Route::post('/claims', [DashboardClaimController::class, 'store']);
         Route::post('/claims/{claim}', [DashboardClaimController::class, 'update']);
         Route::delete('/claims/{claim}', [DashboardClaimController::class, 'destroy']);
@@ -113,8 +114,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
         Route::get('/orders/refunds', [DashboardOrderReferenceController::class, 'refunds']);
         Route::get('/orders/product', [DashboardOrderReferenceController::class, 'product']);
+        Route::post('/orders/data', [DashboardOrderReferenceController::class, 'updateData']);
         Route::post('/orders/lines/{line}', [DashboardOrderReferenceController::class, 'updateLine']);
         Route::post('/orders/process', [DashboardOrderReferenceController::class, 'process']);
+        Route::post('/orders/packed-pickup', [DashboardOrderReferenceController::class, 'markPackedForPickup']);
         Route::post('/orders/route', [DashboardOrderReferenceController::class, 'markInRoute']);
         Route::post('/orders/deliver', [DashboardOrderReferenceController::class, 'deliver']);
     });

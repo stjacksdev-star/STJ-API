@@ -25,6 +25,8 @@ class ClaimController extends BaseController
             'search' => ['nullable', 'string', 'max:150'],
             'status' => ['nullable', Rule::in(ClaimService::STATUSES)],
             'type' => ['nullable', Rule::in(ClaimService::TYPES)],
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:1000'],
         ]);
 
@@ -32,6 +34,30 @@ class ClaimController extends BaseController
             $this->claims->index($validated),
             'Reclamos obtenidos'
         );
+    }
+
+    public function export(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['nullable', 'integer', 'min:1'],
+            'search' => ['nullable', 'string', 'max:150'],
+            'status' => ['nullable', Rule::in(ClaimService::STATUSES)],
+            'type' => ['nullable', Rule::in(ClaimService::TYPES)],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date', 'after_or_equal:startDate'],
+        ]);
+
+        $export = $this->claims->export($validated);
+
+        return response($export['contents'], 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$export['filename'].'"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
     }
 
     public function store(Request $request)
@@ -94,7 +120,9 @@ class ClaimController extends BaseController
             'customerPhone' => ['nullable', 'string', 'max:30'],
             'customerDui' => ['nullable', 'string', 'max:20'],
             'type' => ['required', Rule::in(ClaimService::TYPES)],
+            'typeOther' => ['nullable', 'required_if:type,otro,otros', 'string', 'max:255'],
             'origin' => ['required', Rule::in(ClaimService::ORIGINS)],
+            'originOther' => ['nullable', 'required_if:origin,otro,otros', 'string', 'max:255'],
             'responsibleArea' => ['required', Rule::in(ClaimService::AREAS)],
             'store' => ['nullable', 'string', 'max:100'],
             'description' => ['required', 'string'],
@@ -106,6 +134,8 @@ class ClaimController extends BaseController
             'registeredBy' => ['nullable', 'string', 'max:255'],
             'assignedTo' => ['nullable', 'string', 'max:255'],
             'actor' => ['nullable', 'array'],
+            'photos' => ['nullable', 'array'],
+            'photos.*' => ['image', 'max:8192'],
         ]);
     }
 }
