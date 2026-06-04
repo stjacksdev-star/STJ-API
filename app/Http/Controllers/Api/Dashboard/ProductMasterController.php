@@ -86,6 +86,8 @@ class ProductMasterController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
+        @set_time_limit(900);
+
         $validated = $request->validate([
             'file' => ['required', 'file', 'mimes:xlsx,xls', 'max:20480'],
         ]);

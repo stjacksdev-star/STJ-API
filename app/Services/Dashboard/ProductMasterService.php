@@ -15,6 +15,8 @@ use Throwable;
 class ProductMasterService
 {
     private const MAX_PHOTO_IMPORT_ROWS = 30;
+    private const PHOTO_IMPORT_TIMEOUT_SECONDS = 900;
+    private const PHOTO_DOWNLOAD_TIMEOUT_SECONDS = 90;
 
     private const PRODUCT_COLUMNS = [
         'A' => 'codigo',
@@ -372,6 +374,8 @@ class ProductMasterService
      */
     public function importPhotos(UploadedFile $file): array
     {
+        @set_time_limit(self::PHOTO_IMPORT_TIMEOUT_SECONDS);
+        $startedAt = microtime(true);
         $spreadsheet = IOFactory::load($file->getRealPath());
         $sheet = $spreadsheet->getSheet(0);
         $highestRow = $sheet->getHighestDataRow();
@@ -481,6 +485,11 @@ class ProductMasterService
         }
 
         $spreadsheet->disconnectWorksheets();
+        $duration = round(microtime(true) - $startedAt, 2);
+        $summary['durationSeconds'] = $duration;
+        $summary['durationLabel'] = $duration >= 60
+            ? floor($duration / 60).'m '.round(fmod($duration, 60)).'s'
+            : $duration.'s';
 
         return [
             'summary' => $summary,
@@ -633,7 +642,7 @@ class ProductMasterService
      */
     private function storeProductPhoto(string $url, string $filename): array
     {
-        $response = Http::timeout(45)->get($url);
+        $response = Http::timeout(self::PHOTO_DOWNLOAD_TIMEOUT_SECONDS)->get($url);
 
         if (! $response->successful() || $response->body() === '') {
             throw new \RuntimeException('No se pudo descargar la imagen.');
