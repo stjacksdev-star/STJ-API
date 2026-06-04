@@ -106,6 +106,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/store/virtual-cut', [DashboardStoreReportController::class, 'virtualCut']);
         Route::get('/reports/store/pending-items', [DashboardStoreReportController::class, 'pendingItems']);
         Route::get('/reports/store/pending-items-by-order', [DashboardStoreReportController::class, 'pendingItemsByOrder']);
+        Route::get('/reports/store/home-delivery', [DashboardStoreReportController::class, 'homeDelivery']);
+        Route::get('/reports/store/home-delivery/export', [DashboardStoreReportController::class, 'homeDeliveryExport']);
         Route::get('/reports/accounting/3/count', [DashboardAccountingReportController::class, 'count3']);
         Route::get('/reports/accounting/3/export', [DashboardAccountingReportController::class, 'export3']);
         Route::get('/reports/accounting/sales-by-store', [DashboardAccountingReportController::class, 'salesByStore']);

@@ -87,4 +87,43 @@ class StoreReportController extends BaseController
             'Articulos pendientes por pedido obtenidos'
         );
     }
+
+    public function homeDelivery(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date', 'after_or_equal:startDate'],
+        ]);
+
+        return $this->success(
+            $this->reports->homeDelivery($validated),
+            'Reporte de domicilio obtenido'
+        );
+    }
+
+    public function homeDeliveryExport(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date', 'after_or_equal:startDate'],
+        ]);
+
+        $export = $this->reports->exportHomeDelivery($validated);
+
+        return response($export['contents'], 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$export['filename'].'"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
+    }
 }

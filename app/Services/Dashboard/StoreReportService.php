@@ -5,6 +5,9 @@ namespace App\Services\Dashboard;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class StoreReportService
 {
@@ -270,6 +273,122 @@ class StoreReportService
     }
 
     /**
+     * @param array<string, mixed> $filters
+     * @return array<string, mixed>
+     */
+    public function homeDelivery(array $filters): array
+    {
+        $countryId = $this->resolveCountryId((string) ($filters['country'] ?? ''));
+        $start = $this->nullableDate($filters['startDate'] ?? null);
+        $end = $this->nullableDate($filters['endDate'] ?? null);
+
+        $this->validateDateRange($start, $end);
+
+        $storeCode = $this->domicilioStoreCode($countryId);
+        $rows = $this->homeDeliveryRows($countryId, $storeCode, $start, $end);
+
+        return [
+            'countries' => $this->countries(),
+            'filters' => [
+                'country' => $countryId,
+                'startDate' => $start,
+                'endDate' => $end,
+                'store' => $storeCode,
+            ],
+            'summary' => [
+                'orders' => count($rows),
+            ],
+            'rows' => $rows,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @return array{filename: string, contents: string}
+     */
+    public function exportHomeDelivery(array $filters): array
+    {
+        $report = $this->homeDelivery($filters);
+        $headers = [
+            'STJ',
+            'Fecha Pedido',
+            'Fecha facturado',
+            'Plataforma',
+            'Estado Pedido',
+            'Tipo checkout',
+            'Tienda',
+            'Nombres',
+            'Apellidos',
+            'Correo',
+            'Dui',
+            'Direccion',
+            'Telefono',
+            'Whatsapp',
+            'Tipo pago',
+            'Tarjeta',
+            'Pago estado',
+        ];
+        $keys = [
+            'stj',
+            'orderDate',
+            'processedAt',
+            'platform',
+            'orderStatus',
+            'checkoutType',
+            'store',
+            'names',
+            'lastNames',
+            'email',
+            'dui',
+            'address',
+            'phone',
+            'whatsapp',
+            'paymentType',
+            'card',
+            'paymentStatus',
+        ];
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Domicilio');
+        $sheet->fromArray($headers, null, 'A1');
+
+        $rowNumber = 2;
+        foreach ($report['rows'] as $row) {
+            $sheet->fromArray(array_map(fn (string $key) => $row[$key] ?? null, $keys), null, 'A'.$rowNumber);
+            $rowNumber++;
+        }
+
+        $lastColumn = $sheet->getHighestColumn();
+        $sheet->getStyle('A1:'.$lastColumn.'1')->getFont()->setBold(true);
+        $sheet->setAutoFilter('A1:'.$lastColumn.max(1, $rowNumber - 1));
+        $sheet->freezePane('A2');
+
+        $lastColumnIndex = Coordinate::columnIndexFromString($lastColumn);
+        for ($columnIndex = 1; $columnIndex <= $lastColumnIndex; $columnIndex++) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($columnIndex))->setAutoSize(true);
+        }
+
+        $filename = 'reporte-domicilio-'.Carbon::parse($report['filters']['startDate'])->format('Ymd').'-'.Carbon::parse($report['filters']['endDate'])->format('Ymd').'.xlsx';
+        $path = tempnam(sys_get_temp_dir(), 'stj-domicilio-');
+
+        try {
+            (new Xlsx($spreadsheet))->save($path);
+
+            return [
+                'filename' => $filename,
+                'contents' => (string) file_get_contents($path),
+            ];
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function countries(): array
@@ -378,6 +497,116 @@ class StoreReportService
         $value = trim((string) $value);
 
         return $value === '' ? null : Carbon::parse($value)->toDateString();
+    }
+
+    private function validateDateRange(?string $start, ?string $end): void
+    {
+        if (($start && ! $end) || (! $start && $end)) {
+            throw ValidationException::withMessages([
+                'endDate' => 'Debe enviar ambas fechas o ninguna.',
+            ]);
+        }
+
+        if ($start === null || $end === null) {
+            throw ValidationException::withMessages([
+                'startDate' => 'Debe enviar fecha inicio y fecha fin.',
+            ]);
+        }
+
+        if ($start > $end) {
+            throw ValidationException::withMessages([
+                'endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.',
+            ]);
+        }
+    }
+
+    private function domicilioStoreCode(int $countryId): string
+    {
+        $countryCode = strtolower((string) DB::table('stj_paises')->where('pai_id', $countryId)->value('pai_codigo'));
+        $configured = $countryCode !== ''
+            ? (string) config("inventory.domicilio_store_by_country.{$countryCode}", '')
+            : '';
+
+        $storeCode = $configured !== ''
+            ? $configured
+            : match ($countryId) {
+                1 => '57',
+                2 => '2',
+                3 => '1',
+                default => '',
+            };
+
+        if ($storeCode === '') {
+            throw ValidationException::withMessages([
+                'country' => 'El pais seleccionado no tiene tienda de domicilio configurada.',
+            ]);
+        }
+
+        return $storeCode;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function homeDeliveryRows(int $countryId, string $storeCode, string $start, string $end): array
+    {
+        $startAt = Carbon::parse($start)->startOfDay();
+        $endAt = Carbon::parse($end)->addDay()->startOfDay();
+
+        return DB::table('stj_pedidos as p')
+            ->join('stj_pedidos_pago as pay', 'pay.ppa_pedido', '=', 'p.ped_id')
+            ->join('stj_tiendas as store', function ($join) use ($countryId) {
+                $join->on('store.tie_codigo', '=', 'p.ped_tienda')
+                    ->where('store.tie_pais', '=', $countryId);
+            })
+            ->where('pay.ppa_fecha', '>=', $startAt)
+            ->where('pay.ppa_fecha', '<', $endAt)
+            ->where('p.ped_tienda', $storeCode)
+            ->where('pay.ppa_estado', 'APROBADA')
+            ->where('p.ped_id_pais', $countryId)
+            ->where('p.ped_checkout', 'DOMICILIO')
+            ->orderBy('pay.ppa_fecha')
+            ->selectRaw('
+                pay.ppa_ref,
+                pay.ppa_fecha,
+                pay.ppa_fecha_procesado,
+                p.ped_origen,
+                p.ped_estatus,
+                p.ped_checkout,
+                store.tie_nombre,
+                p.ped_nombres,
+                p.ped_apellidos,
+                p.ped_email,
+                p.ped_identificacion,
+                p.ped_direccion,
+                p.ped_telefono,
+                p.ped_whatsapp,
+                pay.ppa_tipo,
+                pay.ppa_tarjeta,
+                pay.ppa_estado
+            ')
+            ->get()
+            ->map(fn ($row) => [
+                'stj' => (string) ($row->ppa_ref ?? ''),
+                'orderDate' => $this->dateTimeOrNull($row->ppa_fecha ?? null),
+                'processedAt' => $this->dateTimeOrNull($row->ppa_fecha_procesado ?? null),
+                'platform' => (string) ($row->ped_origen ?? ''),
+                'orderStatus' => (string) ($row->ped_estatus ?? ''),
+                'checkoutType' => (string) ($row->ped_checkout ?? ''),
+                'store' => (string) ($row->tie_nombre ?? ''),
+                'names' => (string) ($row->ped_nombres ?? ''),
+                'lastNames' => (string) ($row->ped_apellidos ?? ''),
+                'email' => (string) ($row->ped_email ?? ''),
+                'dui' => (string) ($row->ped_identificacion ?? ''),
+                'address' => (string) ($row->ped_direccion ?? ''),
+                'phone' => (string) ($row->ped_telefono ?? ''),
+                'whatsapp' => (string) ($row->ped_whatsapp ?? ''),
+                'paymentType' => (string) ($row->ppa_tipo ?? ''),
+                'card' => (string) ($row->ppa_tarjeta ?? ''),
+                'paymentStatus' => (string) ($row->ppa_estado ?? ''),
+            ])
+            ->values()
+            ->all();
     }
 
     private function productImageUrl(string $filename, string $folder): string
