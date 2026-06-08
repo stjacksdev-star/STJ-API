@@ -33,7 +33,7 @@ class AccountingReportService
             throw ValidationException::withMessages(['endDate' => 'La fecha fin debe ser mayor o igual a la fecha inicio.']);
         }
 
-        $rows = DB::table('stj_pedidos as p')
+        $orders = DB::table('stj_pedidos as p')
             ->join('stj_pedidos_pago as pay', function ($join) {
                 $join->on('pay.ppa_pedido', '=', 'p.ped_id')
                     ->where('pay.ppa_estado', '=', 'APROBADA');
@@ -64,9 +64,12 @@ class AccountingReportService
                 pay.ppa_monto_senv,
                 store.tie_nombre
             ')
-            ->get()
-            ->map(function ($row) {
+            ->get();
+        $details = $this->detailsByReference($orders->pluck('ppa_ref')->map(fn ($ref) => (string) $ref)->all());
+        $rows = $orders
+            ->map(function ($row) use ($details) {
                 $refund = $this->refundAmount($row);
+                $orderDetails = $details[(string) ($row->ppa_ref ?? '')] ?? collect();
 
                 return [
                     'paidAt' => $this->dateTimeOrNull($row->ppa_fecha ?? null),
@@ -75,7 +78,7 @@ class AccountingReportService
                     'customer' => mb_strtoupper(trim((string) ($row->ped_nombres ?? '').' '.(string) ($row->ped_apellidos ?? ''))),
                     'ticket' => (string) ($row->ppa_ticket ?? ''),
                     'authorization' => (string) ($row->ppa_autorizacion ?? ''),
-                    'items' => (int) ($row->ppa_articulos ?? 0),
+                    'items' => $this->originalItems($orderDetails, (int) ($row->ppa_articulos ?? 0)),
                     'amount' => (float) ($row->ppa_monto_senv ?? 0),
                     'status' => (string) ($row->ped_estatus ?? ''),
                     'productStatus' => (string) ($row->ped_estatus_productos ?? ''),
@@ -218,7 +221,7 @@ class AccountingReportService
             $line = 0;
 
             foreach ($orderDetails as $detail) {
-                $quantity = (int) ($detail->car_cantidad ?? 0);
+                $quantity = $this->originalQuantity($detail);
                 $billedQuantity = (int) ($detail->car_total_facturado ?? 0);
                 $price = (float) ($detail->car_precio ?? 0);
                 $discount = (float) ($detail->car_descuento ?? 0);
@@ -411,22 +414,55 @@ class AccountingReportService
             return collect();
         }
 
+        $firstLogIds = DB::table('stj_pedidos_detalle_log')
+            ->selectRaw('pdl_detalle_id, MIN(pdl_id) AS first_log_id')
+            ->groupBy('pdl_detalle_id');
+
         return DB::table('stj_pedidos_detalle as detail')
             ->join('stj_productos as product', 'product.pro_id', '=', 'detail.car_producto')
+            ->leftJoinSub($firstLogIds, 'first_detail_log', function ($join) {
+                $join->on('first_detail_log.pdl_detalle_id', '=', 'detail.car_id');
+            })
+            ->leftJoin('stj_pedidos_detalle_log as quantity_log', 'quantity_log.pdl_id', '=', 'first_detail_log.first_log_id')
             ->whereIn('detail.car_ref', $references)
             ->where('detail.car_accion', 'AGREGADO')
             ->selectRaw('
+                detail.car_id,
                 detail.car_ref,
                 detail.car_talla,
                 detail.car_cantidad,
+                detail.car_cantidad_copia,
                 detail.car_precio,
                 detail.car_descuento,
                 detail.car_total_facturado,
                 detail.car_descuento_final,
+                quantity_log.pdl_cantidad_anterior AS logged_original_quantity,
                 product.pro_codigo
             ')
             ->get()
             ->groupBy(fn ($detail) => (string) $detail->car_ref);
+    }
+
+    private function originalItems($details, int $fallback): int
+    {
+        if ($details->isEmpty()) {
+            return $fallback;
+        }
+
+        return (int) $details->sum(fn ($detail) => $this->originalQuantity($detail));
+    }
+
+    private function originalQuantity(object $detail): int
+    {
+        if ((int) ($detail->car_cantidad_copia ?? 0) > 0) {
+            return (int) $detail->car_cantidad_copia;
+        }
+
+        if ($detail->logged_original_quantity !== null) {
+            return (int) $detail->logged_original_quantity;
+        }
+
+        return (int) ($detail->car_cantidad ?? 0);
     }
 
     private function writeOrderTotals($sheet, int $row, float $subtotalList, float $subtotalBilled, float $shipping): int

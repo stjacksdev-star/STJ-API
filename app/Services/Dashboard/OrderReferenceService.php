@@ -444,9 +444,9 @@ class OrderReferenceService
                 ]);
             }
 
-            if ((string) $line->ped_estatus !== 'RECIBIDO') {
+            if (! in_array((string) $line->ped_estatus, ['RECIBIDO', 'EMPACADO-ENTREGA'], true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Solo se pueden editar articulos de pedidos en estado RECIBIDO.',
+                    'order' => 'Solo se pueden editar articulos de pedidos en estado RECIBIDO o EMPACADO-ENTREGA.',
                 ]);
             }
 
@@ -457,26 +457,34 @@ class OrderReferenceService
             $quantity = max(0, (int) $data['quantity']);
             $discount = max(0, min(100, (float) ($data['discount'] ?? 0)));
             $actorName = $this->actorName($actor);
+            $quantityChanged = $quantity !== (int) ($line->car_cantidad ?? 0);
+            $hasOriginalQuantityCopy = (int) ($line->car_cantidad_copia ?? 0) > 0;
 
             $this->ensureCardLineDoesNotIncreasePayment($line, $product['price'], $quantity, $discount);
 
+            $updates = [
+                'car_producto' => $product['id'],
+                'car_precio' => $product['price'],
+                'car_talla' => trim((string) $data['size']),
+                'car_cantidad' => $quantity,
+                'car_descuento' => $discount,
+                'car_total_facturado' => null,
+                'car_descuento_final' => null,
+                'car_estilo_final' => null,
+                'car_talla_final' => null,
+                'car_modificar' => 'SI',
+                'car_a_usuario' => $actorName,
+                'car_a_ip' => $actor['ip'] ?? Request::ip(),
+                'car_a_fecha' => now(),
+            ];
+
+            if ($quantityChanged && ! $hasOriginalQuantityCopy) {
+                $updates['car_cantidad_copia'] = $this->originalQuantityForLine($lineId, (int) ($line->car_cantidad ?? 0));
+            }
+
             DB::table('stj_pedidos_detalle')
                 ->where('car_id', $lineId)
-                ->update([
-                    'car_producto' => $product['id'],
-                    'car_precio' => $product['price'],
-                    'car_talla' => trim((string) $data['size']),
-                    'car_cantidad' => $quantity,
-                    'car_descuento' => $discount,
-                    'car_total_facturado' => null,
-                    'car_descuento_final' => null,
-                    'car_estilo_final' => null,
-                    'car_talla_final' => null,
-                    'car_modificar' => 'SI',
-                    'car_a_usuario' => $actorName,
-                    'car_a_ip' => $actor['ip'] ?? Request::ip(),
-                    'car_a_fecha' => now(),
-                ]);
+                ->update($updates);
 
             $updatedLine = $this->editableLine($lineId);
 
@@ -503,9 +511,9 @@ class OrderReferenceService
                 ]);
             }
 
-            if ((string) $order->ped_estatus !== 'RECIBIDO') {
+            if (! in_array((string) $order->ped_estatus, ['RECIBIDO', 'EMPACADO-ENTREGA'], true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Solo se pueden procesar pedidos en estado RECIBIDO.',
+                    'order' => 'Solo se pueden procesar pedidos en estado RECIBIDO o EMPACADO-ENTREGA.',
                 ]);
             }
 
@@ -1275,6 +1283,11 @@ class OrderReferenceService
                     'newQuantity' => (int) ($last->pdl_cantidad_nueva ?? 0),
                 ];
 
+                if ($quantityChanged && (int) ($product['originalQuantity'] ?? 0) <= 0) {
+                    $product['originalQuantity'] = (int) ($first->pdl_cantidad_anterior ?? 0);
+                    $product['quantityEdited'] = (int) $product['originalQuantity'] !== (int) ($product['quantity'] ?? 0);
+                }
+
                 return $product;
             })
             ->values()
@@ -1615,6 +1628,16 @@ class OrderReferenceService
             5 => 'Panama',
             default => 'ElSalvador',
         };
+    }
+
+    private function originalQuantityForLine(int $lineId, int $fallback): int
+    {
+        $loggedOriginal = DB::table('stj_pedidos_detalle_log')
+            ->where('pdl_detalle_id', $lineId)
+            ->orderBy('pdl_id')
+            ->value('pdl_cantidad_anterior');
+
+        return $loggedOriginal !== null ? (int) $loggedOriginal : $fallback;
     }
 
     /**
@@ -2076,6 +2099,9 @@ class OrderReferenceService
     private function normalizeProduct(object $product): array
     {
         $quantity = (int) ($product->car_cantidad ?? 0);
+        $originalQuantity = (int) ($product->car_cantidad_copia ?? 0) > 0
+            ? (int) $product->car_cantidad_copia
+            : null;
         $billedQuantity = $product->car_total_facturado !== null ? (int) $product->car_total_facturado : null;
         $price = (float) ($product->car_precio ?? $product->ppa_precio ?? 0);
         $discount = (float) ($product->car_descuento ?? 0);
@@ -2090,6 +2116,8 @@ class OrderReferenceService
             'name' => (string) $product->pro_nombre,
             'size' => (string) ($product->car_talla ?? ''),
             'quantity' => $quantity,
+            'originalQuantity' => $originalQuantity,
+            'quantityEdited' => $originalQuantity !== null && $originalQuantity !== $quantity,
             'billedQuantity' => $billedQuantity,
             'price' => $price,
             'discount' => $discount,
