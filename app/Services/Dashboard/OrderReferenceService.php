@@ -538,7 +538,7 @@ class OrderReferenceService
             $difference = round($calculatedPaid - $originalPaid, 2);
             $isCardPayment = strtoupper((string) ($order->ppa_tipo ?? '')) === 'TARJETA';
 
-            if ($isCardPayment && $difference > 0.009) {
+            if ($isCardPayment && $difference > 0.02) {
                 throw ValidationException::withMessages([
                     'order' => 'No se puede procesar un pedido pagado con tarjeta cuando el detalle supera el total aprobado.',
                 ]);

@@ -1322,7 +1322,7 @@ class SalesKpiService
             ->where('p.ped_id_pais', $countryId)
             ->when($store['code'] ?? null, fn ($builder, $code) => $builder->where('p.ped_tienda', $code))
             ->when($start !== null && $end !== null, fn ($builder) => $builder->whereRaw('DATE(pay.ppa_fecha) BETWEEN ? AND ?', [$start, $end]))
-            ->orderByDesc('pay.ppa_fecha');
+            ->orderBy('pay.ppa_fecha');
 
         $rows = $query->get()->map(fn ($row) => $this->normalizeOrderDetail($row))->values()->all();
 
