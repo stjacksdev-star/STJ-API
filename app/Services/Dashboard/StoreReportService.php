@@ -633,6 +633,7 @@ class StoreReportService
             2 => 'Q',
             3 => 'CRC',
             7 => 'L',
+            8 => '$',
             default => '',
         };
     }

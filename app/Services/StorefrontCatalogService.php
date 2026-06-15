@@ -203,6 +203,7 @@ class StorefrontCatalogService
             'cr' => 'CRC',
             'do' => 'DOP',
             'hn' => 'HNL',
+            've' => 'USD',
             default => 'USD',
         };
     }

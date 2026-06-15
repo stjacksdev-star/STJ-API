@@ -183,6 +183,7 @@ class CollectionAssetService
             3 => 'CostaRica',
             5 => 'Panama',
             7 => 'Honduras',
+            8 => 'Venezuela',
             default => 'ElSalvador',
         };
     }

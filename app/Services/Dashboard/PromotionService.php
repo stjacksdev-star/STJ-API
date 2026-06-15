@@ -241,6 +241,7 @@ class PromotionService
         $status = (string) $promotion->prm_estado;
         $startAt = $this->dashboardDateTime($data['startAt'] ?? $schedule->pho_inicio);
         $endAt = $this->dashboardDateTime($data['endAt'] ?? $schedule->pho_fin);
+        $syncAssetsEndAt = array_key_exists('endAt', $data);
 
         if ($status === 'PENDIENTE') {
             if ($startAt->lessThanOrEqualTo($this->dashboardNow())) {
@@ -255,7 +256,7 @@ class PromotionService
                 ]);
             }
 
-            DB::transaction(function () use ($id, $schedule, $startAt, $endAt, $promotionUpdates) {
+            DB::transaction(function () use ($id, $schedule, $startAt, $endAt, $promotionUpdates, $syncAssetsEndAt) {
                 if ($promotionUpdates !== []) {
                     DB::table('stj_promociones')
                         ->where('prm_id', $id)
@@ -268,6 +269,10 @@ class PromotionService
                         'pho_inicio' => $startAt->format('Y-m-d H:i:s'),
                         'pho_fin' => $endAt->format('Y-m-d H:i:s'),
                     ]);
+
+                if ($syncAssetsEndAt) {
+                    $this->syncPromotionAssetsEndAt($id, $endAt);
+                }
             });
 
             return $this->find($id);
@@ -288,7 +293,7 @@ class PromotionService
                 ]);
             }
 
-            DB::transaction(function () use ($id, $schedule, $endAt, $promotionUpdates) {
+            DB::transaction(function () use ($id, $schedule, $endAt, $promotionUpdates, $syncAssetsEndAt) {
                 if ($promotionUpdates !== []) {
                     DB::table('stj_promociones')
                         ->where('prm_id', $id)
@@ -300,6 +305,10 @@ class PromotionService
                     ->update([
                         'pho_fin' => $endAt->format('Y-m-d H:i:s'),
                     ]);
+
+                if ($syncAssetsEndAt) {
+                    $this->syncPromotionAssetsEndAt($id, $endAt);
+                }
             });
 
             return $this->find($id);
@@ -318,6 +327,16 @@ class PromotionService
     private function dashboardNow(): Carbon
     {
         return Carbon::now(self::DASHBOARD_TIMEZONE);
+    }
+
+    private function syncPromotionAssetsEndAt(int $promotionId, Carbon $endAt): void
+    {
+        DB::table('stj_assets')
+            ->where('ast_tipo_accion', 1)
+            ->where('ast_idpromocion', $promotionId)
+            ->update([
+                'ast_fin' => $endAt->format('Y-m-d H:i:s'),
+            ]);
     }
 
     public function find(int $id): array

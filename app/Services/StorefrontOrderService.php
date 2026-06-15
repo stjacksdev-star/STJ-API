@@ -309,6 +309,7 @@ class StorefrontOrderService
             'pa' => '507',
             'hn' => '504',
             'do' => '1',
+            've' => '58',
         ][$countryCode] ?? '';
     }
 

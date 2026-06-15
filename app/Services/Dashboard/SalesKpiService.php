@@ -227,6 +227,13 @@ class SalesKpiService
                 'current' => 'Honduras',
                 'previous' => 'Honduras',
             ],
+            [
+                'key' => 've',
+                'countryId' => 8,
+                'country' => 'Venezuela',
+                'current' => 'Venezuela',
+                'previous' => 'Venezuela',
+            ],
         ];
 
         $series = [];
@@ -288,6 +295,7 @@ class SalesKpiService
                     'GT' => 0.13049,
                     'CR' => 0.0017594,
                     'HN' => $hnlUsdRate,
+                    'VE' => 1.0,
                 ],
             ],
         ];
@@ -624,6 +632,7 @@ class SalesKpiService
                 ['id' => 2, 'label' => 'Guatemala', 'country' => 'Guatemala'],
                 ['id' => 3, 'label' => 'Costa Rica', 'country' => 'Costa Rica'],
                 ['id' => 7, 'label' => 'Honduras', 'country' => 'Honduras'],
+                ['id' => 8, 'label' => 'Venezuela', 'country' => 'Venezuela'],
             ],
             'dates' => $this->dateRange($start, $end),
             'categories' => collect($rows)->pluck('category')->unique()->values()->all(),
@@ -640,6 +649,7 @@ class SalesKpiService
             2 => ['label' => 'Guatemala', 'rate' => 0.13049, 'splitOrigin' => false],
             3 => ['label' => 'Costa Rica', 'rate' => 0.0017594, 'splitOrigin' => false],
             7 => ['label' => 'Honduras', 'rate' => $hnlUsdRate['rate'], 'splitOrigin' => false],
+            8 => ['label' => 'Venezuela', 'rate' => 1.0, 'splitOrigin' => false],
         ];
 
         $rows = DB::table('stj_pedidos as p')
@@ -706,6 +716,7 @@ class SalesKpiService
                     'GT' => 0.13049,
                     'CR' => 0.0017594,
                     'HN' => $hnlUsdRate,
+                    'VE' => 1.0,
                 ],
             ],
             'segments' => [
@@ -714,6 +725,7 @@ class SalesKpiService
                 ['key' => 'gt', 'label' => 'Guatemala'],
                 ['key' => 'cr', 'label' => 'Costa Rica'],
                 ['key' => 'hn', 'label' => 'Honduras'],
+                ['key' => 've', 'label' => 'Venezuela'],
             ],
             'sales' => [
                 'rows' => $matrix,
@@ -734,6 +746,7 @@ class SalesKpiService
             2 => ['label' => 'Guatemala', 'rate' => 0.13049, 'splitOrigin' => false],
             3 => ['label' => 'Costa Rica', 'rate' => 0.0017594, 'splitOrigin' => false],
             7 => ['label' => 'Honduras', 'rate' => $hnlUsdRate['rate'], 'splitOrigin' => false],
+            8 => ['label' => 'Venezuela', 'rate' => 1.0, 'splitOrigin' => false],
         ];
 
         $rows = DB::table('stj_pedidos as p')
@@ -785,6 +798,7 @@ class SalesKpiService
                     'GT' => 0.13049,
                     'CR' => 0.0017594,
                     'HN' => $hnlUsdRate,
+                    'VE' => 1.0,
                 ],
             ],
             'segments' => [
@@ -793,6 +807,7 @@ class SalesKpiService
                 ['key' => 'gt', 'label' => 'Guatemala'],
                 ['key' => 'cr', 'label' => 'Costa Rica'],
                 ['key' => 'hn', 'label' => 'Honduras'],
+                ['key' => 've', 'label' => 'Venezuela'],
             ],
             'issuers' => ['VISA', 'MASTERCARD', 'AMEX', 'EFECTIVO'],
             'store' => $this->paymentFormMatrix($rows, 'TIENDA'),
@@ -943,7 +958,8 @@ class SalesKpiService
                 IFNULL(SUM(CASE WHEN ped_id_pais = 1 THEN ppa_monto_senv END), 0) AS ElSalvador,
                 IFNULL(SUM(CASE WHEN ped_id_pais = 2 THEN ppa_monto_senv END), 0) * 0.13049 AS Guatemala,
                 IFNULL(SUM(CASE WHEN ped_id_pais = 3 THEN ppa_monto_senv END), 0) * 0.0017594 AS CostaRica,
-                IFNULL(SUM(CASE WHEN ped_id_pais = 7 THEN ppa_monto_senv END), 0) * ? AS Honduras
+                IFNULL(SUM(CASE WHEN ped_id_pais = 7 THEN ppa_monto_senv END), 0) * ? AS Honduras,
+                IFNULL(SUM(CASE WHEN ped_id_pais = 8 THEN ppa_monto_senv END), 0) AS Venezuela
             FROM stj_pedidos
             INNER JOIN stj_pedidos_pago ON ppa_pedido = ped_id AND ppa_estado = 'APROBADA'
             WHERE DATE(ppa_fecha) BETWEEN ? AND ?
@@ -959,6 +975,7 @@ class SalesKpiService
                     'Guatemala' => (float) ($row->Guatemala ?? 0),
                     'CostaRica' => (float) ($row->CostaRica ?? 0),
                     'Honduras' => (float) ($row->Honduras ?? 0),
+                    'Venezuela' => (float) ($row->Venezuela ?? 0),
                 ],
             ])
             ->all();
@@ -1095,6 +1112,12 @@ class SalesKpiService
                 'visitCountry' => 'Honduras',
                 'countryId' => 7,
             ],
+            '8', 've', 'venezuela' => [
+                'key' => 've',
+                'label' => 'Venezuela',
+                'visitCountry' => 'Venezuela',
+                'countryId' => 8,
+            ],
             default => [
                 'key' => 'general',
                 'label' => 'General',
@@ -1144,7 +1167,8 @@ class SalesKpiService
                     (float) ($row['ElSalvador'] ?? 0)
                     + (float) ($row['Guatemala'] ?? 0)
                     + (float) ($row['CostaRica'] ?? 0)
-                    + (float) ($row['Honduras'] ?? 0),
+                    + (float) ($row['Honduras'] ?? 0)
+                    + (float) ($row['Venezuela'] ?? 0),
                     2,
                 );
             })
@@ -1544,6 +1568,7 @@ class SalesKpiService
             2 => 'gt',
             3 => 'cr',
             7 => 'hn',
+            8 => 've',
             default => 'country_'.$countryId,
         };
     }
@@ -1636,7 +1661,7 @@ class SalesKpiService
      */
     private function paymentFormMatrix(array $rows, string $checkout): array
     {
-        $segments = ['sv_web', 'sv_app', 'gt', 'cr', 'hn'];
+        $segments = ['sv_web', 'sv_app', 'gt', 'cr', 'hn', 've'];
 
         return collect(['VISA', 'MASTERCARD', 'AMEX', 'EFECTIVO'])
             ->map(function (string $issuer) use ($rows, $checkout, $segments) {
@@ -1698,6 +1723,7 @@ class SalesKpiService
             'gt' => '03',
             'cr' => '04',
             'hn' => '05',
+            've' => '06',
             default => '99'.$key,
         };
     }

@@ -102,7 +102,7 @@ class SubscriberService
             ->map(fn (string $country) => strtoupper($country))
             ->all();
 
-        $known = ['SV', 'GT', 'CR', 'NI', 'HN'];
+        $known = ['SV', 'GT', 'CR', 'NI', 'HN', 'VE'];
 
         return collect([...$known, ...$existing])
             ->unique()
@@ -160,6 +160,7 @@ class SubscriberService
             'CR' => 'Costa Rica',
             'NI' => 'Nicaragua',
             'HN' => 'Honduras',
+            'VE' => 'Venezuela',
             default => strtoupper($country),
         };
     }
