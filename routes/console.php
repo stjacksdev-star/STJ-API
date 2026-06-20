@@ -1,9 +1,10 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
 use App\Models\User;
-use Illuminate\Support\Facades\Artisan;
+use App\Services\PushNotificationService;
+use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schedule;
 
@@ -81,4 +82,24 @@ Artisan::command('dashboard:issue-token {email=dashboard@stjacks.local : Correo 
     return self::SUCCESS;
 })->purpose('Crea o reutiliza el usuario tecnico del dashboard y genera token Sanctum con ability dashboard');
 
+Artisan::command('push:send-pending', function (PushNotificationService $pushNotifications) {
+    $this->line("ST. JACK'S - Notificaciones PUSH");
+    $this->line('INICIO => '.now()->toDateTimeString());
+
+    $summary = $pushNotifications->sendPending();
+
+    if ($summary['pending'] === 0) {
+        $this->line('Notificaciones: No hay notificaciones a enviar');
+    } else {
+        $this->line("Pendientes: {$summary['pending']}");
+        $this->line("Enviadas: {$summary['sent']}");
+        $this->line("Errores: {$summary['failed']}");
+    }
+
+    $this->line('FIN => '.now()->toDateTimeString());
+
+    return $summary['failed'] > 0 ? self::FAILURE : self::SUCCESS;
+})->purpose('Envia las notificaciones push pendientes programadas');
+
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
+Schedule::command('push:send-pending')->hourly();

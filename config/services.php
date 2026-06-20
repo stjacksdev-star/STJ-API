@@ -35,6 +35,14 @@ return [
         'timeout' => env('SMTP2GO_TIMEOUT', 15),
     ],
 
+    'fcm' => [
+        'url' => env('FCM_API_URL', 'https://fcm.googleapis.com/fcm/send'),
+        'server_key' => env('FCM_SERVER_KEY'),
+        'timeout' => env('FCM_TIMEOUT', 30),
+        'image_base_url' => env('FCM_IMAGE_BASE_URL', 'https://stjacks.com'),
+        'icon_url' => env('FCM_ICON_URL', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/logos/notificaciones_push/logostj.png'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
