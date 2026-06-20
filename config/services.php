@@ -36,8 +36,11 @@ return [
     ],
 
     'fcm' => [
-        'url' => env('FCM_API_URL', 'https://fcm.googleapis.com/fcm/send'),
+        'url' => env('FCM_API_URL', 'https://fcm.googleapis.com/v1'),
         'server_key' => env('FCM_SERVER_KEY'),
+        'project_id' => env('FCM_PROJECT_ID'),
+        'service_account_json' => env('FCM_SERVICE_ACCOUNT_JSON'),
+        'token_url' => env('FCM_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
         'timeout' => env('FCM_TIMEOUT', 30),
         'image_base_url' => env('FCM_IMAGE_BASE_URL', 'https://stjacks.com'),
         'icon_url' => env('FCM_ICON_URL', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/logos/notificaciones_push/logostj.png'),

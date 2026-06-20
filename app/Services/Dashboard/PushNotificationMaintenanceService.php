@@ -14,8 +14,7 @@ class PushNotificationMaintenanceService
 {
     public function __construct(
         private readonly ImageOptimizer $images,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  array<string, mixed>  $filters

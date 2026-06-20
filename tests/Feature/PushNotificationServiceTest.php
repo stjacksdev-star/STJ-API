@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\PushNotificationService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -36,8 +37,23 @@ class PushNotificationServiceTest extends TestCase
             prm_nombre TEXT NULL
         )');
 
-        config()->set('services.fcm.url', 'https://fcm.test/fcm/send');
-        config()->set('services.fcm.server_key', 'test-server-key');
+        Cache::flush();
+
+        $serviceAccountPath = storage_path('framework/testing/firebase-service-account.json');
+
+        if (! is_dir(dirname($serviceAccountPath))) {
+            mkdir(dirname($serviceAccountPath), 0755, true);
+        }
+
+        file_put_contents($serviceAccountPath, json_encode([
+            'client_email' => 'firebase-adminsdk@example.iam.gserviceaccount.com',
+            'private_key' => $this->privateKey(),
+        ], JSON_THROW_ON_ERROR));
+
+        config()->set('services.fcm.url', 'https://fcm.test/v1');
+        config()->set('services.fcm.project_id', 'stj-test');
+        config()->set('services.fcm.service_account_json', $serviceAccountPath);
+        config()->set('services.fcm.token_url', 'https://oauth2.test/token');
         config()->set('services.fcm.timeout', 10);
         config()->set('services.fcm.image_base_url', 'https://stjacks.com');
         config()->set('services.fcm.icon_url', 'https://cdn.test/logostj.png');
@@ -46,7 +62,14 @@ class PushNotificationServiceTest extends TestCase
     public function test_it_sends_pending_push_notifications(): void
     {
         Http::fake([
-            'fcm.test/*' => Http::response('{"success":1}', 200),
+            'oauth2.test/*' => Http::response([
+                'access_token' => 'test-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ], 200),
+            'fcm.test/*' => Http::response([
+                'name' => 'projects/stj-test/messages/123',
+            ], 200),
         ]);
 
         DB::table('stj_notificaciones_push')->insert([
@@ -71,19 +94,35 @@ class PushNotificationServiceTest extends TestCase
 
         $this->assertSame(['pending' => 1, 'sent' => 1, 'failed' => 0], $summary);
         $this->assertSame('ENVIADO', DB::table('stj_notificaciones_push_envios')->value('npe_estado'));
-        $this->assertSame(serialize('{"success":1}'), DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
+        $this->assertSame('{"name":"projects\/stj-test\/messages\/123"}', DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
 
         Http::assertSent(function ($request) {
+            if ($request->url() !== 'https://oauth2.test/token') {
+                return false;
+            }
+
             $payload = $request->data();
 
-            return $request->url() === 'https://fcm.test/fcm/send'
-                && $request->hasHeader('Authorization', 'key=test-server-key')
-                && $payload['to'] === '/topics/sv'
-                && $payload['notification']['title'] === 'Nueva promo'
-                && $payload['notification']['body'] === 'Tenemos descuentos'
-                && $payload['notification']['image'] === 'https://stjacks.com/images/promo.jpg'
-                && $payload['notification']['icon'] === 'https://cdn.test/logostj.png'
-                && $payload['notification']['click_action'] === 'https://stjacks.com/promo';
+            return $payload['grant_type'] === 'urn:ietf:params:oauth:grant-type:jwt-bearer'
+                && filled($payload['assertion'] ?? null);
+        });
+
+        Http::assertSent(function ($request) {
+            if ($request->url() !== 'https://fcm.test/v1/projects/stj-test/messages:send') {
+                return false;
+            }
+
+            $payload = $request->data();
+            $message = $payload['message'] ?? [];
+
+            return $request->hasHeader('Authorization', 'Bearer test-access-token')
+                && $message['topic'] === 'sv'
+                && $message['notification']['title'] === 'Nueva promo'
+                && $message['notification']['body'] === 'Tenemos descuentos'
+                && $message['notification']['image'] === 'https://stjacks.com/images/promo.jpg'
+                && $message['data']['click_action'] === 'https://stjacks.com/promo'
+                && $message['webpush']['notification']['icon'] === 'https://cdn.test/logostj.png'
+                && $message['webpush']['fcm_options']['link'] === 'https://stjacks.com/promo';
         });
     }
 
@@ -115,5 +154,39 @@ class PushNotificationServiceTest extends TestCase
         $this->assertSame('PENDIENTE', DB::table('stj_notificaciones_push_envios')->value('npe_estado'));
 
         Http::assertNothingSent();
+    }
+
+    private function privateKey(): string
+    {
+        return <<<'KEY'
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGD7B+ps2nDrDP
+0Gd52mckAsRC0Km1NPM+d1OWz0VVRNsuJBuN1GXKJrWcUk/avqGq09s+A9TE0kDK
+xDbEa1PpmPLT22kOqlVJCMGqQ3AYN4Jw2ZFyjZr0rTTiwlR++GiQpntlaZEKcsxO
+EpCPx+rmczj1hqdtk3EhiitDXZPjbUvc8Cq7EM0hnKnbvW8ja5pPjlYW6FR2A268
+RV9N8E7dAloskpM6IluZ8djO+aYjDbYKeKtFNIjt3uJjX2NyuGIVRUec35xzVzg1
+J+jQZln7Dm8RQhBjNMMRBbnwa2W1qlJSF81qgK4fIK7GQlwPKFvp4Z/S5GYEH+XZ
+RMb4llCvAgMBAAECggEABIcWOxQ2+YgH0YzUfKh0tRnAAtsWtj3s6kB3JWLMwtEX
+rG8tXk0UaPFZGJDrmj/+Jfp2GTd7c6o6fYGj5p0vJuKfyTRyOMMFugGoqYmG15Q3
+UabQQ/fme+wGxLJMHy5V+t1oZsZKlgWwM8IE31mf6IO8K4pCj86BzvObGsjm2V2Z
+6me//5MKDxNVV6eKg9FYbo7pLyFL2eD9h5V3uQWYKe1lJPc8VIh+FEwx9qOkoWD9
+nqFZvhO6o0npqEzh/sXgzwBqEeAqeLjMjxmssgr1Do76W+8mwTg78NX27exgKpF8
+13DyOOO1iSS6GuGxDfYoPmxsOBH/+47nqlXhR/p7YQKBgQDx8u3ePzB2pCg+cAEj
+NyPmkD7S1aK2gSfdM1yPUeMfbSGlHcxUZ+MkK6xJrXgIzm19TovhYylffQ2MtBXR
+YMpOBczCbUpSLQ3s0MHRkIW0+0xDVW2rPTWs2JYjCy7LTP48xGHyjGzVMWhVvUFK
+uYdquvK0TH4G7EvSEU3lgYjChwKBgQDRnu5CijxvREczUpx50p+gmCvfvq6IuDJH
+FWKT7WfCw1fwzUDEtg4WH6t9k6M0M8ey1HsmG7bYtIMeO/AeMDlH8OGEhcxk2bZX
+JoX0rL5+QSUjwqsNcZla11gPlD14MS7SnI7UEhlsQmtfop0UoQNe+FUDbfXvsUlo
+VlcD7HWuDwKBgH6gTxwdHfEJxjcIv4a3oCS93DW4PUF09b3BSoOjQlP4g9UkHltS
+NNn8VwHFUj4TKVjYb45Gf3C4l9PIc4YLvFvweHTpRBp3HD9KZPcL5G14xIlTA5+0
+3y4uQQxEBASkNg7m6R9PkbO/H/bqWuFo8I6o78kdTzWI98jtjn8zK31fAoGAFooQ
+DoNwpJ9sk7sVfoMwzZg5u0rFD2HwkdT4L69u38gbX2Wfi82IfUxzDwhA9DVfuwBT
+o2YtBRz1MBXbtYvhhUuy17pHi9YotxLBAXEh05qHFx8/JBOPukRfxdYVU+fSC8ng
+bEZsDOZTW9wSGqKXItjOtxZNMJ9pbKtC59UuV+MCgYEAz4D1dRtndg4guSe4d8fx
+RK4tB8JZ5gWQGB3tfWD8MrdHQziDzsSjiSOjNvL2SrGdExfXxxDgy4xkn9wXMPi2
+6+i3cYuRmB6Z8ZzLnx5Wx02sx+nc4nx6opMoXb0VGvdm55fNVoXG69jUWcFdBAi5
+9vudcoJQGUDjf7JxikSAFlE=
+-----END PRIVATE KEY-----
+KEY;
     }
 }
