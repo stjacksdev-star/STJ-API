@@ -117,6 +117,10 @@ class PushNotificationService
             return $path;
         }
 
+        if (str_starts_with($path, '/images/notificaciones_push/') && filled(config('filesystems.disks.spaces.url'))) {
+            return rtrim((string) config('filesystems.disks.spaces.url'), '/').'/'.ltrim($path, '/');
+        }
+
         return rtrim((string) config('services.fcm.image_base_url', 'https://stjacks.com'), '/').'/'.ltrim($path, '/');
     }
 

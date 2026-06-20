@@ -204,7 +204,7 @@ class PushNotificationMaintenanceService
                     'CacheControl' => 'public, max-age=31536000, immutable',
                 ]);
 
-                return rtrim((string) config('filesystems.disks.spaces.url'), '/').'/'.$path;
+                return '/'.$path;
             }
 
             $directory = public_path('images/notificaciones_push');
