@@ -1,0 +1,381 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
+
+class FirebasePushService
+{
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function sendToTopic(string $topic, string $title, string $body, array $data = []): string
+    {
+        return $this->sendMessage([
+            'topic' => $this->normalizeTopic($topic),
+            ...$this->messagePayload($title, $body, $data),
+        ]);
+    }
+
+    /**
+     * @param  array<int, string>  $tokens
+     * @param  array<string, mixed>  $data
+     * @return array{sent: int, failed: int, results: array<int, array{token: string, ok: bool, result: string}>}
+     */
+    public function sendToTokens(array $tokens, string $title, string $body, array $data = []): array
+    {
+        $summary = [
+            'sent' => 0,
+            'failed' => 0,
+            'results' => [],
+        ];
+
+        foreach ($this->cleanTokens($tokens) as $token) {
+            try {
+                $result = $this->sendMessage([
+                    'token' => $token,
+                    ...$this->messagePayload($title, $body, $data),
+                ]);
+
+                $summary['sent']++;
+                $summary['results'][] = [
+                    'token' => $token,
+                    'ok' => true,
+                    'result' => $result,
+                ];
+            } catch (RuntimeException $exception) {
+                $summary['failed']++;
+                $summary['results'][] = [
+                    'token' => $token,
+                    'ok' => false,
+                    'result' => $exception->getMessage(),
+                ];
+            }
+        }
+
+        return $summary;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{sent: int, failed: int, results: array<int, array{token: string, ok: bool, result: string}>}
+     */
+    public function sendToPlatform(string $platform, string $title, string $body, array $data = []): array
+    {
+        return $this->sendToTokens(
+            $this->tokensForPlatform($platform, $this->optionalTopic($data)),
+            $title,
+            $body,
+            $data,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $message
+     */
+    public function sendMessage(array $message): string
+    {
+        $response = Http::timeout($this->timeout())
+            ->withToken($this->accessToken())
+            ->asJson()
+            ->post($this->url(), ['message' => $message]);
+
+        if ($response->failed()) {
+            throw new RuntimeException($response->body());
+        }
+
+        return $response->body();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function tokensForPlatform(string $platform, ?string $topic = null): array
+    {
+        $platforms = $this->platforms($platform);
+
+        $topics = $this->topicVariants($topic);
+
+        return DB::table('stj_tokens')
+            ->whereIn('tok_tipo', $platforms)
+            ->whereNotNull('tok_token')
+            ->where('tok_token', '<>', '-')
+            ->where('tok_token', '<>', '')
+            ->when($topics !== [], fn ($query) => $query->whereIn('tok_topic', $topics))
+            ->distinct()
+            ->pluck('tok_token')
+            ->map(fn ($token) => trim((string) $token))
+            ->filter(fn (string $token) => $token !== '' && $token !== '-')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function messagePayload(string $title, string $body, array $data): array
+    {
+        $action = (string) ($data['click_action'] ?? '');
+        $imageUrl = (string) ($data['image'] ?? '');
+
+        $payload = [
+            'notification' => array_filter([
+                'title' => $title,
+                'body' => $body,
+                'image' => $imageUrl !== '' ? $imageUrl : null,
+            ], fn ($value) => $value !== null && $value !== ''),
+            'data' => collect($data)
+                ->except(['image', 'topic'])
+                ->map(fn ($value) => (string) $value)
+                ->all(),
+        ];
+
+        if ($imageUrl !== '' || $action !== '') {
+            $payload['android'] = [
+                'notification' => array_filter([
+                    'image' => $imageUrl !== '' ? $imageUrl : null,
+                    'click_action' => $action !== '' ? $action : null,
+                ], fn ($value) => $value !== null && $value !== ''),
+            ];
+        }
+
+        if ($imageUrl !== '') {
+            $payload['apns'] = [
+                'payload' => [
+                    'aps' => [
+                        'mutable-content' => 1,
+                    ],
+                ],
+                'fcm_options' => [
+                    'image' => $imageUrl,
+                ],
+            ];
+        }
+
+        if ($imageUrl !== '' || $action !== '') {
+            $payload['webpush'] = [
+                'notification' => array_filter([
+                    'image' => $imageUrl !== '' ? $imageUrl : null,
+                    'icon' => $this->iconUrl() ?: null,
+                ], fn ($value) => $value !== null && $value !== ''),
+                'fcm_options' => array_filter([
+                    'link' => $action !== '' ? $action : null,
+                ], fn ($value) => $value !== null && $value !== ''),
+            ];
+        }
+
+        return $payload;
+    }
+
+    private function url(): string
+    {
+        $baseUrl = rtrim(trim((string) config('services.fcm.url')), '/');
+
+        if ($baseUrl === '') {
+            throw new RuntimeException('FCM_API_URL no esta configurado.');
+        }
+
+        return "{$baseUrl}/projects/{$this->projectId()}/messages:send";
+    }
+
+    private function accessToken(): string
+    {
+        return Cache::remember('fcm_http_v1_access_token', now()->addMinutes(50), function (): string {
+            $serviceAccount = $this->serviceAccount();
+            $now = time();
+            $assertion = $this->jwt([
+                'iss' => $serviceAccount['client_email'],
+                'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+                'aud' => $this->tokenUrl(),
+                'iat' => $now,
+                'exp' => $now + 3600,
+            ], $serviceAccount['private_key']);
+
+            $response = Http::asForm()
+                ->timeout($this->timeout())
+                ->post($this->tokenUrl(), [
+                    'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                    'assertion' => $assertion,
+                ]);
+
+            if ($response->failed()) {
+                throw new RuntimeException('No fue posible obtener access token FCM: '.$response->body());
+            }
+
+            $token = trim((string) $response->json('access_token'));
+
+            if ($token === '') {
+                throw new RuntimeException('Google no retorno access_token para FCM.');
+            }
+
+            return $token;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $claims
+     */
+    private function jwt(array $claims, string $privateKey): string
+    {
+        $unsigned = $this->base64Url(json_encode([
+            'alg' => 'RS256',
+            'typ' => 'JWT',
+        ], JSON_THROW_ON_ERROR)).'.'.$this->base64Url(json_encode($claims, JSON_THROW_ON_ERROR));
+
+        if (! openssl_sign($unsigned, $signature, $privateKey, OPENSSL_ALGO_SHA256)) {
+            throw new RuntimeException('No fue posible firmar JWT para FCM.');
+        }
+
+        return $unsigned.'.'.$this->base64Url($signature);
+    }
+
+    private function base64Url(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    /**
+     * @return array{client_email: string, private_key: string}
+     */
+    private function serviceAccount(): array
+    {
+        $path = $this->serviceAccountPath();
+        $data = json_decode((string) file_get_contents($path), true);
+
+        if (! is_array($data) || empty($data['client_email']) || empty($data['private_key'])) {
+            throw new RuntimeException('FCM_SERVICE_ACCOUNT_JSON no contiene client_email/private_key validos.');
+        }
+
+        return [
+            'client_email' => (string) $data['client_email'],
+            'private_key' => (string) $data['private_key'],
+        ];
+    }
+
+    private function serviceAccountPath(): string
+    {
+        $path = trim((string) config('services.fcm.service_account_json'));
+
+        if ($path === '') {
+            throw new RuntimeException('FCM_SERVICE_ACCOUNT_JSON no esta configurado.');
+        }
+
+        $normalized = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+        $candidates = [
+            $normalized,
+            base_path($normalized),
+            storage_path($normalized),
+            storage_path('app'.DIRECTORY_SEPARATOR.$normalized),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        throw new RuntimeException("No existe el archivo FCM_SERVICE_ACCOUNT_JSON: {$path}");
+    }
+
+    private function projectId(): string
+    {
+        $projectId = trim((string) config('services.fcm.project_id'));
+
+        if ($projectId === '') {
+            throw new RuntimeException('FCM_PROJECT_ID no esta configurado.');
+        }
+
+        return $projectId;
+    }
+
+    private function tokenUrl(): string
+    {
+        $url = trim((string) config('services.fcm.token_url'));
+
+        if ($url === '') {
+            throw new RuntimeException('FCM_TOKEN_URL no esta configurado.');
+        }
+
+        return $url;
+    }
+
+    private function timeout(): int
+    {
+        return max(1, (int) config('services.fcm.timeout', 30));
+    }
+
+    private function iconUrl(): string
+    {
+        return trim((string) config('services.fcm.icon_url'));
+    }
+
+    private function normalizeTopic(string $topic): string
+    {
+        $topic = trim($topic);
+
+        if (str_starts_with($topic, '/topics/')) {
+            return substr($topic, 8);
+        }
+
+        return ltrim($topic, '/');
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function cleanTokens(array $tokens): array
+    {
+        return collect($tokens)
+            ->map(fn ($token) => trim((string) $token))
+            ->filter(fn (string $token) => $token !== '' && $token !== '-')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function platforms(string $platform): array
+    {
+        return match (strtolower(trim($platform))) {
+            'todo', 'all' => ['Android', 'Ios'],
+            'ios' => ['Ios'],
+            default => ['Android'],
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function optionalTopic(array $data): ?string
+    {
+        $topic = trim((string) ($data['topic'] ?? ''));
+
+        return $topic === '' ? null : $topic;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function topicVariants(?string $topic): array
+    {
+        $topic = trim((string) $topic);
+
+        if ($topic === '') {
+            return [];
+        }
+
+        $normalized = $this->normalizeTopic($topic);
+
+        return collect([$topic, $normalized, '/topics/'.$normalized])
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+}

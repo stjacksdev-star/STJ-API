@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscrib
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\ProductoController;
+use App\Http\Controllers\Api\PushSendController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -45,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/productos', [ProductoController::class, 'listar']);
     Route::get('/pedido/detalle', [PedidoController::class, 'getPedidoById']);
+    Route::post('/push/send', PushSendController::class);
 
     Route::prefix('dashboard')->group(function () {
         Route::get('/collections', [DashboardCollectionController::class, 'index']);

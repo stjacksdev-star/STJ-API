@@ -29,7 +29,17 @@ class PushNotificationServiceTest extends TestCase
             npu_imagen TEXT NOT NULL,
             npu_action TEXT NOT NULL,
             npu_para TEXT NOT NULL,
+            npu_plataforma TEXT NULL,
             npu_promocion INTEGER NULL
+        )');
+
+        DB::statement('CREATE TABLE stj_tokens (
+            tok_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tok_token TEXT NULL,
+            tok_session TEXT NULL,
+            tok_tipo TEXT NULL,
+            tok_fecha TEXT NULL,
+            tok_topic TEXT NULL
         )');
 
         DB::statement('CREATE TABLE stj_promociones (
@@ -79,6 +89,7 @@ class PushNotificationServiceTest extends TestCase
             'npu_imagen' => '/images/promo.jpg',
             'npu_action' => 'https://stjacks.com/promo',
             'npu_para' => '/topics/sv',
+            'npu_plataforma' => 'WEB',
             'npu_promocion' => null,
         ]);
 
@@ -137,6 +148,7 @@ class PushNotificationServiceTest extends TestCase
             'npu_imagen' => '/images/future.jpg',
             'npu_action' => 'app://future',
             'npu_para' => '/topics/sv',
+            'npu_plataforma' => 'WEB',
             'npu_promocion' => null,
         ]);
 
@@ -154,6 +166,66 @@ class PushNotificationServiceTest extends TestCase
         $this->assertSame('PENDIENTE', DB::table('stj_notificaciones_push_envios')->value('npe_estado'));
 
         Http::assertNothingSent();
+    }
+
+    public function test_it_sends_pending_push_notifications_to_android_tokens(): void
+    {
+        Http::fake([
+            'oauth2.test/*' => Http::response([
+                'access_token' => 'test-access-token',
+                'expires_in' => 3600,
+                'token_type' => 'Bearer',
+            ], 200),
+            'fcm.test/*' => Http::response([
+                'name' => 'projects/stj-test/messages/token',
+            ], 200),
+        ]);
+
+        DB::table('stj_tokens')->insert([
+            ['tok_token' => 'android-token-1', 'tok_tipo' => 'Android', 'tok_topic' => 'androidsv'],
+            ['tok_token' => 'android-token-2', 'tok_tipo' => 'Android', 'tok_topic' => '/topics/androidsv'],
+            ['tok_token' => 'ios-token-1', 'tok_tipo' => 'Ios', 'tok_topic' => 'androidsv'],
+            ['tok_token' => '-', 'tok_tipo' => 'Android', 'tok_topic' => 'androidsv'],
+        ]);
+
+        DB::table('stj_notificaciones_push')->insert([
+            'npu_id' => 101,
+            'npu_titulo' => 'Android promo',
+            'npu_cuerpo' => 'Solo Android',
+            'npu_imagen' => '/images/promo.jpg',
+            'npu_action' => 'https://stjacks.com/android',
+            'npu_para' => '/topics/androidsv',
+            'npu_plataforma' => 'Android',
+            'npu_promocion' => null,
+        ]);
+
+        DB::table('stj_notificaciones_push_envios')->insert([
+            'npe_id' => 201,
+            'npe_notificacion' => 101,
+            'npe_fecha_envio' => now()->subMinute()->toDateTimeString(),
+            'npe_estado' => 'PENDIENTE',
+            'npe_resultado' => null,
+        ]);
+
+        $summary = app(PushNotificationService::class)->sendPending();
+
+        $this->assertSame(['pending' => 1, 'sent' => 1, 'failed' => 0], $summary);
+        $this->assertSame('ENVIADO', DB::table('stj_notificaciones_push_envios')->value('npe_estado'));
+        $this->assertStringContainsString('"platform":"Android"', DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
+        $this->assertStringContainsString('"sent":2', DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
+
+        $sentTokens = [];
+        Http::assertSent(function ($request) use (&$sentTokens) {
+            if ($request->url() !== 'https://fcm.test/v1/projects/stj-test/messages:send') {
+                return false;
+            }
+
+            $sentTokens[] = $request->data()['message']['token'] ?? null;
+
+            return true;
+        });
+
+        $this->assertSame(['android-token-1', 'android-token-2'], array_values(array_filter($sentTokens)));
     }
 
     private function privateKey(): string

@@ -39,6 +39,7 @@ class PushNotificationMaintenanceService
                 'n.npu_imagen',
                 'n.npu_action',
                 'n.npu_para',
+                'n.npu_plataforma',
                 'n.npu_promocion',
                 'p.prm_nombre',
                 'p.prm_nombre_comercial',
@@ -80,6 +81,8 @@ class PushNotificationMaintenanceService
             'options' => [
                 'statuses' => ['TODO', 'PENDIENTE', 'ENVIADO', 'ERROR'],
                 'topics' => $this->topics(),
+                'platforms' => $this->platforms(),
+                'defaultPlatform' => 'Todo',
                 'defaultTopic' => '/topics/all',
             ],
             'notifications' => $notifications,
@@ -100,7 +103,8 @@ class PushNotificationMaintenanceService
                 'npu_cuerpo' => trim((string) $data['body']),
                 'npu_imagen' => $imagePath,
                 'npu_action' => trim((string) $data['action']),
-                'npu_para' => trim((string) $data['to']),
+                'npu_para' => trim((string) ($data['to'] ?? '')),
+                'npu_plataforma' => $this->platformValue((string) ($data['platform'] ?? 'Todo')),
                 'npu_promocion' => filled($data['promotionId'] ?? null) ? (int) $data['promotionId'] : null,
             ]);
 
@@ -126,6 +130,7 @@ class PushNotificationMaintenanceService
                     'n.npu_imagen',
                     'n.npu_action',
                     'n.npu_para',
+                    'n.npu_plataforma',
                     'n.npu_promocion',
                     'p.prm_nombre',
                     'p.prm_nombre_comercial',
@@ -153,6 +158,7 @@ class PushNotificationMaintenanceService
             'image' => (string) $row->npu_imagen,
             'action' => (string) $row->npu_action,
             'to' => (string) $row->npu_para,
+            'platform' => (string) ($row->npu_plataforma ?? 'WEB'),
             'promotionId' => $row->npu_promocion !== null ? (int) $row->npu_promocion : null,
             'promotionName' => (string) ($row->prm_nombre_comercial ?: $row->prm_nombre ?: ''),
             'scheduledAt' => $row->npe_fecha_envio,
@@ -187,6 +193,28 @@ class PushNotificationMaintenanceService
             ['value' => '/topics/androidsv', 'label' => 'Android SV'],
             ['value' => '/topics/generalWEB', 'label' => 'General WEB'],
         ];
+    }
+
+    /**
+     * @return array<int, array{value: string, label: string}>
+     */
+    private function platforms(): array
+    {
+        return [
+            ['value' => 'Todo', 'label' => 'Todo'],
+            ['value' => 'Android', 'label' => 'Android'],
+            ['value' => 'Ios', 'label' => 'Ios'],
+        ];
+    }
+
+    private function platformValue(string $platform): string
+    {
+        return match (strtolower(trim($platform))) {
+            'android' => 'Android',
+            'ios' => 'Ios',
+            'web' => 'WEB',
+            default => 'Todo',
+        };
     }
 
     private function storeImage(UploadedFile $image): string
