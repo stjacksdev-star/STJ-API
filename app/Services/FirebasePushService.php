@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 class FirebasePushService
 {
@@ -27,31 +29,65 @@ class FirebasePushService
      */
     public function sendToTokens(array $tokens, string $title, string $body, array $data = []): array
     {
+        $tokens = $this->cleanTokens($tokens);
+        $payload = $this->messagePayload($title, $body, $data);
+        $accessToken = $this->accessToken();
+        $url = $this->url();
         $summary = [
             'sent' => 0,
             'failed' => 0,
             'results' => [],
         ];
 
-        foreach ($this->cleanTokens($tokens) as $token) {
+        foreach (array_chunk($tokens, $this->tokenChunkSize()) as $chunk) {
             try {
-                $result = $this->sendMessage([
-                    'token' => $token,
-                    ...$this->messagePayload($title, $body, $data),
-                ]);
+                $responses = Http::pool(function ($pool) use ($chunk, $payload, $accessToken, $url) {
+                    return collect($chunk)
+                        ->mapWithKeys(fn (string $token) => [
+                            $token => $pool
+                                ->withToken($accessToken)
+                                ->asJson()
+                                ->connectTimeout($this->connectTimeout())
+                                ->timeout($this->sendTimeout())
+                                ->post($url, [
+                                    'message' => [
+                                        'token' => $token,
+                                        ...$payload,
+                                    ],
+                                ]),
+                        ])
+                        ->all();
+                });
+            } catch (Throwable $throwable) {
+                foreach ($chunk as $token) {
+                    $summary['failed']++;
+                    $summary['results'][] = [
+                        'token' => $token,
+                        'ok' => false,
+                        'result' => $this->shortResult($throwable->getMessage()),
+                    ];
+                }
 
-                $summary['sent']++;
-                $summary['results'][] = [
-                    'token' => $token,
-                    'ok' => true,
-                    'result' => $result,
-                ];
-            } catch (RuntimeException $exception) {
+                continue;
+            }
+
+            foreach ($responses as $token => $response) {
+                if ($response instanceof Response && ! $response->failed()) {
+                    $summary['sent']++;
+                    $summary['results'][] = [
+                        'token' => (string) $token,
+                        'ok' => true,
+                        'result' => $this->shortResult($response->body()),
+                    ];
+
+                    continue;
+                }
+
                 $summary['failed']++;
                 $summary['results'][] = [
-                    'token' => $token,
+                    'token' => (string) $token,
                     'ok' => false,
-                    'result' => $exception->getMessage(),
+                    'result' => $this->shortResult($response instanceof Response ? $response->body() : 'No response'),
                 ];
             }
         }
@@ -78,7 +114,8 @@ class FirebasePushService
      */
     public function sendMessage(array $message): string
     {
-        $response = Http::timeout($this->timeout())
+        $response = Http::connectTimeout($this->connectTimeout())
+            ->timeout($this->sendTimeout())
             ->withToken($this->accessToken())
             ->asJson()
             ->post($this->url(), ['message' => $message]);
@@ -308,6 +345,21 @@ class FirebasePushService
         return max(1, (int) config('services.fcm.timeout', 30));
     }
 
+    private function sendTimeout(): int
+    {
+        return max(1, (int) config('services.fcm.send_timeout', 8));
+    }
+
+    private function connectTimeout(): int
+    {
+        return max(1, (int) config('services.fcm.connect_timeout', 3));
+    }
+
+    private function tokenChunkSize(): int
+    {
+        return max(1, min(200, (int) config('services.fcm.token_chunk_size', 50)));
+    }
+
     private function iconUrl(): string
     {
         return trim((string) config('services.fcm.icon_url'));
@@ -377,5 +429,12 @@ class FirebasePushService
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function shortResult(string $result): string
+    {
+        $result = trim($result);
+
+        return mb_strlen($result) > 240 ? mb_substr($result, 0, 240) : $result;
     }
 }
