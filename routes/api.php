@@ -101,6 +101,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/subscribers/{subscriber}', [DashboardSubscriberController::class, 'destroy']);
         Route::get('/push-notifications', [DashboardPushNotificationController::class, 'index']);
         Route::post('/push-notifications', [DashboardPushNotificationController::class, 'store']);
+        Route::delete('/push-notifications/{notification}', [DashboardPushNotificationController::class, 'destroy']);
         Route::get('/user-country-access', [DashboardUserCountryAccessController::class, 'index']);
         Route::get('/user-country-access/current', [DashboardUserCountryAccessController::class, 'current']);
         Route::get('/user-country-access/users', [DashboardUserCountryAccessController::class, 'users']);

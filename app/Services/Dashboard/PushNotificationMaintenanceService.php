@@ -79,7 +79,7 @@ class PushNotificationMaintenanceService
 
         return [
             'options' => [
-                'statuses' => ['TODO', 'PENDIENTE', 'ENVIADO', 'ERROR'],
+                'statuses' => ['TODO', 'PENDIENTE', 'ENVIADO', 'ERROR', 'CANCELADO'],
                 'topics' => $this->topics(),
                 'platforms' => $this->platforms(),
                 'defaultPlatform' => 'Todo',
@@ -146,6 +146,68 @@ class PushNotificationMaintenanceService
 
             return $this->normalize($row);
         });
+    }
+
+    public function cancel(int $shipmentId): array
+    {
+        return DB::transaction(function () use ($shipmentId) {
+            $row = $this->findShipment($shipmentId);
+
+            if (! $row) {
+                throw ValidationException::withMessages([
+                    'notification' => 'La notificacion push no existe.',
+                ]);
+            }
+
+            if (strtoupper((string) $row->npe_estado) !== 'PENDIENTE') {
+                throw ValidationException::withMessages([
+                    'notification' => 'Solo se pueden cancelar notificaciones pendientes.',
+                ]);
+            }
+
+            DB::table('stj_notificaciones_push_envios')
+                ->where('npe_id', $shipmentId)
+                ->update([
+                    'npe_estado' => 'CANCELADO',
+                    'npe_resultado' => 'Cancelado desde dashboard',
+                ]);
+
+            $cancelled = $this->findShipment($shipmentId);
+
+            if (! $cancelled) {
+                throw ValidationException::withMessages([
+                    'notification' => 'No fue posible recuperar la notificacion cancelada.',
+                ]);
+            }
+
+            return $this->normalize($cancelled);
+        });
+    }
+
+    private function findShipment(int $shipmentId): ?object
+    {
+        return DB::table('stj_notificaciones_push_envios as e')
+            ->join('stj_notificaciones_push as n', 'e.npe_notificacion', '=', 'n.npu_id')
+            ->leftJoin('stj_promociones as p', 'n.npu_promocion', '=', 'p.prm_id')
+            ->select([
+                'e.npe_id',
+                'e.npe_notificacion',
+                'e.npe_fecha_envio',
+                'e.npe_estado',
+                'e.npe_resultado',
+                'n.npu_id',
+                'n.npu_titulo',
+                'n.npu_cuerpo',
+                'n.npu_imagen',
+                'n.npu_action',
+                'n.npu_para',
+                'n.npu_plataforma',
+                'n.npu_promocion',
+                'p.prm_nombre',
+                'p.prm_nombre_comercial',
+            ])
+            ->where('e.npe_id', $shipmentId)
+            ->first();
     }
 
     private function normalize(object $row): array

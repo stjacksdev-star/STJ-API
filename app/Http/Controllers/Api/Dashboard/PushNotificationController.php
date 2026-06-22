@@ -26,7 +26,7 @@ class PushNotificationController extends BaseController
         $validated = $request->validate([
             'startDate' => ['nullable', 'date'],
             'endDate' => ['nullable', 'date'],
-            'status' => ['nullable', 'string', Rule::in(['TODO', 'PENDIENTE', 'ENVIADO', 'ERROR'])],
+            'status' => ['nullable', 'string', Rule::in(['TODO', 'PENDIENTE', 'ENVIADO', 'ERROR', 'CANCELADO'])],
             'search' => ['nullable', 'string', 'max:255'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:5000'],
             'actor' => ['nullable', 'array'],
@@ -67,6 +67,28 @@ class PushNotificationController extends BaseController
         return $this->success(
             $this->pushNotifications->create($validated, $request->file('image')),
             'Notificacion push programada correctamente'
+        );
+    }
+
+    public function destroy(Request $request, int $notification)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        if (! $this->isRootActor($request)) {
+            return $this->error('Solo usuarios ROOT pueden administrar notificaciones push', 403);
+        }
+
+        $request->validate([
+            'actor' => ['nullable', 'array'],
+            'actor.permissions' => ['nullable', 'array'],
+            'actor.permissions.*' => ['nullable', 'string'],
+        ]);
+
+        return $this->success(
+            $this->pushNotifications->cancel($notification),
+            'Notificacion push cancelada correctamente'
         );
     }
 

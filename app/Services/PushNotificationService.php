@@ -36,11 +36,16 @@ class PushNotificationService
         $summary['pending'] = $notifications->count();
 
         foreach ($notifications as $notification) {
+            if (! $this->isStillPending((int) $notification->npe_id)) {
+                continue;
+            }
+
             try {
                 $result = $this->sendToFcm($notification);
 
                 DB::table('stj_notificaciones_push_envios')
                     ->where('npe_id', $notification->npe_id)
+                    ->where('npe_estado', 'PENDIENTE')
                     ->update([
                         'npe_estado' => 'ENVIADO',
                         'npe_resultado' => $this->storedResult($result),
@@ -50,6 +55,7 @@ class PushNotificationService
             } catch (Throwable $throwable) {
                 DB::table('stj_notificaciones_push_envios')
                     ->where('npe_id', $notification->npe_id)
+                    ->where('npe_estado', 'PENDIENTE')
                     ->update([
                         'npe_estado' => 'ERROR',
                         'npe_resultado' => $this->storedResult($throwable->getMessage()),
@@ -139,5 +145,13 @@ class PushNotificationService
     private function usesTokens(string $platform): bool
     {
         return in_array(strtolower(trim($platform)), ['todo', 'android', 'ios'], true);
+    }
+
+    private function isStillPending(int $shipmentId): bool
+    {
+        return DB::table('stj_notificaciones_push_envios')
+            ->where('npe_id', $shipmentId)
+            ->where('npe_estado', 'PENDIENTE')
+            ->exists();
     }
 }
