@@ -12,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class PushNotificationMaintenanceService
 {
+    private const DASHBOARD_TIMEZONE = 'America/El_Salvador';
+
     public function __construct(
         private readonly ImageOptimizer $images,
     ) {}
@@ -46,11 +48,11 @@ class PushNotificationMaintenanceService
             ]);
 
         if (filled($filters['startDate'] ?? null)) {
-            $query->where('e.npe_fecha_envio', '>=', Carbon::parse((string) $filters['startDate'])->startOfDay()->toDateTimeString());
+            $query->where('e.npe_fecha_envio', '>=', $this->dashboardDateTime($filters['startDate'])->startOfDay()->toDateTimeString());
         }
 
         if (filled($filters['endDate'] ?? null)) {
-            $query->where('e.npe_fecha_envio', '<=', Carbon::parse((string) $filters['endDate'])->endOfDay()->toDateTimeString());
+            $query->where('e.npe_fecha_envio', '<=', $this->dashboardDateTime($filters['endDate'])->endOfDay()->toDateTimeString());
         }
 
         if (filled($filters['status'] ?? null) && strtoupper((string) $filters['status']) !== 'TODO') {
@@ -94,7 +96,7 @@ class PushNotificationMaintenanceService
      */
     public function create(array $data, ?UploadedFile $image = null): array
     {
-        $scheduledAt = Carbon::parse((string) $data['scheduledAt'])->format('Y-m-d H:i:s');
+        $scheduledAt = $this->dashboardDateTime($data['scheduledAt'])->format('Y-m-d H:i:s');
         $imagePath = $image ? $this->storeImage($image) : trim((string) ($data['image'] ?? ''));
 
         return DB::transaction(function () use ($data, $scheduledAt, $imagePath) {
@@ -277,6 +279,11 @@ class PushNotificationMaintenanceService
             'web' => 'WEB',
             default => 'Todo',
         };
+    }
+
+    private function dashboardDateTime(mixed $value): Carbon
+    {
+        return Carbon::parse((string) $value, self::DASHBOARD_TIMEZONE);
     }
 
     private function storeImage(UploadedFile $image): string

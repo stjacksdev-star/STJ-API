@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\PushNotificationService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -226,6 +227,43 @@ class PushNotificationServiceTest extends TestCase
         });
 
         $this->assertSame(['android-token-1', 'android-token-2'], array_values(array_filter($sentTokens)));
+    }
+
+    public function test_it_uses_el_salvador_time_for_pending_push_notifications(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-23 09:55:00', 'America/El_Salvador'));
+
+        try {
+            Http::fake();
+
+            DB::table('stj_notificaciones_push')->insert([
+                'npu_id' => 102,
+                'npu_titulo' => 'Promo tarde',
+                'npu_cuerpo' => 'No enviar antes',
+                'npu_imagen' => '/images/future.jpg',
+                'npu_action' => 'https://stjacks.com/tarde',
+                'npu_para' => '/topics/sv',
+                'npu_plataforma' => 'WEB',
+                'npu_promocion' => null,
+            ]);
+
+            DB::table('stj_notificaciones_push_envios')->insert([
+                'npe_id' => 202,
+                'npe_notificacion' => 102,
+                'npe_fecha_envio' => '2026-06-23 15:00:00',
+                'npe_estado' => 'PENDIENTE',
+                'npe_resultado' => null,
+            ]);
+
+            $summary = app(PushNotificationService::class)->sendPending();
+
+            $this->assertSame(['pending' => 0, 'sent' => 0, 'failed' => 0], $summary);
+            $this->assertSame('PENDIENTE', DB::table('stj_notificaciones_push_envios')->value('npe_estado'));
+
+            Http::assertNothingSent();
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     private function privateKey(): string

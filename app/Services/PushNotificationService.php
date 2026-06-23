@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class PushNotificationService
 {
+    private const DASHBOARD_TIMEZONE = 'America/El_Salvador';
+
     public function __construct(
         private readonly FirebasePushService $firebase,
     ) {}
@@ -16,7 +19,7 @@ class PushNotificationService
      */
     public function sendPending(): array
     {
-        $now = now()->toDateTimeString();
+        $now = Carbon::now(self::DASHBOARD_TIMEZONE)->toDateTimeString();
         $summary = [
             'pending' => 0,
             'sent' => 0,
