@@ -2,13 +2,12 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class StorefrontProductService
 {
-    private const LEGACY_HOST = 'https://stjacks.com';
-
     public function forCountryAndSlug(string $countryCode, string $slug): ?array
     {
         $productId = $this->extractProductId($slug);
@@ -141,9 +140,7 @@ class StorefrontProductService
                 'category' => trim((string) ($related->categoria_nombre ?: 'Catalogo')),
                 'brand' => trim((string) ($related->pro_marca ?: 'ST JACKS')),
                 'sizes' => trim((string) ($related->pro_tallas ?: '')),
-                'imageUrl' => $related->pro_thumbs
-                    ? $this->productImageUrl((string) $related->pro_thumbs, 'p400')
-                    : null,
+                'imageUrl' => $this->productImageUrl((string) $related->pro_thumbs, 'p400'),
             ])
             ->values()
             ->all();
@@ -220,20 +217,8 @@ class StorefrontProductService
         ];
     }
 
-    private function productImageUrl(string $filename, string $folder): string
+    private function productImageUrl(string $filename, string $folder): ?string
     {
-        $filename = trim($filename);
-
-        if (str_starts_with($filename, 'http://') || str_starts_with($filename, 'https://')) {
-            return $filename;
-        }
-
-        $spacesUrl = rtrim((string) config('filesystems.disks.spaces.url'), '/');
-
-        if ($spacesUrl !== '') {
-            return $spacesUrl.'/images/'.$folder.'/'.ltrim($filename, '/');
-        }
-
-        return self::LEGACY_HOST.'/images/'.$folder.'/'.ltrim($filename, '/');
+        return StorefrontImageUrl::image($filename, $folder);
     }
 }

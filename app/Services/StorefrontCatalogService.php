@@ -2,12 +2,12 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class StorefrontCatalogService
 {
-    private const LEGACY_HOST = 'https://stjacks.com';
     private const GROUP_MAPPINGS = [
         'girls' => ['Niñas'],
         'boys' => ['Niños'],
@@ -136,9 +136,7 @@ class StorefrontCatalogService
                     'availableSizes' => $availabilitySummary['availableSizes'] ?? [],
                     'hasStock' => (bool) ($availabilitySummary['hasStock'] ?? false),
                     'stockTotal' => (int) ($availabilitySummary['totalQuantity'] ?? 0),
-                    'imageUrl' => $product->pro_thumbs
-                        ? self::LEGACY_HOST.'/images/p400/'.ltrim((string) $product->pro_thumbs, '/')
-                        : null,
+                    'imageUrl' => StorefrontImageUrl::image((string) $product->pro_thumbs, 'p400'),
                 ];
             })
             ->values()

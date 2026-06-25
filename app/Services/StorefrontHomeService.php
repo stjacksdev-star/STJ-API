@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Arr;
 
 class StorefrontHomeService
@@ -107,7 +108,7 @@ class StorefrontHomeService
             return $path;
         }
 
-        return self::LEGACY_HOST.$this->normalizePath($path);
+        return StorefrontImageUrl::asset($path);
     }
 
     private function productImageUrl(?string $filename): ?string
@@ -116,7 +117,7 @@ class StorefrontHomeService
             return null;
         }
 
-        return self::LEGACY_HOST.'/images/p400/'.ltrim($filename, '/');
+        return StorefrontImageUrl::image($filename, 'p400');
     }
 
     private function linkUrl(?string $path): ?string
