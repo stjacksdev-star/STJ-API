@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardU
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\PushSendController;
+use App\Http\Controllers\Api\StorefrontAssetController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -31,6 +32,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show'])
+    ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
