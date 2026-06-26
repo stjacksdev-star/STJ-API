@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
 use App\Http\Controllers\Api\Dashboard\AppointmentController as DashboardAppointmentController;
+use App\Http\Controllers\Api\Dashboard\AssetPublicationController as DashboardAssetPublicationController;
 use App\Http\Controllers\Api\Dashboard\ClaimController as DashboardClaimController;
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
@@ -127,6 +128,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/orders/packed-pickup', [DashboardOrderReferenceController::class, 'markPackedForPickup']);
         Route::post('/orders/route', [DashboardOrderReferenceController::class, 'markInRoute']);
         Route::post('/orders/deliver', [DashboardOrderReferenceController::class, 'deliver']);
+        Route::post('/tasks/put-assets', DashboardAssetPublicationController::class);
     });
 });
 

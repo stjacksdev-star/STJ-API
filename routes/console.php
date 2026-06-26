@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use App\Services\Dashboard\AssetPublicationService;
 use App\Services\PushNotificationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Carbon;
@@ -100,6 +101,22 @@ Artisan::command('push:send-pending', function (PushNotificationService $pushNot
 
     return $summary['failed'] > 0 ? self::FAILURE : self::SUCCESS;
 })->purpose('Envia las notificaciones push pendientes programadas');
+
+Artisan::command('assets:put', function (AssetPublicationService $assets) {
+    $this->line("ST. JACK'S WEB - PUT ASSETS");
+    $this->line('INICIO => '.now()->toDateTimeString());
+
+    $payload = $assets->publish();
+    $summary = $payload['summary'] ?? [];
+
+    $this->line('Assets finalizados: '.($summary['finished'] ?? 0));
+    $this->line('Assets activados: '.($summary['activated'] ?? 0));
+    $this->line('Paises procesados: '.($summary['countries'] ?? 0));
+    $this->line('Archivo JSON: '.($summary['path'] ?? ''));
+    $this->line('FIN => '.now()->toDateTimeString());
+
+    return self::SUCCESS;
+})->purpose('Activa/finaliza assets y publica storage/app/storefront/assets.json');
 
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 Schedule::command('push:send-pending')->hourly();
