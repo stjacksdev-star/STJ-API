@@ -19,8 +19,8 @@ class PushNotificationController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
-        if (! $this->isRootActor($request)) {
-            return $this->error('Solo usuarios ROOT pueden administrar notificaciones push', 403);
+        if (! $this->canManagePushNotifications($request)) {
+            return $this->error('No tienes permiso para administrar notificaciones push', 403);
         }
 
         $validated = $request->validate([
@@ -46,8 +46,8 @@ class PushNotificationController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
-        if (! $this->isRootActor($request)) {
-            return $this->error('Solo usuarios ROOT pueden administrar notificaciones push', 403);
+        if (! $this->canManagePushNotifications($request)) {
+            return $this->error('No tienes permiso para administrar notificaciones push', 403);
         }
 
         $validated = $request->validate([
@@ -76,8 +76,8 @@ class PushNotificationController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
-        if (! $this->isRootActor($request)) {
-            return $this->error('Solo usuarios ROOT pueden administrar notificaciones push', 403);
+        if (! $this->canManagePushNotifications($request)) {
+            return $this->error('No tienes permiso para administrar notificaciones push', 403);
         }
 
         $request->validate([
@@ -92,10 +92,14 @@ class PushNotificationController extends BaseController
         );
     }
 
-    private function isRootActor(Request $request): bool
+    private function canManagePushNotifications(Request $request): bool
     {
-        $permissions = (array) $request->input('actor.permissions', []);
+        $permissions = collect((array) $request->input('actor.permissions', []))
+            ->map(fn (mixed $permission) => strtoupper((string) $permission))
+            ->all();
 
-        return in_array('ROOT', $permissions, true);
+        return in_array('ROOT', $permissions, true)
+            || in_array('MENU_PUSH_NOTIFICACIONES', $permissions, true)
+            || in_array('OP_MENU_PUSH_NOTIFICACIONES', $permissions, true);
     }
 }
