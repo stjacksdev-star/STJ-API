@@ -28,12 +28,15 @@ use App\Http\Controllers\Api\StorefrontHomeController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
+use App\Http\Controllers\Api\StorefrontPromotionController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 'show'])
+    ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/promotions/{country}', [StorefrontPromotionController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
