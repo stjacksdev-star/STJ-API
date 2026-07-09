@@ -869,8 +869,8 @@ class SalesKpiService
             ->orderByRaw('MONTH(tok_fecha) ASC')
             ->selectRaw("
                 MONTH(tok_fecha) AS month,
-                SUM(CASE WHEN tok_tipo = 'Android' THEN 1 ELSE 0 END) AS android,
-                SUM(CASE WHEN tok_tipo = 'Ios' THEN 1 ELSE 0 END) AS ios
+                COUNT(DISTINCT CASE WHEN tok_tipo = 'Android' THEN tok_token END) AS android,
+                COUNT(DISTINCT CASE WHEN tok_tipo = 'Ios' THEN tok_token END) AS ios
             ")
             ->get()
             ->map(fn (object $row) => [
