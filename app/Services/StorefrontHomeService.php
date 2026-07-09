@@ -44,6 +44,8 @@ class StorefrontHomeService
     {
         return collect($slides)
             ->map(fn (array $slide) => [
+                'imagen' => $this->assetUrl(Arr::get($slide, 'desktop')),
+                'imagen_movil' => $this->assetUrl(Arr::get($slide, 'mobile')),
                 'desktopImage' => $this->assetUrl(Arr::get($slide, 'desktop')),
                 'mobileImage' => $this->assetUrl(Arr::get($slide, 'mobile')),
                 'href' => $this->linkUrl(Arr::get($slide, 'link')),

@@ -43,11 +43,13 @@ class StorefrontAssetService
                 fn (array $asset) => (int) ($asset['id'] ?? 0),
             ])
             ->map(fn (array $asset) => [
-                'desktopImage' => $this->assetUrl($asset['desktopImage'] ?? $asset['image'] ?? null),
-                'mobileImage' => $this->assetUrl($asset['mobileImage'] ?? null),
+                'imagen' => $this->assetUrl($asset['ast_imagen'] ?? $asset['imagen'] ?? $asset['desktopImage'] ?? $asset['image'] ?? null),
+                'imagen_movil' => $this->assetUrl($asset['ast_imagen_movil'] ?? $asset['imagen_movil'] ?? $asset['mobileImage'] ?? null),
+                'desktopImage' => $this->assetUrl($asset['ast_imagen'] ?? $asset['imagen'] ?? $asset['desktopImage'] ?? $asset['image'] ?? null),
+                'mobileImage' => $this->assetUrl($asset['ast_imagen_movil'] ?? $asset['imagen_movil'] ?? $asset['mobileImage'] ?? null),
                 'href' => $this->linkUrl($asset['link'] ?? null),
             ])
-            ->filter(fn (array $asset) => $asset['desktopImage'] || $asset['mobileImage'])
+            ->filter(fn (array $asset) => $asset['imagen'] || $asset['imagen_movil'])
             ->values()
             ->all();
     }
@@ -60,11 +62,13 @@ class StorefrontAssetService
                 fn (array $asset) => (int) ($asset['id'] ?? 0),
             ])
             ->map(fn (array $asset) => [
-                'desktopImage' => $this->assetUrl($asset['desktopImage'] ?? $asset['image'] ?? null),
-                'mobileImage' => $this->assetUrl($asset['mobileImage'] ?? null),
+                'imagen' => $this->assetUrl($asset['ast_imagen'] ?? $asset['imagen'] ?? $asset['desktopImage'] ?? $asset['image'] ?? null),
+                'imagen_movil' => $this->assetUrl($asset['ast_imagen_movil'] ?? $asset['imagen_movil'] ?? $asset['mobileImage'] ?? null),
+                'desktopImage' => $this->assetUrl($asset['ast_imagen'] ?? $asset['imagen'] ?? $asset['desktopImage'] ?? $asset['image'] ?? null),
+                'mobileImage' => $this->assetUrl($asset['ast_imagen_movil'] ?? $asset['imagen_movil'] ?? $asset['mobileImage'] ?? null),
                 'href' => $this->linkUrl($asset['link'] ?? null),
             ])
-            ->filter(fn (array $asset) => $asset['desktopImage'] || $asset['mobileImage'])
+            ->filter(fn (array $asset) => $asset['imagen'] || $asset['imagen_movil'])
             ->values()
             ->all();
     }
