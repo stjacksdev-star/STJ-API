@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
+use App\Http\Controllers\Api\StorefrontSubscriberController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -46,6 +47,8 @@ Route::get('/storefront/product/{country}/{slug}/availability', [StorefrontProdu
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationController::class);
 Route::post('/storefront/orders', [StorefrontOrderController::class, 'store']);
+Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
+    ->where('country', '[A-Za-z]{2}');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
