@@ -19,6 +19,7 @@ class StorefrontAssetService
             'heroSlides' => $this->mapSlider($assets['slider'] ?? []),
             'banners' => $this->mapBanners($assets['banner'] ?? []),
             'newArrivals' => $this->mapNewArrivals($assets['lo-mas-nuevo'] ?? []),
+            'coupons' => $this->mapCoupons($assets['cupon'] ?? []),
         ];
     }
 
@@ -104,6 +105,26 @@ class StorefrontAssetService
             });
 
         return $columns;
+    }
+
+    private function mapCoupons(array $assets): array
+    {
+        return collect($assets)
+            ->sortBy([
+                fn (array $asset) => (int) ($asset['order'] ?? 0),
+                fn (array $asset) => (int) ($asset['id'] ?? 0),
+            ])
+            ->map(fn (array $asset) => [
+                'id' => $asset['id'] ?? null,
+                'title' => $asset['title'] ?? 'Mis Ofertas',
+                'image' => $this->assetUrl($asset['image'] ?? $asset['desktopImage'] ?? null),
+                'mobileImage' => $this->assetUrl($asset['mobileImage'] ?? null),
+                'href' => $this->linkUrl($asset['link'] ?? null),
+                'order' => $asset['order'] ?? null,
+            ])
+            ->filter(fn (array $asset) => $asset['image'] || $asset['mobileImage'])
+            ->values()
+            ->all();
     }
 
     private function positionColumn(mixed $position): string
