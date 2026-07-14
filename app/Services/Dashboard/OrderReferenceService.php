@@ -1940,7 +1940,24 @@ class OrderReferenceService
     private function ensureRootActor(array $actor): void
     {
         $permissions = collect($actor['permissions'] ?? [])
-            ->map(fn ($permission) => strtoupper(trim((string) $permission)))
+            ->map(function ($permission) {
+                if (is_array($permission)) {
+                    $permission = $permission['ope_codigo']
+                        ?? $permission['aope_codigo']
+                        ?? $permission['codigo']
+                        ?? $permission['code']
+                        ?? null;
+                } elseif (is_object($permission)) {
+                    $permission = $permission->ope_codigo
+                        ?? $permission->aope_codigo
+                        ?? $permission->codigo
+                        ?? $permission->code
+                        ?? null;
+                }
+
+                return strtoupper(trim((string) $permission));
+            })
+            ->filter()
             ->all();
 
         if (! in_array('ROOT', $permissions, true)) {

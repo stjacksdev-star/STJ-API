@@ -173,7 +173,6 @@ class OrderReferenceController extends BaseController
             'reference' => ['required', 'string', 'max:60'],
             'actor' => ['required', 'array'],
             'actor.permissions' => ['required', 'array'],
-            'actor.permissions.*' => ['string', 'max:100'],
         ]);
 
         return $this->success(
@@ -220,7 +219,6 @@ class OrderReferenceController extends BaseController
             'actor.email' => ['nullable', 'string', 'max:150'],
             'actor.username' => ['nullable', 'string', 'max:100'],
             'actor.permissions' => ['required', 'array'],
-            'actor.permissions.*' => ['string', 'max:100'],
             'actor.ip' => ['nullable', 'string', 'max:45'],
             'actor.userAgent' => ['nullable', 'string', 'max:500'],
         ]);
