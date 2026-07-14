@@ -12,6 +12,8 @@ use Throwable;
 
 class OrderReferenceService
 {
+    private const CARD_AMOUNT_INCREASE_TOLERANCE = 0.05;
+
     public function __construct(
         private readonly Smtp2GoMailer $mailer,
     ) {
@@ -538,7 +540,7 @@ class OrderReferenceService
             $difference = round($calculatedPaid - $originalPaid, 2);
             $isCardPayment = strtoupper((string) ($order->ppa_tipo ?? '')) === 'TARJETA';
 
-            if ($isCardPayment && $difference > 0.02) {
+            if ($isCardPayment && $difference > self::CARD_AMOUNT_INCREASE_TOLERANCE) {
                 throw ValidationException::withMessages([
                     'order' => 'No se puede procesar un pedido pagado con tarjeta cuando el detalle supera el total aprobado.',
                 ]);
@@ -832,10 +834,11 @@ class OrderReferenceService
             : 0.0;
         $newCalculatedPaid = round($currentSubtotal - (float) $editedLineSubtotal + $newLineSubtotal + $shipping, 2);
         $approvedPaid = round((float) ($line->ppa_monto ?? 0), 2);
+        $increase = round($newCalculatedPaid - $approvedPaid, 2);
 
-        if ($newCalculatedPaid > $approvedPaid + 0.009) {
+        if ($increase > self::CARD_AMOUNT_INCREASE_TOLERANCE) {
             throw ValidationException::withMessages([
-                'line' => 'No se puede aumentar el monto de un pedido pagado con tarjeta. El detalle debe bajar o mantenerse igual al total aprobado.',
+                'line' => 'No se puede aumentar el monto de un pedido pagado con tarjeta por mas de 0.05 sobre el total aprobado.',
             ]);
         }
     }
