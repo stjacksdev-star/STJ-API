@@ -433,6 +433,97 @@ class OrderReferenceService
     }
 
     /**
+     * @param array<string, mixed> $actor
+     */
+    public function shippingManagement(string $reference, array $actor = []): array
+    {
+        $this->ensureRootActor($actor);
+
+        $order = $this->shippingManagementOrder($reference);
+
+        if (! $order) {
+            throw ValidationException::withMessages([
+                'reference' => 'No se encontro un pedido con la referencia STJ indicada.',
+            ]);
+        }
+
+        return $this->normalizeShippingManagement($order);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $actor
+     */
+    public function updateShippingManagement(string $reference, array $data, array $actor = []): array
+    {
+        $this->ensureRootActor($actor);
+
+        return DB::transaction(function () use ($reference, $data, $actor) {
+            $order = $this->shippingManagementOrder($reference, true);
+
+            if (! $order) {
+                throw ValidationException::withMessages([
+                    'reference' => 'No se encontro un pedido con la referencia STJ indicada.',
+                ]);
+            }
+
+            if (strtoupper((string) $order->ped_checkout) !== 'DOMICILIO' || $order->pdi_id === null || $order->dir_id === null) {
+                throw ValidationException::withMessages([
+                    'order' => 'El pedido no es de tipo DOMICILIO o no tiene una direccion asociada.',
+                ]);
+            }
+
+            $actorName = $this->actorName($actor);
+            $actorIp = $actor['ip'] ?? Request::ip();
+            $now = now();
+
+            DB::table('stj_pedidos_direccion')
+                ->where('pdi_id', (int) $order->pdi_id)
+                ->update([
+                    'pdi_tipo_envio' => $this->trimText($data['shippingType'] ?? '', 50),
+                    'pdi_id_urbano' => $this->trimText($data['urbanId'] ?? '', 100),
+                    'pdi_id_shipping' => $this->nullableTrimText($data['shippingId'] ?? null, 100),
+                    'pdi_costo_envio' => (float) ($data['shippingCost'] ?? 0),
+                    'pdi_costo_envio_txt' => $this->trimText($data['shippingCostText'] ?? '', 200),
+                    'pdi_costo_envio_final' => (float) ($data['finalShippingCost'] ?? 0),
+                    'pdi_aplica_envio_gratis' => strtoupper((string) ($data['freeShipping'] ?? 'NO')),
+                    'pdi_fecha_ruta' => $this->nullableDateTime($data['routeAt'] ?? null),
+                    'pdi_a_usuario' => $actorName,
+                    'pdi_a_ip' => $actorIp,
+                    'pdi_a_fecha' => $now,
+                ]);
+
+            DB::table('stj_direcciones')
+                ->where('dir_id', (int) $order->dir_id)
+                ->update([
+                    'dir_tipo' => $this->trimText($data['addressType'] ?? '', 30),
+                    'dir_misma_persona' => strtoupper((string) ($data['samePerson'] ?? 'NO')),
+                    'dir_misma_direccion' => strtoupper((string) ($data['sameAddress'] ?? 'NO')),
+                    'dir_pais' => $this->trimText($data['country'] ?? '', 10),
+                    'dir_latitud' => $this->nullableTrimText($data['latitude'] ?? null, 50),
+                    'dir_longitud' => $this->nullableTrimText($data['longitude'] ?? null, 50),
+                    'dir_direccion' => $this->trimText($data['address'] ?? '', 200),
+                    'dir_referencia' => $this->trimText($data['referencePoint'] ?? '', 200),
+                    'dir_departamento' => $this->nullableTrimText($data['departmentId'] ?? null, 30),
+                    'dir_municipio' => $this->nullableTrimText($data['municipalityId'] ?? null, 30),
+                    'dir_departamento_txt' => $this->trimText($data['department'] ?? '', 100),
+                    'dir_municipio_txt' => $this->trimText($data['municipality'] ?? '', 100),
+                    'dir_distrito' => $this->nullableTrimText($data['district'] ?? null, 100),
+                    'dir_persona' => $this->trimText($data['receiverName'] ?? '', 100),
+                    'dir_telefono' => $this->trimText($data['receiverPhone'] ?? '', 100),
+                    'dir_save' => $this->trimText($data['saveType'] ?? '', 20),
+                    'dir_a_usuario' => $actorName,
+                    'dir_a_ip' => $actorIp,
+                    'dir_a_fecha' => $now,
+                ]);
+
+            $updated = $this->shippingManagementOrder($reference);
+
+            return $this->normalizeShippingManagement($updated);
+        });
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public function updateLine(int $lineId, array $data, array $actor = []): array
@@ -1740,6 +1831,125 @@ class OrderReferenceService
             ->first();
     }
 
+    private function shippingManagementOrder(string $reference, bool $lock = false): ?object
+    {
+        $query = DB::table('stj_pedidos_pago as pay')
+            ->join('stj_pedidos as p', 'p.ped_id', '=', 'pay.ppa_pedido')
+            ->leftJoin('stj_pedidos_direccion as pd', 'pd.pdi_pedido', '=', 'p.ped_id')
+            ->leftJoin('stj_direcciones as d', 'd.dir_id', '=', 'pd.pdi_direccion')
+            ->where('pay.ppa_ref', trim($reference))
+            ->select([
+                'pay.ppa_ref',
+                'p.ped_id',
+                'p.ped_id_pais',
+                'p.ped_checkout',
+                'p.ped_estatus',
+                'pd.pdi_id',
+                'pd.pdi_pedido',
+                'pd.pdi_direccion',
+                'pd.pdi_tipo_envio',
+                'pd.pdi_id_urbano',
+                'pd.pdi_id_shipping',
+                'pd.pdi_costo_envio',
+                'pd.pdi_costo_envio_txt',
+                'pd.pdi_costo_envio_final',
+                'pd.pdi_aplica_envio_gratis',
+                'pd.pdi_fecha_ruta',
+                'd.dir_id',
+                'd.dir_tipo',
+                'd.dir_misma_persona',
+                'd.dir_misma_direccion',
+                'd.dir_fecha',
+                'd.dir_usuario',
+                'd.dir_pais',
+                'd.dir_latitud',
+                'd.dir_longitud',
+                'd.dir_direccion',
+                'd.dir_referencia',
+                'd.dir_departamento',
+                'd.dir_municipio',
+                'd.dir_departamento_txt',
+                'd.dir_municipio_txt',
+                'd.dir_distrito',
+                'd.dir_persona',
+                'd.dir_telefono',
+                'd.dir_save',
+            ])
+            ->orderByDesc('pay.ppa_id');
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        return $query->first();
+    }
+
+    private function normalizeShippingManagement(object $order): array
+    {
+        $checkout = strtoupper((string) ($order->ped_checkout ?? ''));
+
+        return [
+            'reference' => (string) ($order->ppa_ref ?? ''),
+            'orderId' => (int) ($order->ped_id ?? 0),
+            'countryId' => (int) ($order->ped_id_pais ?? 0),
+            'checkout' => $checkout,
+            'status' => (string) ($order->ped_estatus ?? ''),
+            'isHomeDelivery' => $checkout === 'DOMICILIO',
+            'orderShipping' => $checkout === 'DOMICILIO' ? [
+                'id' => $order->pdi_id !== null ? (int) $order->pdi_id : null,
+                'orderId' => $order->pdi_pedido !== null ? (int) $order->pdi_pedido : null,
+                'addressId' => $order->pdi_direccion !== null ? (int) $order->pdi_direccion : null,
+                'shippingType' => (string) ($order->pdi_tipo_envio ?? ''),
+                'urbanId' => (string) ($order->pdi_id_urbano ?? ''),
+                'shippingId' => (string) ($order->pdi_id_shipping ?? ''),
+                'shippingCost' => (float) ($order->pdi_costo_envio ?? 0),
+                'shippingCostText' => (string) ($order->pdi_costo_envio_txt ?? ''),
+                'finalShippingCost' => (float) ($order->pdi_costo_envio_final ?? 0),
+                'freeShipping' => (string) ($order->pdi_aplica_envio_gratis ?? 'NO'),
+                'routeAt' => filled($order->pdi_fecha_ruta ?? null)
+                    ? Carbon::parse($order->pdi_fecha_ruta)->format('Y-m-d\TH:i')
+                    : '',
+            ] : null,
+            'address' => $checkout === 'DOMICILIO' ? [
+                'id' => $order->dir_id !== null ? (int) $order->dir_id : null,
+                'addressType' => (string) ($order->dir_tipo ?? ''),
+                'samePerson' => (string) ($order->dir_misma_persona ?? 'NO'),
+                'sameAddress' => (string) ($order->dir_misma_direccion ?? 'NO'),
+                'createdAt' => (string) ($order->dir_fecha ?? ''),
+                'userId' => (string) ($order->dir_usuario ?? ''),
+                'country' => (string) ($order->dir_pais ?? ''),
+                'latitude' => (string) ($order->dir_latitud ?? ''),
+                'longitude' => (string) ($order->dir_longitud ?? ''),
+                'address' => (string) ($order->dir_direccion ?? ''),
+                'referencePoint' => (string) ($order->dir_referencia ?? ''),
+                'departmentId' => (string) ($order->dir_departamento ?? ''),
+                'municipalityId' => (string) ($order->dir_municipio ?? ''),
+                'department' => (string) ($order->dir_departamento_txt ?? ''),
+                'municipality' => (string) ($order->dir_municipio_txt ?? ''),
+                'district' => (string) ($order->dir_distrito ?? ''),
+                'receiverName' => (string) ($order->dir_persona ?? ''),
+                'receiverPhone' => (string) ($order->dir_telefono ?? ''),
+                'saveType' => (string) ($order->dir_save ?? ''),
+            ] : null,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $actor
+     */
+    private function ensureRootActor(array $actor): void
+    {
+        $permissions = collect($actor['permissions'] ?? [])
+            ->map(fn ($permission) => strtoupper(trim((string) $permission)))
+            ->all();
+
+        if (! in_array('ROOT', $permissions, true)) {
+            throw ValidationException::withMessages([
+                'actor' => 'Solo un usuario ROOT puede gestionar los datos de envio del pedido.',
+            ]);
+        }
+    }
+
     private function applyOrderSearchTerm($query, string $like): void
     {
         $query
@@ -2212,6 +2422,20 @@ class OrderReferenceService
     private function trimText(mixed $value, int $limit): string
     {
         return mb_substr(trim((string) $value), 0, $limit);
+    }
+
+    private function nullableTrimText(mixed $value, int $limit): ?string
+    {
+        $value = $this->trimText($value, $limit);
+
+        return $value !== '' ? $value : null;
+    }
+
+    private function nullableDateTime(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? Carbon::parse($value)->format('Y-m-d H:i:s') : null;
     }
 
     private function resolveCountryId(string $country): int

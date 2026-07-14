@@ -132,6 +132,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/orders/refunds', [DashboardOrderReferenceController::class, 'refunds']);
         Route::get('/orders/product', [DashboardOrderReferenceController::class, 'product']);
         Route::post('/orders/data', [DashboardOrderReferenceController::class, 'updateData']);
+        Route::post('/orders/shipping-management/lookup', [DashboardOrderReferenceController::class, 'shippingManagement']);
+        Route::post('/orders/shipping-management', [DashboardOrderReferenceController::class, 'updateShippingManagement']);
         Route::post('/orders/lines/{line}', [DashboardOrderReferenceController::class, 'updateLine']);
         Route::post('/orders/process', [DashboardOrderReferenceController::class, 'process']);
         Route::post('/orders/packed-pickup', [DashboardOrderReferenceController::class, 'markPackedForPickup']);

@@ -163,6 +163,74 @@ class OrderReferenceController extends BaseController
         );
     }
 
+    public function shippingManagement(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'reference' => ['required', 'string', 'max:60'],
+            'actor' => ['required', 'array'],
+            'actor.permissions' => ['required', 'array'],
+            'actor.permissions.*' => ['string', 'max:100'],
+        ]);
+
+        return $this->success(
+            $this->orders->shippingManagement($validated['reference'], $validated['actor']),
+            'Pedido obtenido'
+        );
+    }
+
+    public function updateShippingManagement(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'reference' => ['required', 'string', 'max:60'],
+            'shippingType' => ['required', 'string', 'max:50'],
+            'urbanId' => ['nullable', 'string', 'max:100'],
+            'shippingId' => ['nullable', 'string', 'max:100'],
+            'shippingCost' => ['required', 'numeric', 'min:0'],
+            'shippingCostText' => ['nullable', 'string', 'max:200'],
+            'finalShippingCost' => ['required', 'numeric', 'min:0'],
+            'freeShipping' => ['required', 'in:SI,NO'],
+            'routeAt' => ['nullable', 'date'],
+            'addressType' => ['nullable', 'string', 'max:30'],
+            'samePerson' => ['required', 'in:SI,NO'],
+            'sameAddress' => ['required', 'in:SI,NO'],
+            'country' => ['required', 'string', 'max:10'],
+            'latitude' => ['nullable', 'string', 'max:50'],
+            'longitude' => ['nullable', 'string', 'max:50'],
+            'address' => ['required', 'string', 'max:200'],
+            'referencePoint' => ['nullable', 'string', 'max:200'],
+            'departmentId' => ['nullable', 'string', 'max:30'],
+            'municipalityId' => ['nullable', 'string', 'max:30'],
+            'department' => ['nullable', 'string', 'max:100'],
+            'municipality' => ['nullable', 'string', 'max:100'],
+            'district' => ['nullable', 'string', 'max:100'],
+            'receiverName' => ['nullable', 'string', 'max:100'],
+            'receiverPhone' => ['nullable', 'string', 'max:100'],
+            'saveType' => ['nullable', 'string', 'max:20'],
+            'actor' => ['required', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:150'],
+            'actor.username' => ['nullable', 'string', 'max:100'],
+            'actor.permissions' => ['required', 'array'],
+            'actor.permissions.*' => ['string', 'max:100'],
+            'actor.ip' => ['nullable', 'string', 'max:45'],
+            'actor.userAgent' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return $this->success(
+            $this->orders->updateShippingManagement($validated['reference'], $validated, $validated['actor']),
+            'Datos de envio actualizados'
+        );
+    }
+
     public function process(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {
