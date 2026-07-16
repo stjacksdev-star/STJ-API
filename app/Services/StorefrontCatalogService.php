@@ -47,6 +47,7 @@ class StorefrontCatalogService
                     ],
                 ],
                 'products' => [],
+                'categoryHero' => null,
                 'search' => [
                     'query' => $trimmedQuery,
                     'total' => 0,
@@ -175,6 +176,7 @@ class StorefrontCatalogService
                 ],
             ],
             'products' => $products,
+            'categoryHero' => $this->categoryHero($activeGroup),
             'search' => [
                 'query' => $trimmedQuery,
                 'total' => count($products),
@@ -248,6 +250,40 @@ class StorefrontCatalogService
         };
     }
 
+    private function categoryHero(string $group): ?array
+    {
+        $categories = self::GROUP_MAPPINGS[$group] ?? null;
+
+        if (! $categories) {
+            return null;
+        }
+
+        $category = DB::table('stj_categorias')
+            ->select([
+                'cat_nombre',
+                'cat_header',
+                'cat_descripcion',
+                'cat_orden',
+            ])
+            ->whereIn('cat_nombre', $categories)
+            ->orderByRaw("TRIM(COALESCE(cat_header, '')) = ''")
+            ->orderByRaw("TRIM(COALESCE(cat_descripcion, '')) = ''")
+            ->orderByRaw('cat_orden IS NULL')
+            ->orderBy('cat_orden')
+            ->orderBy('cat_nombre')
+            ->first();
+
+        if (! $category) {
+            return null;
+        }
+
+        return [
+            'title' => trim((string) $category->cat_nombre),
+            'description' => trim((string) $category->cat_descripcion),
+            'image' => $this->categoryAsset($category->cat_header),
+        ];
+    }
+
     private function groupFilters(): array
     {
         return [
@@ -276,5 +312,33 @@ class StorefrontCatalogService
         return [
             ['value' => '1', 'label' => 'Solo rebajas'],
         ];
+    }
+
+    private function categoryAsset(mixed $path): ?string
+    {
+        $path = trim((string) $path);
+
+        if ($path === '') {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        if (str_starts_with($path, '/images/') || str_starts_with($path, 'images/')) {
+            return StorefrontImageUrl::asset($path);
+        }
+
+        $baseUrl = rtrim((string) config('filesystems.disks.spaces.url'), '/')
+            ?: 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com';
+
+        $path = ltrim($path, '/');
+
+        if (str_starts_with($path, 'categorias/')) {
+            return $baseUrl.'/'.$path;
+        }
+
+        return $baseUrl.'/categorias/'.$path;
     }
 }
