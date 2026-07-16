@@ -296,8 +296,8 @@ class StorefrontBrandService
             ])
             ->whereNotNull('c.cat_nombre')
             ->groupBy('c.cat_nombre')
-            ->orderByRaw('orden IS NULL')
-            ->orderBy('orden')
+            ->orderByRaw('MIN(c.cat_orden) IS NULL')
+            ->orderByRaw('MIN(c.cat_orden)')
             ->orderBy('c.cat_nombre')
             ->get()
             ->map(fn ($group) => [
@@ -352,8 +352,8 @@ class StorefrontBrandService
                 DB::raw('COUNT(*) as total'),
             ])
             ->groupBy('c.cat_nombre', 'c.cat_logo_app', 'c.cat_header')
-            ->orderByRaw('orden IS NULL')
-            ->orderBy('orden')
+            ->orderByRaw('MIN(c.cat_orden) IS NULL')
+            ->orderByRaw('MIN(c.cat_orden)')
             ->orderBy('c.cat_nombre')
             ->get()
             ->map(fn ($block) => [
