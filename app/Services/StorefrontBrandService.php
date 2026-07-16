@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontBrandMap;
 use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -11,11 +12,10 @@ class StorefrontBrandService
 {
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailabilityService,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<string, mixed>|null
      */
     public function show(string $countryCode, string $slug, array $filters = []): ?array
@@ -44,16 +44,27 @@ class StorefrontBrandService
         }
 
         $query = trim((string) ($filters['q'] ?? ''));
+        $group = trim((string) ($filters['group'] ?? ''));
         $category = trim((string) ($filters['category'] ?? ''));
         $sort = trim((string) ($filters['sort'] ?? 'featured'));
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = max(6, min((int) ($filters['perPage'] ?? 12), 24));
+        $slug = strtolower((string) $this->value($brand, 'mar_slug'));
 
         $baseQuery = $this->baseProductQuery((int) $country->pai_id);
-        $this->applyBrandFilter($baseQuery, $brand);
+        StorefrontBrandMap::applyProductBrandFilter($baseQuery, $slug);
+        $brandOnlyQuery = clone $baseQuery;
         $this->applySearchFilter($baseQuery, $query);
 
-        $categoryQuery = clone $baseQuery;
+        $groupsQuery = clone $baseQuery;
+        $this->applyCategoryFilter($groupsQuery, $category);
+
+        $categoriesQuery = clone $baseQuery;
+        $this->applyGroupFilter($categoriesQuery, $group);
+
+        $heroBlocksQuery = clone $brandOnlyQuery;
+
+        $this->applyGroupFilter($baseQuery, $group);
         $this->applyCategoryFilter($baseQuery, $category);
 
         $total = (clone $baseQuery)->count();
@@ -64,22 +75,25 @@ class StorefrontBrandService
             ->forPage($page, $perPage)
             ->get();
 
-        $products = $this->mapProducts($rawProducts, $country);
-        $featured = collect($products)->take(6)->values()->all();
-        $newArrivals = collect($products)->sortByDesc('id')->take(6)->values()->all();
+        $products = $this->mapProducts($rawProducts, $country, $slug);
+        $featured = $this->featuredProducts((int) $country->pai_id, $country, $slug);
+        $newArrivals = $this->newArrivalProducts((int) $country->pai_id, $country, $slug);
 
         return [
             ...$this->normalizeBrand($brand),
             'products' => $products,
             'featured' => $featured,
             'newArrivals' => $newArrivals,
+            'featureBlocks' => $this->featureBlocks($heroBlocksQuery, $slug),
             'filters' => [
                 'active' => [
                     'q' => $query,
+                    'group' => $group,
                     'category' => $category,
                     'sort' => $sort,
                 ],
-                'categories' => $this->categories($categoryQuery),
+                'groups' => $this->groups($groupsQuery),
+                'categories' => $this->categories($categoriesQuery),
                 'sorts' => [
                     ['value' => 'featured', 'label' => 'Destacados'],
                     ['value' => 'newest', 'label' => 'Novedades'],
@@ -117,46 +131,13 @@ class StorefrontBrandService
             ->where('p.pro_estatus', 'ACTIVO');
     }
 
-    private function applyBrandFilter($query, object $brand): void
+    private function applyGroupFilter($query, string $group): void
     {
-        $terms = $this->brandTerms($brand);
-        $slug = strtolower((string) $this->value($brand, 'mar_slug'));
+        if ($group === '') {
+            return;
+        }
 
-        $query->where(function ($subQuery) use ($terms, $slug) {
-            foreach ($terms as $term) {
-                $subQuery->orWhere('p.pro_marca', 'like', "%{$term}%")
-                    ->orWhere('p.pro_tags', 'like', "%{$term}%")
-                    ->orWhere('p.pro_oc_categoria', 'like', "%{$term}%");
-            }
-
-            if ($slug === 'stjacks') {
-                $subQuery->orWhereNull('p.pro_marca')
-                    ->orWhere('p.pro_marca', '');
-            }
-        });
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function brandTerms(object $brand): array
-    {
-        $name = trim((string) $this->value($brand, 'mar_nombre'));
-        $code = trim((string) $this->value($brand, 'mar_codigo'));
-        $slug = strtolower((string) $this->value($brand, 'mar_slug'));
-        $extra = match ($slug) {
-            'stjacks' => ['ST JACKS', "ST. JACK'S", 'STJACKS', 'STJ'],
-            'basikos' => ['BASIKOS', 'BASICO', 'BAS'],
-            'jackco' => ['JACK & CO', 'JACK&CO', 'JACKCO', 'JACK'],
-            default => [],
-        };
-
-        return collect([$name, $code, $slug, ...$extra])
-            ->map(fn (string $term) => trim($term))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+        $query->where('c.cat_nombre', $group);
     }
 
     private function applySearchFilter($query, string $queryText): void
@@ -181,7 +162,7 @@ class StorefrontBrandService
             return;
         }
 
-        $query->where('c.cat_nombre', $category);
+        $query->where('sc.sca_nombre', $category);
     }
 
     private function applySort($query, string $sort): void
@@ -208,6 +189,8 @@ class StorefrontBrandService
             'p.pro_nombre',
             'p.pro_descripcion',
             'p.pro_marca',
+            'p.pro_categoria',
+            'p.pro_sub_categoria',
             'p.pro_oc_categoria',
             'p.pro_tallas',
             'pp.ppa_precio',
@@ -215,10 +198,12 @@ class StorefrontBrandService
             'pp.ppa_es_popular',
             'sc.sca_nombre as subcategoria_nombre',
             'c.cat_nombre as categoria_nombre',
+            'c.cat_header',
+            'c.cat_logo_app',
         ];
     }
 
-    private function mapProducts($rawProducts, object $country): array
+    private function mapProducts($rawProducts, object $country, string $brandSlug): array
     {
         $availability = $this->productListAvailabilityService->summarize(
             strtolower((string) $country->pai_codigo),
@@ -226,7 +211,7 @@ class StorefrontBrandService
         );
 
         return $rawProducts
-            ->map(function ($product) use ($country, $availability) {
+            ->map(function ($product) use ($country, $availability, $brandSlug) {
                 $category = trim((string) ($product->categoria_nombre ?: $product->pro_oc_categoria ?: 'Catalogo'));
                 $subcategory = trim((string) ($product->subcategoria_nombre ?: ''));
                 $description = trim((string) $product->pro_descripcion);
@@ -248,7 +233,8 @@ class StorefrontBrandService
                     'currency' => $this->currencyForCountry(strtolower((string) $country->pai_codigo)),
                     'badge' => trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible'))),
                     'category' => $category,
-                    'brand' => trim((string) ($product->pro_marca ?: 'ST JACKS')),
+                    'subcategory' => $subcategory,
+                    'brand' => StorefrontBrandMap::canonical($brandSlug),
                     'description' => $description,
                     'sizes' => trim((string) ($product->pro_tallas ?: '')),
                     'availableSizes' => $availabilitySummary['availableSizes'] ?? [],
@@ -261,21 +247,124 @@ class StorefrontBrandService
             ->all();
     }
 
+    private function featuredProducts(int $countryId, object $country, string $brandSlug): array
+    {
+        $query = $this->baseProductQuery($countryId);
+        StorefrontBrandMap::applyProductBrandFilter($query, $brandSlug);
+
+        $rawProducts = $query
+            ->where('pp.ppa_es_popular', 1)
+            ->orderByDesc('pp.ppa_es_popular')
+            ->orderByDesc('p.pro_registro')
+            ->select($this->productSelects())
+            ->limit(10)
+            ->get();
+
+        if ($rawProducts->isEmpty()) {
+            return [];
+        }
+
+        return $this->mapProducts($rawProducts, $country, $brandSlug);
+    }
+
+    private function newArrivalProducts(int $countryId, object $country, string $brandSlug): array
+    {
+        $query = $this->baseProductQuery($countryId);
+        StorefrontBrandMap::applyProductBrandFilter($query, $brandSlug);
+
+        $rawProducts = $query
+            ->orderByDesc('p.pro_registro')
+            ->orderByDesc('p.pro_id')
+            ->select($this->productSelects())
+            ->limit(10)
+            ->get();
+
+        if ($rawProducts->isEmpty()) {
+            return [];
+        }
+
+        return $this->mapProducts($rawProducts, $country, $brandSlug);
+    }
+
+    private function groups($query): array
+    {
+        return $query
+            ->select([
+                'c.cat_nombre',
+                DB::raw('MIN(c.cat_orden) as orden'),
+                DB::raw('COUNT(*) as total'),
+            ])
+            ->whereNotNull('c.cat_nombre')
+            ->groupBy('c.cat_nombre')
+            ->orderByRaw('orden IS NULL')
+            ->orderBy('orden')
+            ->orderBy('c.cat_nombre')
+            ->get()
+            ->map(fn ($group) => [
+                'label' => trim((string) $group->cat_nombre),
+                'value' => trim((string) $group->cat_nombre),
+                'count' => (int) $group->total,
+            ])
+            ->filter(fn (array $group) => $group['label'] !== '')
+            ->values()
+            ->all();
+    }
+
     private function categories($query): array
     {
         return $query
-            ->select(['c.cat_nombre', DB::raw('COUNT(*) as total')])
-            ->whereNotNull('c.cat_nombre')
-            ->groupBy('c.cat_nombre')
-            ->orderBy('c.cat_nombre')
-            ->limit(12)
+            ->select([
+                'sc.sca_nombre',
+                DB::raw('COUNT(*) as total'),
+            ])
+            ->whereNotNull('sc.sca_nombre')
+            ->groupBy('sc.sca_nombre')
+            ->orderBy('sc.sca_nombre')
             ->get()
             ->map(fn ($category) => [
-                'label' => trim((string) $category->cat_nombre),
-                'value' => trim((string) $category->cat_nombre),
+                'label' => trim((string) $category->sca_nombre),
+                'value' => trim((string) $category->sca_nombre),
                 'count' => (int) $category->total,
             ])
             ->filter(fn (array $category) => $category['label'] !== '')
+            ->values()
+            ->all();
+    }
+
+    private function featureBlocks($query, string $brandSlug): array
+    {
+        if ($brandSlug !== 'jackco') {
+            return [];
+        }
+
+        $copy = [
+            'Teen Chicas' => 'Estilo con personalidad propia.',
+            'Teen Chicos' => 'Actitud urbana para cada dia.',
+        ];
+
+        return $query
+            ->whereIn('c.cat_nombre', array_keys($copy))
+            ->select([
+                'c.cat_nombre',
+                'c.cat_logo_app',
+                'c.cat_header',
+                DB::raw('MIN(c.cat_orden) as orden'),
+                DB::raw('COUNT(*) as total'),
+            ])
+            ->groupBy('c.cat_nombre', 'c.cat_logo_app', 'c.cat_header')
+            ->orderByRaw('orden IS NULL')
+            ->orderBy('orden')
+            ->orderBy('c.cat_nombre')
+            ->get()
+            ->map(fn ($block) => [
+                'title' => trim((string) $block->cat_nombre),
+                'text' => $copy[trim((string) $block->cat_nombre)] ?? '',
+                'button' => 'Ver coleccion',
+                'group' => trim((string) $block->cat_nombre),
+                'image' => $this->asset($block->cat_logo_app ?: $block->cat_header),
+                'count' => (int) $block->total,
+            ])
+            ->filter(fn (array $block) => $block['title'] !== '' && $block['count'] > 0)
             ->values()
             ->all();
     }
@@ -349,9 +438,11 @@ class StorefrontBrandService
         return [
             'active' => [
                 'q' => trim((string) ($filters['q'] ?? '')),
+                'group' => trim((string) ($filters['group'] ?? '')),
                 'category' => trim((string) ($filters['category'] ?? '')),
                 'sort' => trim((string) ($filters['sort'] ?? 'featured')),
             ],
+            'groups' => [],
             'categories' => [],
             'sorts' => [],
         ];
