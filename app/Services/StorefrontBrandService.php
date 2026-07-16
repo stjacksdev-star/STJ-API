@@ -393,6 +393,15 @@ class StorefrontBrandService
                 'accent' => (string) ($this->value($brand, 'mar_color_acento') ?: '#FF2D6F'),
                 'text' => (string) ($this->value($brand, 'mar_color_texto') ?: '#222222'),
                 'background' => (string) ($this->value($brand, 'mar_color_fondo') ?: '#FFFFFF'),
+                'filter' => [
+                    'background' => (string) ($this->value($brand, 'mar_color_filtro_fondo') ?: '#FFFFFF'),
+                    'title' => (string) ($this->value($brand, 'mar_color_filtro_titulo') ?: '#222222'),
+                    'text' => (string) ($this->value($brand, 'mar_color_filtro_texto') ?: '#3F3F3F'),
+                    'secondary' => (string) ($this->value($brand, 'mar_color_filtro_secundario') ?: '#606060'),
+                    'border' => (string) ($this->value($brand, 'mar_color_filtro_borde') ?: 'rgba(15,23,42,0.08)'),
+                    'activeBackground' => (string) ($this->value($brand, 'mar_color_filtro_activo_fondo') ?: '#FFFFFF'),
+                    'activeText' => (string) ($this->value($brand, 'mar_color_filtro_activo_texto') ?: '#111111'),
+                ],
             ],
         ];
     }
