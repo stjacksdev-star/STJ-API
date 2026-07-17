@@ -31,9 +31,15 @@ use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
+use App\Http\Controllers\Api\StorefrontAccountController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);
+Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function () {
+    Route::get('/', [StorefrontAccountController::class, 'show']);
+    Route::post('/logout', [StorefrontAccountController::class, 'logout']);
+});
 Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 'show'])
