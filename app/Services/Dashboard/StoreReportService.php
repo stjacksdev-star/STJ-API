@@ -40,7 +40,7 @@ class StoreReportService
             ->where('p.ped_id_pais', $countryId)
             ->where('store.tie_id', $store['id'])
             ->whereDate('pay.ppa_fecha', $date)
-            ->where('p.ped_estatus', 'EMPACADO-ENTREGA')
+            ->where('p.ped_estatus', '<>', 'EMPACADO-ENTREGA')
             ->orderBy('pay.ppa_fecha')
             ->selectRaw('
                 p.ped_id,
