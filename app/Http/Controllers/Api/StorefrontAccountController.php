@@ -52,11 +52,10 @@ class StorefrontAccountController extends BaseController
             })
             ->orderByDesc('ped_fecha')
             ->limit(10)
-            ->get(['ped_id', 'ped_fecha', 'ped_total', 'ped_estatus'])
+            ->get(['ped_id', 'ped_fecha', 'ped_estatus'])
             ->map(fn ($order) => [
                 'id' => $order->ped_id,
                 'date' => $order->ped_fecha,
-                'total' => (float) $order->ped_total,
                 'status' => $order->ped_estatus,
             ]);
 
