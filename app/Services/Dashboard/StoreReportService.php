@@ -40,10 +40,12 @@ class StoreReportService
             ->where('p.ped_id_pais', $countryId)
             ->where('store.tie_id', $store['id'])
             ->whereDate('pay.ppa_fecha', $date)
+            ->where('p.ped_estatus', 'EMPACADO-ENTREGA')
             ->orderBy('pay.ppa_fecha')
             ->selectRaw('
                 p.ped_id,
                 p.ped_monto_devolucion,
+                p.ped_estatus,
                 pay.ppa_fecha,
                 pay.ppa_tipo,
                 pay.ppa_ref,
@@ -61,6 +63,7 @@ class StoreReportService
 
                 return [
                     'orderId' => (int) $row->ped_id,
+                    'status' => (string) ($row->ped_estatus ?? ''),
                     'purchaseDate' => $this->dateTimeOrNull($row->ppa_fecha),
                     'paymentType' => (string) ($row->ppa_tipo ?? ''),
                     'reference' => (string) ($row->ppa_ref ?? ''),
