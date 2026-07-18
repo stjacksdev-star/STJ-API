@@ -46,18 +46,34 @@ class StorefrontAccountController extends BaseController
             return $this->error('Esta sesion no pertenece a un cliente del storefront.', 403);
         }
 
-        $orders = DB::table('stj_pedidos')
-            ->where(function ($query) use ($customer) {
-                $query->where('ped_user', $customer->getKey())
-                    ->orWhere('ped_email', $customer->usu_usuario);
+        $orders = DB::table('stj_pedidos as orders')
+            ->leftJoin('stj_pedidos_direccion as order_addresses', 'orders.ped_id', '=', 'order_addresses.pdi_pedido')
+            ->leftJoin('stj_direcciones as addresses', 'order_addresses.pdi_direccion', '=', 'addresses.dir_id')
+            ->leftJoin('stj_tiendas as stores', function ($join) {
+                $join->on('orders.ped_tienda', '=', 'stores.tie_codigo')
+                    ->on('stores.tie_pais', '=', 'orders.ped_id_pais');
             })
-            ->orderByDesc('ped_fecha')
+            ->leftJoin('stj_pedidos_pago as payments', 'payments.ppa_pedido', '=', 'orders.ped_id')
+            ->leftJoin('stj_mensajes_fac as messages', function ($join) {
+                $join->on('messages.mfa_tarjeta', '=', 'payments.ppa_emisor')
+                    ->on('messages.mfa_codigo', '=', 'payments.ppa_rsp_codigo');
+            })
+            ->where(function ($query) use ($customer) {
+                $query->where('orders.ped_user', $customer->getKey())
+                    ->orWhere('orders.ped_email', $customer->usu_correo ?: $customer->usu_usuario);
+            })
+            ->orderByDesc('payments.ppa_fecha')
             ->limit(10)
-            ->get(['ped_id', 'ped_fecha', 'ped_estatus'])
+            ->get([
+                'payments.ppa_ref', 'payments.ppa_fecha', 'stores.tie_nombre',
+                'orders.ped_checkout', 'payments.ppa_monto',
+            ])
             ->map(fn ($order) => [
-                'id' => $order->ped_id,
-                'date' => $order->ped_fecha,
-                'status' => $order->ped_estatus,
+                'reference' => $order->ppa_ref,
+                'date' => $order->ppa_fecha,
+                'store' => $order->tie_nombre,
+                'checkout' => $order->ped_checkout,
+                'amount' => $order->ppa_monto !== null ? (float) $order->ppa_monto : null,
             ]);
 
         return $this->success([
