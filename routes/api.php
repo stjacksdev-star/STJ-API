@@ -38,6 +38,10 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);
 Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function () {
     Route::get('/', [StorefrontAccountController::class, 'show']);
+    Route::put('/profile', [StorefrontAccountController::class, 'update']);
+    Route::get('/locations/countries', [StorefrontAccountController::class, 'countries']);
+    Route::get('/locations/states/{country}', [StorefrontAccountController::class, 'states'])->whereNumber('country');
+    Route::get('/locations/cities/{state}', [StorefrontAccountController::class, 'cities'])->whereNumber('state');
     Route::post('/logout', [StorefrontAccountController::class, 'logout']);
 });
 Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show'])
