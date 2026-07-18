@@ -63,7 +63,7 @@ class StorefrontAccountController extends BaseController
         return $this->success([
             'customer' => $this->profile($customer),
             'orders' => $orders,
-            'addresses' => [],
+            'addresses' => $this->addresses($customer),
             'payment_methods' => [],
         ]);
     }
@@ -133,7 +133,10 @@ class StorefrontAccountController extends BaseController
     {
         if (! $request->user() instanceof StorefrontCustomer) return $this->error('No autorizado.', 403);
 
-        return $this->success(DB::table('stj_world_countries')->orderBy('name')->get(['id', 'name', 'phonecode']));
+        return $this->success(DB::table('stj_world_countries')
+            ->orderByRaw("FIELD(iso2, 'DO', 'VE', 'HN', 'PA', 'US', 'CR', 'GT', 'SV') DESC")
+            ->orderBy('name')
+            ->get(['id', 'name', 'phonecode']));
     }
 
     public function states(Request $request, int $country)
@@ -148,6 +151,150 @@ class StorefrontAccountController extends BaseController
         if (! $request->user() instanceof StorefrontCustomer) return $this->error('No autorizado.', 403);
 
         return $this->success(DB::table('stj_world_cities')->where('state_id', $state)->orderBy('name')->get(['id', 'name']));
+    }
+
+    public function storeAddress(Request $request)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer) return $this->error('No autorizado.', 403);
+
+        $data = $this->validatedAddress($request);
+        $location = $this->addressLocation($data);
+        if (! $location) return $this->error('La ubicacion seleccionada no es valida.', 422);
+
+        DB::transaction(function () use ($customer, $data, $location) {
+            $hasAddresses = DB::table('stj_direcciones')->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')->exists();
+            $isPrimary = ! $hasAddresses || $data['primary'];
+            if ($isPrimary) $this->clearPrimaryAddress($customer);
+
+            DB::table('stj_direcciones')->insert($this->addressValues($customer, $data, $location, $isPrimary) + [
+                'dir_fecha' => now(),
+            ]);
+        });
+
+        return $this->success($this->addresses($customer), 'Direccion agregada');
+    }
+
+    public function updateAddress(Request $request, int $address)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer || ! $this->ownsAddress($customer, $address)) return $this->error('Direccion no encontrada.', 404);
+
+        $data = $this->validatedAddress($request);
+        $location = $this->addressLocation($data);
+        if (! $location) return $this->error('La ubicacion seleccionada no es valida.', 422);
+
+        DB::transaction(function () use ($customer, $address, $data, $location) {
+            $wasPrimary = DB::table('stj_direcciones')->where('dir_id', $address)->value('dir_principal') === 'SI';
+            $isPrimary = $wasPrimary || $data['primary'];
+            if ($isPrimary) $this->clearPrimaryAddress($customer);
+            DB::table('stj_direcciones')->where('dir_id', $address)->where('dir_usuario', $customer->getKey())
+                ->update($this->addressValues($customer, $data, $location, $isPrimary));
+        });
+
+        return $this->success($this->addresses($customer), 'Direccion actualizada');
+    }
+
+    public function makeAddressPrimary(Request $request, int $address)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer || ! $this->ownsAddress($customer, $address)) return $this->error('Direccion no encontrada.', 404);
+
+        DB::transaction(function () use ($customer, $address) {
+            $this->clearPrimaryAddress($customer);
+            DB::table('stj_direcciones')->where('dir_id', $address)->where('dir_usuario', $customer->getKey())->update(['dir_principal' => 'SI']);
+        });
+
+        return $this->success($this->addresses($customer), 'Direccion principal actualizada');
+    }
+
+    public function destroyAddress(Request $request, int $address)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer || ! $this->ownsAddress($customer, $address)) return $this->error('Direccion no encontrada.', 404);
+
+        DB::transaction(function () use ($customer, $address) {
+            $wasPrimary = DB::table('stj_direcciones')->where('dir_id', $address)->value('dir_principal') === 'SI';
+            DB::table('stj_direcciones')->where('dir_id', $address)->where('dir_usuario', $customer->getKey())->update(['dir_save' => 'NO', 'dir_principal' => 'NO']);
+            if ($wasPrimary) {
+                $next = DB::table('stj_direcciones')->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')->orderByDesc('dir_id')->value('dir_id');
+                if ($next) DB::table('stj_direcciones')->where('dir_id', $next)->update(['dir_principal' => 'SI']);
+            }
+        });
+
+        return $this->success($this->addresses($customer), 'Direccion eliminada');
+    }
+
+    private function validatedAddress(Request $request): array
+    {
+        return $request->validate([
+            'type' => ['required', Rule::in(['CASA', 'TRABAJO', 'OTRO'])],
+            'other_type' => ['nullable', 'required_if:type,OTRO', 'string', 'max:80'],
+            'same_person' => ['required', 'boolean'],
+            'recipient' => ['nullable', 'required_if:same_person,false', 'string', 'max:150'],
+            'recipient_phone' => ['nullable', 'required_if:same_person,false', 'string', 'max:30'],
+            'country_id' => ['required', 'integer', 'exists:stj_world_countries,id'],
+            'state_id' => ['required', 'integer', 'exists:stj_world_states,id'],
+            'city_id' => ['required', 'integer', 'exists:stj_world_cities,id'],
+            'address' => ['required', 'string', 'max:500'],
+            'reference' => ['required', 'string', 'max:500'],
+            'primary' => ['required', 'boolean'],
+        ]);
+    }
+
+    private function addressLocation(array $data): ?array
+    {
+        $country = DB::table('stj_world_countries')->where('id', $data['country_id'])->first(['id', 'name']);
+        $state = DB::table('stj_world_states')->where('id', $data['state_id'])->where('country_id', $data['country_id'])->first(['id', 'name']);
+        $city = $state ? DB::table('stj_world_cities')->where('id', $data['city_id'])->where('state_id', $data['state_id'])->first(['id', 'name']) : null;
+        return $country && $state && $city ? compact('country', 'state', 'city') : null;
+    }
+
+    private function addressValues(StorefrontCustomer $customer, array $data, array $location, bool $primary): array
+    {
+        return [
+            'dir_usuario' => $customer->getKey(), 'dir_tipo' => $data['type'],
+            'dir_tipo_otro' => $data['type'] === 'OTRO' ? trim((string) $data['other_type']) : null,
+            'dir_misma_persona' => $data['same_person'] ? 'SI' : 'NO',
+            'dir_misma_direccion' => 'NO',
+            'dir_persona' => $data['same_person'] ? null : trim((string) $data['recipient']),
+            'dir_telefono' => $data['same_person'] ? null : trim((string) $data['recipient_phone']),
+            'dir_pais' => $location['country']->name, 'dir_departamento' => $location['state']->id,
+            'dir_departamento_txt' => $location['state']->name, 'dir_municipio' => $location['city']->id,
+            'dir_municipio_txt' => $location['city']->name, 'dir_direccion' => trim($data['address']),
+            'dir_referencia' => trim($data['reference']), 'dir_save' => 'SI',
+            'dir_principal' => $primary ? 'SI' : 'NO',
+        ];
+    }
+
+    private function addresses(StorefrontCustomer $customer): array
+    {
+        return DB::table('stj_direcciones')->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')
+            ->orderByRaw("dir_principal = 'SI' DESC")->orderByDesc('dir_id')->get()->map(fn ($item) => [
+                'id' => (int) $item->dir_id, 'type' => $item->dir_tipo, 'other_type' => $item->dir_tipo_otro,
+                'same_person' => $item->dir_misma_persona === 'SI', 'recipient' => $item->dir_persona,
+                'recipient_phone' => $item->dir_telefono, 'country' => $item->dir_pais,
+                'state_id' => $item->dir_departamento ? (int) $item->dir_departamento : null,
+                'state' => $item->dir_departamento_txt, 'city_id' => $item->dir_municipio ? (int) $item->dir_municipio : null,
+                'city' => $item->dir_municipio_txt, 'address' => $item->dir_direccion,
+                'reference' => $item->dir_referencia, 'primary' => $item->dir_principal === 'SI',
+                'country_id' => DB::table('stj_world_countries')->where('name', $item->dir_pais)->value('id'),
+            ])->all();
+    }
+
+    private function storefrontCustomer(Request $request): ?StorefrontCustomer
+    {
+        return $request->user() instanceof StorefrontCustomer ? $request->user() : null;
+    }
+
+    private function ownsAddress(StorefrontCustomer $customer, int $address): bool
+    {
+        return DB::table('stj_direcciones')->where('dir_id', $address)->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')->exists();
+    }
+
+    private function clearPrimaryAddress(StorefrontCustomer $customer): void
+    {
+        DB::table('stj_direcciones')->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')->update(['dir_principal' => 'NO']);
     }
 
     private function profile(StorefrontCustomer $customer): array

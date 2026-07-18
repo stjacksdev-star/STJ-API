@@ -42,6 +42,10 @@ Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function 
     Route::get('/locations/countries', [StorefrontAccountController::class, 'countries']);
     Route::get('/locations/states/{country}', [StorefrontAccountController::class, 'states'])->whereNumber('country');
     Route::get('/locations/cities/{state}', [StorefrontAccountController::class, 'cities'])->whereNumber('state');
+    Route::post('/addresses', [StorefrontAccountController::class, 'storeAddress']);
+    Route::put('/addresses/{address}', [StorefrontAccountController::class, 'updateAddress'])->whereNumber('address');
+    Route::put('/addresses/{address}/primary', [StorefrontAccountController::class, 'makeAddressPrimary'])->whereNumber('address');
+    Route::delete('/addresses/{address}', [StorefrontAccountController::class, 'destroyAddress'])->whereNumber('address');
     Route::post('/logout', [StorefrontAccountController::class, 'logout']);
 });
 Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show'])
