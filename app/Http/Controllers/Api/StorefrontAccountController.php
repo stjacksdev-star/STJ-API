@@ -27,15 +27,63 @@ class StorefrontAccountController extends BaseController
             return $this->error('El correo o la contrasena no son correctos.', 401);
         }
 
-        $expiresAt = Carbon::now()->addHours(3);
-        $customer->tokens()->where('name', 'storefront-customer')->delete();
-        $token = $customer->createToken('storefront-customer', ['storefront:account'], $expiresAt);
+        return $this->success($this->sessionPayload($customer), 'Sesion iniciada');
+    }
 
-        return $this->success([
-            'customer' => $this->profile($customer),
-            'token' => $token->plainTextToken,
-            'expires_at' => $expiresAt->toISOString(),
-        ], 'Sesion iniciada');
+    public function registrationCountries()
+    {
+        return $this->success(DB::table('stj_world_countries')
+            ->orderByRaw("FIELD(iso2, 'SV', 'GT', 'CR', 'HN', 'PA') = 0")
+            ->orderByRaw("FIELD(iso2, 'SV', 'GT', 'CR', 'HN', 'PA')")
+            ->orderBy('name')
+            ->get(['id', 'iso2', 'name', 'phonecode']));
+    }
+
+    public function register(Request $request, string $country)
+    {
+        $storefrontCountry = DB::table('stj_paises')
+            ->where('pai_codigo', strtoupper($country))
+            ->first(['pai_id', 'pai_codigo']);
+
+        if (! $storefrontCountry) return $this->error('El pais del storefront no es valido.', 422);
+
+        $data = $request->validate([
+            'email' => ['required', 'email', 'max:150'],
+            'first_name' => ['required', 'string', 'max:100'],
+            'last_name' => ['required', 'string', 'max:100'],
+            'birth_date' => ['nullable', 'date', 'before:today', 'after_or_equal:'.now()->subYears(120)->toDateString()],
+            'phone_country_id' => ['required', 'integer', 'exists:stj_world_countries,id'],
+            'phone' => ['required', 'string', 'max:30'],
+            'password' => ['required', 'string', 'min:8', 'max:255', 'confirmed'],
+        ]);
+
+        $email = strtolower(trim($data['email']));
+        if (StorefrontCustomer::query()->whereRaw('LOWER(usu_usuario) = ?', [$email])->exists()) {
+            return response()->json(['ok' => false, 'message' => 'Este correo ya esta registrado.', 'errors' => ['email' => ['Este correo ya esta registrado.']]], 422);
+        }
+
+        $phoneCountry = DB::table('stj_world_countries')->where('id', $data['phone_country_id'])->first(['phonecode']);
+        $customerId = DB::table('stj_usuarios')->insertGetId([
+            'usu_usuario' => $email,
+            'usu_password' => Hash::make($data['password']),
+            'usu_nombre' => trim($data['first_name']),
+            'usu_apellido' => trim($data['last_name']),
+            'usu_telefono_pais' => '+'.ltrim((string) $phoneCountry->phonecode, '+'),
+            'usu_telefono' => trim($data['phone']),
+            'usu_correo' => $email,
+            'usu_fecha_nacimiento' => $data['birth_date'] ?: null,
+            'usu_tipo_login' => 'WEB',
+            'usu_perfil' => (string) round(microtime(true) * 1000),
+            'usu_fecha_registro' => now(),
+            'usu_foto_perfil' => '',
+            'usu_suscrito_mailing' => 0,
+            'usu_pais_registro' => $storefrontCountry->pai_id,
+            'usu_activo' => 1,
+        ]);
+
+        $customer = StorefrontCustomer::query()->findOrFail($customerId);
+
+        return $this->success($this->sessionPayload($customer), 'Cuenta creada correctamente');
     }
 
     public function show(Request $request)
@@ -379,6 +427,19 @@ class StorefrontAccountController extends BaseController
             'gender' => $coupon->genero_nombre, 'collection' => $coupon->che_coleccion,
             'starts_at' => $coupon->che_inicio, 'ends_at' => $coupon->che_final,
             'country' => ['id' => (int) $country->pai_id, 'code' => strtolower($country->pai_codigo), 'name' => $country->pai_nombre],
+        ];
+    }
+
+    private function sessionPayload(StorefrontCustomer $customer): array
+    {
+        $expiresAt = Carbon::now()->addHours(3);
+        $customer->tokens()->where('name', 'storefront-customer')->delete();
+        $token = $customer->createToken('storefront-customer', ['storefront:account'], $expiresAt);
+
+        return [
+            'customer' => $this->profile($customer),
+            'token' => $token->plainTextToken,
+            'expires_at' => $expiresAt->toISOString(),
         ];
     }
 

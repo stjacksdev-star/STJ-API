@@ -36,6 +36,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);
+Route::get('/storefront/account/registration-countries', [StorefrontAccountController::class, 'registrationCountries']);
+Route::post('/storefront/account/register/{country}', [StorefrontAccountController::class, 'register'])
+    ->where('country', '[A-Za-z]{2}');
 Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function () {
     Route::get('/', [StorefrontAccountController::class, 'show']);
     Route::put('/profile', [StorefrontAccountController::class, 'update']);
