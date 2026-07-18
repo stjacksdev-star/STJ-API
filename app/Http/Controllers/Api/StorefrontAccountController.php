@@ -64,7 +64,7 @@ class StorefrontAccountController extends BaseController
             'customer' => $this->profile($customer),
             'orders' => $orders,
             'addresses' => $this->addresses($customer),
-            'payment_methods' => [],
+            'coupons' => $this->coupons($customer),
         ]);
     }
 
@@ -295,6 +295,75 @@ class StorefrontAccountController extends BaseController
     private function clearPrimaryAddress(StorefrontCustomer $customer): void
     {
         DB::table('stj_direcciones')->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')->update(['dir_principal' => 'NO']);
+    }
+
+    private function coupons(StorefrontCustomer $customer): array
+    {
+        $country = DB::table('stj_paises')
+            ->where('pai_id', $customer->usu_pais_registro)
+            ->first(['pai_id', 'pai_codigo', 'pai_nombre']);
+
+        if (! $country) return [];
+
+        $columns = [
+            'c.cup_id', 'c.cup_codigo', 'c.cup_estado', 'c.cup_monto', 'c.cup_disponible',
+            'h.che_id', 'h.che_tipo', 'h.che_descuento', 'h.che_checkout', 'h.che_monto',
+            'h.che_nombre', 'h.che_nombre_comercial', 'h.che_solo_primera_compra',
+            'h.che_aplica_promo', 'h.che_coleccion', 'h.che_inicio', 'h.che_final',
+            'categories.cat_nombre as genero_nombre',
+        ];
+        $email = strtolower(trim((string) ($customer->usu_correo ?: $customer->usu_usuario)));
+        $now = now();
+
+        $personal = DB::table('stj_cupones as c')
+            ->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
+            ->leftJoin('stj_categorias as categories', 'categories.cat_id', '=', 'h.che_genero')
+            ->whereRaw('LOWER(c.cup_correo) = ?', [$email])
+            ->where('h.che_pais', $country->pai_id)
+            ->select($columns)
+            ->get()
+            ->map(fn ($coupon) => $this->couponPayload($coupon, 'personal', $country, $now));
+
+        $generic = DB::table('stj_cupones as c')
+            ->join('stj_cupones_header as h', 'c.cup_header', '=', 'h.che_id')
+            ->leftJoin('stj_categorias as categories', 'categories.cat_id', '=', 'h.che_genero')
+            ->where('h.che_generico', 'SI')
+            ->where('h.che_inicio', '<=', $now)
+            ->where('h.che_final', '>=', $now)
+            ->where('c.cup_estado', 'ACTIVO')
+            ->where('h.che_pais', $country->pai_id)
+            ->select($columns)
+            ->get()
+            ->map(fn ($coupon) => $this->couponPayload($coupon, 'generic', $country, $now));
+
+        return $personal->concat($generic)
+            ->unique(fn ($coupon) => $coupon['id'].'|'.$coupon['code'])
+            ->sortByDesc(fn ($coupon) => $coupon['available'])
+            ->values()
+            ->all();
+    }
+
+    private function couponPayload(object $coupon, string $source, object $country, Carbon $now): array
+    {
+        $startsAt = $coupon->che_inicio ? Carbon::parse($coupon->che_inicio) : null;
+        $endsAt = $coupon->che_final ? Carbon::parse($coupon->che_final) : null;
+        $available = $coupon->cup_estado === 'ACTIVO'
+            && (! $startsAt || $startsAt->lte($now))
+            && (! $endsAt || $endsAt->gte($now));
+
+        return [
+            'id' => (int) $coupon->cup_id, 'header_id' => (int) $coupon->che_id,
+            'code' => $coupon->cup_codigo, 'source' => $source, 'available' => $available,
+            'status' => $coupon->cup_estado, 'type' => $coupon->che_tipo,
+            'discount' => (float) $coupon->che_descuento, 'amount' => (float) $coupon->cup_monto,
+            'available_amount' => (float) $coupon->cup_disponible, 'minimum_amount' => (float) $coupon->che_monto,
+            'name' => $coupon->che_nombre, 'commercial_name' => $coupon->che_nombre_comercial,
+            'checkout' => $coupon->che_checkout, 'promotion_rule' => $coupon->che_aplica_promo,
+            'first_purchase_only' => $coupon->che_solo_primera_compra === 'SI',
+            'gender' => $coupon->genero_nombre, 'collection' => $coupon->che_coleccion,
+            'starts_at' => $coupon->che_inicio, 'ends_at' => $coupon->che_final,
+            'country' => ['id' => (int) $country->pai_id, 'code' => strtolower($country->pai_codigo), 'name' => $country->pai_nombre],
+        ];
     }
 
     private function profile(StorefrontCustomer $customer): array
