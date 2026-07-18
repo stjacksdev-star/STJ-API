@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
 use App\Http\Controllers\Api\StorefrontAccountController;
+use App\Http\Controllers\Api\StorefrontEventController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -70,6 +71,7 @@ Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationControl
 Route::post('/storefront/orders', [StorefrontOrderController::class, 'store']);
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
+Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
