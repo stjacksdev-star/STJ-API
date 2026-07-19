@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Exceptions\CartOperationConflict;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
+use App\Services\Inventory\InventorySourceResolver;
 use App\Services\ProductDetailAvailabilityService;
 use App\Services\StorefrontCartService;
+use App\Services\StorefrontFulfillmentService;
 use App\Services\StorefrontProductPricingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -55,15 +57,24 @@ class StorefrontPersistentCartTest extends TestCase
             $t->decimal('pta_precio', 14, 5);
         });
         Schema::create('stj_usuarios', fn (Blueprint $t) => $t->bigInteger('usu_id', true));
+        Schema::create('stj_tiendas', function (Blueprint $t) {
+            $t->bigInteger('tie_id', true);
+            $t->string('tie_codigo', 15);
+            $t->string('tie_nombre');
+            $t->bigInteger('tie_pais');
+            $t->boolean('tie_productos');
+        });
         Schema::create('stj_pedidos', fn (Blueprint $t) => $t->bigInteger('ped_id', true));
         Schema::create('stj_promociones', fn (Blueprint $t) => $t->bigInteger('prm_id', true));
         DB::table('stj_paises')->insert([['pai_id' => 1, 'pai_codigo' => 'SV'], ['pai_id' => 2, 'pai_codigo' => 'GT']]);
         DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_tallas' => 'S,M', 'pro_estatus' => 'ACTIVO']);
         DB::table('stj_producto_pais')->insert([['ppa_pais' => 1, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 100, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => 10, 'ppa_origen_descuento' => 'WEB', 'ppa_promo_nombre' => 'Promo'], ['ppa_pais' => 2, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 200, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => null, 'ppa_origen_descuento' => null, 'ppa_promo_nombre' => null]]);
+        DB::table('stj_tiendas')->insert([['tie_id' => 1, 'tie_codigo' => '57', 'tie_nombre' => 'Domicilio SV', 'tie_pais' => 1, 'tie_productos' => 0], ['tie_id' => 2, 'tie_codigo' => '002', 'tie_nombre' => 'Las Cascadas', 'tie_pais' => 1, 'tie_productos' => 1], ['tie_id' => 3, 'tie_codigo' => '2', 'tie_nombre' => 'Domicilio GT', 'tie_pais' => 2, 'tie_productos' => 0]]);
+        config(['inventory.domicilio_store_by_country.sv' => '57', 'inventory.domicilio_store_by_country.gt' => '2']);
         $this->visitor = StorefrontVisitor::query()->create(['vis_uuid' => (string) Str::uuid(), 'vis_origen' => 'WEB', 'vis_pais_id' => 1, 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
         $availability = Mockery::mock(ProductDetailAvailabilityService::class);
         $availability->shouldReceive('forCountryAndSlug')->andReturnUsing(fn () => ['sizes' => [['size' => 'S', 'quantityInActiveStore' => 5], ['size' => 'M', 'quantityInActiveStore' => 2]]]);
-        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService);
+        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver));
     }
 
     public function test_guest_add_is_authoritative_and_idempotent(): void
@@ -175,12 +186,42 @@ class StorefrontPersistentCartTest extends TestCase
         DB::table('stj_producto_pais')->where(['ppa_pais' => 1, 'ppa_producto' => 10])->update(['ppa_precio' => 110]);
         $first = $this->service->get('sv', $this->visitor, null);
         $second = $this->service->get('sv', $this->visitor, null);
-        $this->assertSame('PRICE_CHANGED',$first['cart']['alerts'][0]['type']);
+        $this->assertSame('PRICE_CHANGED', $first['cart']['alerts'][0]['type']);
         $this->assertSame([], $second['cart']['alerts']);
-        $this->assertSame(1,DB::table('stj_carrito_auditoria')->where('cau_accion','PRICE_CHANGED')->count());
+        $this->assertSame(1, DB::table('stj_carrito_auditoria')->where('cau_accion', 'PRICE_CHANGED')->count());
     }
 
-    private function item(string $size,int $quantity): array
+    public function test_fulfillment_preview_does_not_modify_and_apply_persists_idempotently(): void
+    {
+        $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $preview = $this->service->previewFulfillment('sv', $this->visitor, null, ['fulfillment_type' => 'TIENDA', 'store_code' => '002']);
+        $this->assertSame('DOMICILIO', $preview['current']['type']);
+        $this->assertSame('TIENDA', $preview['proposed']['type']);
+        $this->assertDatabaseHas('stj_carritos', ['car_tipo' => 'DOMICILIO', 'car_tienda_codigo_snapshot' => '57']);
+
+        $input = ['operation_uuid' => (string) Str::uuid(), 'fulfillment_type' => 'TIENDA', 'store_code' => '002', 'confirm_affected' => true];
+        $first = $this->service->applyFulfillment('sv', $this->visitor, null, $input);
+        $retry = $this->service->applyFulfillment('sv', $this->visitor, null, $input);
+        $this->assertSame($first, $retry);
+        $this->assertSame('002', $first['cart']['fulfillment']['storeCode']);
+        $this->assertDatabaseHas('stj_carrito_auditoria', ['cau_accion' => 'FULFILLMENT_CHANGED']);
+    }
+
+    public function test_store_selection_is_country_scoped_and_codes_remain_text(): void
+    {
+        DB::table('stj_tiendas')->insert([
+            ['tie_id' => 4, 'tie_codigo' => '001', 'tie_nombre' => 'Sucursal SV 001', 'tie_pais' => 1, 'tie_productos' => 1],
+            ['tie_id' => 5, 'tie_codigo' => '001', 'tie_nombre' => 'Sucursal GT 001', 'tie_pais' => 2, 'tie_productos' => 1],
+            ['tie_id' => 6, 'tie_codigo' => '1', 'tie_nombre' => 'Sucursal SV 1', 'tie_pais' => 1, 'tie_productos' => 1],
+        ]);
+        $leadingZeros = $this->service->previewFulfillment('sv', $this->visitor, null, ['fulfillment_type' => 'TIENDA', 'store_code' => '001']);
+        $one = $this->service->previewFulfillment('sv', $this->visitor, null, ['fulfillment_type' => 'TIENDA', 'store_code' => '1']);
+        $this->assertSame(4, $leadingZeros['proposed']['storeId']);
+        $this->assertSame('001', $leadingZeros['proposed']['storeCode']);
+        $this->assertSame(6, $one['proposed']['storeId']);
+    }
+
+    private function item(string $size, int $quantity): array
     {
         return ['operation_uuid' => (string) Str::uuid(), 'product_id' => 10, 'sku' => 'SKU10', 'size' => $size, 'quantity' => $quantity];
     }

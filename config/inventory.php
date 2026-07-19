@@ -11,6 +11,7 @@ return [
     'scopes' => [
         'product_list',
         'product_detail',
+        'cart',
         'checkout',
     ],
 
@@ -36,6 +37,10 @@ return [
             'source' => 'external_api',
             'fallback_source' => null,
         ],
+        'cart' => [
+            'source' => 'external_api',
+            'fallback_source' => 'local_inventory',
+        ],
     ],
 
     'stores_by_country' => [
@@ -44,7 +49,7 @@ return [
         'cr' => ['1', '2'],
         'pa' => ['1'],
         'do' => ['1'],
-        'hn' => ['1'],
+        'hn' => ['001', '1'],
     ],
 
     'default_store_by_country' => [
@@ -53,12 +58,14 @@ return [
         'cr' => '1',
         'pa' => '1',
         'do' => '1',
-        'hn' => '1',
+        'hn' => '001',
     ],
 
     'domicilio_store_by_country' => [
         'sv' => '57',
         'gt' => '2',
         'cr' => '1',
+        'pa' => '1',
+        'hn' => '001',
     ],
 ];

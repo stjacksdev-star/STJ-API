@@ -21,19 +21,20 @@ use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardU
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\PushSendController;
+use App\Http\Controllers\Api\StorefrontAccountController;
 use App\Http\Controllers\Api\StorefrontAssetController;
 use App\Http\Controllers\Api\StorefrontBrandController;
+use App\Http\Controllers\Api\StorefrontCartController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
+use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontHomeController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
+use App\Http\Controllers\Api\StorefrontStoreController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
-use App\Http\Controllers\Api\StorefrontAccountController;
-use App\Http\Controllers\Api\StorefrontEventController;
-use App\Http\Controllers\Api\StorefrontCartController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -59,6 +60,8 @@ Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 's
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/promotions/{country}', [StorefrontPromotionController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/stores/{country}', [StorefrontStoreController::class, 'index'])
+    ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/brands/{country}/{brand}', [StorefrontBrandController::class, 'show'])
@@ -81,6 +84,8 @@ Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])
     Route::post('/sync', [StorefrontCartController::class, 'sync']);
     Route::post('/merge', [StorefrontCartController::class, 'merge']);
 });
+Route::post('/storefront/fulfillment/{country}/preview', [StorefrontCartController::class, 'previewFulfillment'])->where('country', '[A-Za-z]{2}');
+Route::put('/storefront/fulfillment/{country}', [StorefrontCartController::class, 'applyFulfillment'])->where('country', '[A-Za-z]{2}');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);

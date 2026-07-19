@@ -50,8 +50,12 @@ class LocalInventoryProvider
     {
         try {
             $rows = DB::table('stj_inventario as i')
-                ->join('stj_tiendas as t', 't.tie_codigo', '=', 'i.inv_tienda')
+                ->join('stj_tiendas as t', function ($join) {
+                    $join->on('t.tie_codigo', '=', 'i.inv_tienda')
+                        ->on('t.tie_pais', '=', 'i.inv_pais');
+                })
                 ->where('i.inv_pais', $countryId)
+                ->where('t.tie_pais', $countryId)
                 ->where('i.inv_codigo', $productCode)
                 ->whereIn('i.inv_tienda', $storeCodes)
                 ->select([

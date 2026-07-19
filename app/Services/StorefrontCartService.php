@@ -16,7 +16,46 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontCartService
 {
-    public function __construct(private ProductDetailAvailabilityService $availability, private StorefrontProductPricingService $pricing) {}
+    public function __construct(private ProductDetailAvailabilityService $availability, private StorefrontProductPricingService $pricing, private StorefrontFulfillmentService $fulfillment) {}
+
+    public function previewFulfillment(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
+    {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $input) {
+            $cart = $this->resolveCart($countryCode, $visitor, $customer, true);
+            $country = $this->country($countryCode);
+            $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, $input);
+
+            return ['current' => $this->context($cart), 'proposed' => $context, 'impact' => $this->evaluateContext($cart, $context), 'cartVersion' => (int) $cart->car_version];
+        });
+    }
+
+    public function applyFulfillment(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
+    {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $input) {
+            $cart = $this->resolveCart($countryCode, $visitor, $customer, true);
+
+            return $this->idempotent($cart, $visitor, $customer, 'FULFILLMENT_CHANGE', $input['operation_uuid'], $input, function () use ($cart, $countryCode, $visitor, $customer, $input) {
+                $country = $this->country($countryCode);
+                $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, $input);
+                $impact = $this->evaluateContext($cart, $context);
+                if ($impact['affectedCount'] > 0 && ! ($input['confirm_affected'] ?? false)) {
+                    throw ValidationException::withMessages(['confirm_affected' => 'Debe confirmar los cambios del carrito.']);
+                } $old = $this->context($cart);
+                $cart->forceFill(['car_tipo' => $context['type'], 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource']])->save();
+                foreach ($impact['items'] as $change) {
+                    $line = StorefrontCartItem::query()->find($change['id']);
+                    if ($change['status'] !== 'DISPONIBLE') {
+                        $line->forceFill(['cad_estado' => $change['status'], 'cad_motivo_no_disponible' => $change['message'], 'cad_seleccionado' => false, 'cad_actualizado_en' => now()])->save();
+
+                        continue;
+                    } $line->forceFill($this->lineValues($change['commercial'], $change['quantity']) + ['cad_estado' => 'DISPONIBLE', 'cad_motivo_no_disponible' => null, 'cad_actualizado_en' => now()])->save();
+                } $this->touch($cart);
+                $this->audit($cart, null, $visitor, $customer, 'FULFILLMENT_CHANGED', $old, $context);
+
+                return $this->payload($cart, $impact['alerts']);
+            });
+        });
+    }
 
     public function get(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
     {
@@ -199,7 +238,7 @@ class StorefrontCartService
             return $this->replayOperation($old, $cart, $visitor, $customer, $hash);
         }
 
-return $result;
+        return $result;
     }
 
     private function replayOperation(object $old, StorefrontCart $cart, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $hash): array
@@ -208,7 +247,7 @@ return $result;
             throw new CartOperationConflict('operation_uuid ya fue utilizado por otra identidad o con otro contenido.');
         }
 
-return json_decode($old->cao_respuesta, true);
+        return json_decode($old->cao_respuesta, true);
     }
 
     private function resolveCart(string $code, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, bool $create): StorefrontCart
@@ -217,10 +256,15 @@ return json_decode($old->cao_respuesta, true);
         $q = StorefrontCart::query()->where('car_pais_id', $country->pai_id)->where('car_estado', 'ACTIVO');
         $customer ? $q->where('car_usu_id', $customer->getKey()) : $q->whereNull('car_usu_id')->where('car_visitante_id', $visitor->getKey());
         $cart = $q->lockForUpdate()->first();
+        if ($cart && ! $cart->car_tienda_codigo_snapshot) {
+            $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, ['fulfillment_type' => 'DOMICILIO']);
+            $cart->forceFill(['car_tipo' => $context['type'], 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource']])->save();
+        }
         if ($cart || ! $create) {
             return $cart;
         } $now = now();
-        $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_usu_id' => $customer?->getKey(), 'car_pais_id' => $country->pai_id, 'car_tipo' => 'DOMICILIO', 'car_estado' => 'ACTIVO', 'car_origen' => 'WEB', 'car_moneda' => $this->currency(strtolower($country->pai_codigo)), 'car_version' => 1, 'car_ultima_actividad_en' => $now, 'car_expira_en' => $now->copy()->addDays(30), 'car_creado_en' => $now, 'car_actualizado_en' => $now]);
+        $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, ['fulfillment_type' => 'DOMICILIO']);
+        $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_usu_id' => $customer?->getKey(), 'car_pais_id' => $country->pai_id, 'car_tipo' => 'DOMICILIO', 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource'], 'car_estado' => 'ACTIVO', 'car_origen' => 'WEB', 'car_moneda' => $this->currency(strtolower($country->pai_codigo)), 'car_version' => 1, 'car_ultima_actividad_en' => $now, 'car_expira_en' => $now->copy()->addDays(30), 'car_creado_en' => $now, 'car_actualizado_en' => $now]);
         $this->audit($cart, null, $visitor, $customer, 'CART_CREATED', null, ['state' => 'ACTIVO']);
 
         return $cart;
@@ -233,35 +277,47 @@ return json_decode($old->cao_respuesta, true);
             throw ValidationException::withMessages(['price' => $price['message']]);
         } $country = DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo');
         $slug = Str::slug($price['name']).'-'.$price['productId'];
-        $availability = $this->availability->forCountryAndSlug(strtolower($country), $slug, config('inventory.default_store_by_country.'.strtolower($country)));
+        $availability = $this->availability->forCountryAndSlug(strtolower($country), $slug, (string) $cart->car_tienda_codigo_snapshot);
         $sizeData = collect($availability['sizes'] ?? [])->firstWhere('size', $price['size']);
         $available = (int) ($sizeData['quantityInActiveStore'] ?? 0);
         if ($available < 1) {
             $this->stockError($available);
         }
 
-return ['productId' => $price['productId'], 'sku' => $price['sku'], 'name' => $price['name'], 'size' => $price['size'], 'available' => $available, 'regular' => $price['precio_regular'], 'discount' => $price['descuento'], 'final' => $price['precio_final'], 'promotion' => $price['promocion']];
+        return ['productId' => $price['productId'], 'sku' => $price['sku'], 'name' => $price['name'], 'size' => $price['size'], 'available' => $available, 'regular' => $price['precio_regular'], 'discount' => $price['descuento'], 'final' => $price['precio_final'], 'promotion' => $price['promocion']];
     }
 
     private function refreshPrices(StorefrontCart $cart, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
     {
         $alerts = [];
         foreach ($cart->items()->lockForUpdate()->get() as $line) {
-            $price = $this->pricing->resolve((int) $cart->car_pais_id, (int) $line->cad_producto_id, (string) $line->cad_ref, (string) $line->cad_talla, now());
-            if (! $price['ok']) {
-                $alerts[] = ['type' => $price['reason'], 'itemId' => $line->getKey(), 'message' => $price['message']];
-
-                continue;
-            } $old = $this->auditLine($line);
-            if ($this->money($line->cad_precio_unitario) === $price['precio_regular'] && $this->money($line->cad_descuento_unitario) === $price['descuento'] && $this->money($line->cad_precio_final_unitario) === $price['precio_final']) {
-                continue;
-            } $line->forceFill(['cad_precio_unitario' => $price['precio_regular'], 'cad_descuento_unitario' => $price['descuento'], 'cad_precio_final_unitario' => $price['precio_final'], 'cad_promocion' => $price['promocion'], 'cad_actualizado_en' => now()])->save();
+            $old = $this->auditLine($line);
+            try {
+                $commercial = $this->commercial($cart, ['product_id' => $line->cad_producto_id, 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'quantity' => $line->cad_cantidad]);
+                $quantity = min((int) $line->cad_cantidad, $commercial['available'], 99);
+                $priceChanged = $this->money($line->cad_precio_unitario) !== $commercial['regular'] || $this->money($line->cad_descuento_unitario) !== $commercial['discount'] || $this->money($line->cad_precio_final_unitario) !== $commercial['final'];
+                $stateChanged = ($line->cad_estado ?? 'DISPONIBLE') !== 'DISPONIBLE' || (int) $line->cad_cantidad !== $quantity;
+                if (! $priceChanged && ! $stateChanged) {
+                    continue;
+                }
+                $line->forceFill($this->lineValues($commercial, $quantity) + ['cad_actualizado_en' => now()])->save();
+                $action = $priceChanged ? 'PRICE_CHANGED' : 'LINE_REVALIDATED';
+                $message = $priceChanged ? 'El precio del producto cambio.' : 'La linea fue revalidada para el contexto activo.';
+            } catch (ValidationException $e) {
+                $message = (string) collect($e->errors())->flatten()->first();
+                $status = str_contains(strtolower($message), 'inactivo') ? 'PRODUCTO_INACTIVO' : (str_contains(strtolower($message), 'precio') ? 'PRECIO_NO_DISPONIBLE' : (str_contains(strtolower($message), 'talla') ? 'TALLA_NO_DISPONIBLE' : 'SIN_EXISTENCIA'));
+                if (($line->cad_estado ?? 'DISPONIBLE') === $status && ! $line->cad_seleccionado) {
+                    continue;
+                }
+                $line->forceFill(['cad_estado' => $status, 'cad_motivo_no_disponible' => $message, 'cad_seleccionado' => false, 'cad_actualizado_en' => now()])->save();
+                $action = 'LINE_REVALIDATED';
+            }
             $this->touch($cart);
-            $this->audit($cart, $line, $visitor, $customer, 'PRICE_CHANGED', $old, $this->auditLine($line));
-            $alerts[] = ['type' => 'PRICE_CHANGED', 'itemId' => $line->getKey(), 'message' => 'El precio del producto cambio.'];
+            $this->audit($cart, $line, $visitor, $customer, $action, $old, $this->auditLine($line));
+            $alerts[] = ['type' => $action === 'PRICE_CHANGED' ? 'PRICE_CHANGED' : ($line->cad_estado ?? 'LINE_REVALIDATED'), 'itemId' => $line->getKey(), 'message' => $message];
         }
 
-return $alerts;
+        return $alerts;
     }
 
     private function money(mixed $value): string
@@ -271,9 +327,44 @@ return $alerts;
         return ($parts[0] ?: '0').'.'.str_pad(substr($parts[1] ?? '', 0, 2), 2, '0');
     }
 
+    private function context(StorefrontCart $cart): array
+    {
+        return ['type' => $cart->car_tipo, 'storeId' => $cart->car_tienda_id ? (int) $cart->car_tienda_id : null, 'storeCode' => (string) $cart->car_tienda_codigo_snapshot, 'storeName' => $cart->car_tipo === 'DOMICILIO' ? 'Domicilio' : DB::table('stj_tiendas')->where('tie_id', $cart->car_tienda_id)->where('tie_pais', $cart->car_pais_id)->value('tie_nombre'), 'inventorySource' => $cart->car_inventory_source];
+    }
+
+    private function evaluateContext(StorefrontCart $cart, array $context): array
+    {
+        $virtual = clone $cart;
+        $virtual->car_tipo = $context['type'];
+        $virtual->car_tienda_id = $context['storeId'];
+        $virtual->car_tienda_codigo_snapshot = $context['storeCode'];
+        $virtual->car_inventory_source = $context['inventorySource'];
+        $items = [];
+        $alerts = [];
+        $affected = 0;
+        foreach ($cart->items()->get() as $line) {
+            try {
+                $commercial = $this->commercial($virtual, ['product_id' => $line->cad_producto_id, 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'quantity' => $line->cad_cantidad]);
+                $quantity = min((int) $line->cad_cantidad, $commercial['available'], 99);
+                $changed = $quantity !== (int) $line->cad_cantidad || $this->money($line->cad_precio_final_unitario) !== $commercial['final'];
+                if ($changed) {
+                    $affected++;
+                }$items[] = ['id' => $line->getKey(), 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'status' => 'DISPONIBLE', 'quantity' => $quantity, 'previousQuantity' => (int) $line->cad_cantidad, 'priceChanged' => $this->money($line->cad_precio_final_unitario) !== $commercial['final'], 'commercial' => $commercial, 'message' => $changed ? 'Cantidad o precio sera actualizado.' : 'Sin cambios.'];
+            } catch (ValidationException $e) {
+                $affected++;
+                $message = (string) collect($e->errors())->flatten()->first();
+                $status = str_contains(strtolower($message), 'precio') ? 'PRECIO_NO_DISPONIBLE' : (str_contains(strtolower($message), 'talla') ? 'TALLA_NO_DISPONIBLE' : 'SIN_EXISTENCIA');
+                $items[] = ['id' => $line->getKey(), 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'status' => $status, 'quantity' => (int) $line->cad_cantidad, 'previousQuantity' => (int) $line->cad_cantidad, 'priceChanged' => false, 'commercial' => null, 'message' => $message];
+                $alerts[] = ['type' => $status, 'itemId' => $line->getKey(), 'message' => $message];
+            }
+        }
+
+        return ['affectedCount' => $affected, 'items' => $items, 'alerts' => $alerts];
+    }
+
     private function lineValues(array $c, int $q): array
     {
-        return ['cad_producto_id' => $c['productId'], 'cad_ref' => $c['sku'], 'cad_talla' => $c['size'], 'cad_cantidad' => $q, 'cad_precio_unitario' => $c['regular'], 'cad_descuento_unitario' => $c['discount'], 'cad_precio_final_unitario' => $c['final'], 'cad_promocion' => $c['promotion']];
+        return ['cad_producto_id' => $c['productId'], 'cad_ref' => $c['sku'], 'cad_talla' => $c['size'], 'cad_cantidad' => $q, 'cad_precio_unitario' => $c['regular'], 'cad_descuento_unitario' => $c['discount'], 'cad_precio_final_unitario' => $c['final'], 'cad_promocion' => $c['promotion'], 'cad_estado' => 'DISPONIBLE', 'cad_motivo_no_disponible' => null];
     }
 
     private function ownedLine(StorefrontCart $cart, int $id): StorefrontCartItem
@@ -283,7 +374,7 @@ return $alerts;
             throw ValidationException::withMessages(['item' => 'La linea no pertenece al carrito autorizado.']);
         }
 
-return $line;
+        return $line;
     }
 
     private function touch(StorefrontCart $cart): void
@@ -310,20 +401,20 @@ return $line;
     {
         $cart->load('items');
         $products = DB::table('stj_productos')->whereIn('pro_id', $cart->items->pluck('cad_producto_id'))->pluck('pro_nombre', 'pro_id');
-        $items = $cart->items->map(fn ($i) => ['id' => $i->getKey(), 'key' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')).':'.$i->cad_ref.':'.$i->cad_talla, 'countryCode' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')), 'productId' => (int) $i->cad_producto_id, 'name' => $products[$i->cad_producto_id] ?? $i->cad_ref, 'sku' => $i->cad_ref, 'size' => $i->cad_talla, 'quantity' => (int) $i->cad_cantidad, 'selected' => (bool) $i->cad_seleccionado, 'price' => (float) $i->cad_precio_final_unitario, 'regularPrice' => (float) $i->cad_precio_unitario, 'discount' => (float) $i->cad_descuento_unitario, 'finalPrice' => (float) $i->cad_precio_final_unitario, 'lineSubtotal' => round($i->cad_precio_final_unitario * $i->cad_cantidad, 2), 'currency' => $cart->car_moneda])->values();
+        $items = $cart->items->map(fn ($i) => ['id' => $i->getKey(), 'key' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')).':'.$i->cad_ref.':'.$i->cad_talla, 'countryCode' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')), 'productId' => (int) $i->cad_producto_id, 'name' => $products[$i->cad_producto_id] ?? $i->cad_ref, 'sku' => $i->cad_ref, 'size' => $i->cad_talla, 'quantity' => (int) $i->cad_cantidad, 'selected' => (bool) $i->cad_seleccionado, 'status' => $i->cad_estado ?? 'DISPONIBLE', 'unavailableReason' => $i->cad_motivo_no_disponible, 'price' => (float) $i->cad_precio_final_unitario, 'regularPrice' => (float) $i->cad_precio_unitario, 'discount' => (float) $i->cad_descuento_unitario, 'finalPrice' => (float) $i->cad_precio_final_unitario, 'lineSubtotal' => ($i->cad_estado ?? 'DISPONIBLE') === 'DISPONIBLE' && $i->cad_seleccionado ? round($i->cad_precio_final_unitario * $i->cad_cantidad, 2) : 0, 'currency' => $cart->car_moneda])->values();
         $subtotal = round($items->sum('lineSubtotal'), 2);
 
-        return ['cart' => ['id' => $cart->getKey(), 'uuid' => $cart->car_uuid, 'state' => $cart->car_estado, 'type' => $cart->car_tipo, 'version' => (int) $cart->car_version, 'currency' => $cart->car_moneda, 'items' => $items->all(), 'totals' => ['subtotal' => $subtotal, 'discount' => round($items->sum(fn ($i) => $i['discount'] * $i['quantity']), 2), 'total' => $subtotal, 'currency' => $cart->car_moneda], 'alerts' => $alerts, 'updatedAt' => $cart->car_actualizado_en]];
+        return ['cart' => ['id' => $cart->getKey(), 'uuid' => $cart->car_uuid, 'state' => $cart->car_estado, 'type' => $cart->car_tipo, 'fulfillment' => $this->context($cart), 'version' => (int) $cart->car_version, 'currency' => $cart->car_moneda, 'items' => $items->all(), 'totals' => ['subtotal' => $subtotal, 'discount' => round($items->filter(fn ($i) => $i['status'] === 'DISPONIBLE' && $i['selected'])->sum(fn ($i) => $i['discount'] * $i['quantity']), 2), 'total' => $subtotal, 'currency' => $cart->car_moneda], 'alerts' => $alerts, 'updatedAt' => $cart->car_actualizado_en]];
     }
 
     private function country(string $code): object
     {
-        $c = DB::table('stj_paises')->where('pai_codigo',strtoupper($code))->first(['pai_id', 'pai_codigo']);
+        $c = DB::table('stj_paises')->where('pai_codigo', strtoupper($code))->first(['pai_id', 'pai_codigo']);
         if (! $c) {
             throw ValidationException::withMessages(['country' => 'Pais no soportado.']);
         }
 
-return $c;
+        return $c;
     }
 
     private function currency(string $c): string

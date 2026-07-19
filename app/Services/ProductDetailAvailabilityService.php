@@ -46,7 +46,15 @@ class ProductDetailAvailabilityService
 
         $countryCode = strtolower((string) $country->pai_codigo);
         $storeCodes = config("inventory.stores_by_country.{$countryCode}", []);
-        $activeStoreCode = trim((string) ($storeCode ?: config("inventory.default_store_by_country.{$countryCode}", '')));
+        $requestedStoreCode = trim((string) $storeCode);
+        $requestedStoreIsValid = $requestedStoreCode !== '' && DB::table('stj_tiendas')
+            ->where('tie_pais', $country->pai_id)
+            ->where('tie_codigo', $requestedStoreCode)
+            ->exists();
+        $activeStoreCode = $requestedStoreIsValid
+            ? $requestedStoreCode
+            : trim((string) config("inventory.default_store_by_country.{$countryCode}", ''));
+        $storeCodes = collect($storeCodes)->map(fn ($code) => (string) $code)->push($activeStoreCode)->filter()->unique()->values()->all();
 
         if ($storeCodes === [] || $activeStoreCode === '') {
             return [
@@ -73,7 +81,12 @@ class ProductDetailAvailabilityService
             $rule['fallback_source'] ?? null,
         );
 
-        $storeNames = $this->storeNamesByCode($storeCodes);
+        $storeNames = $this->storeNamesByCode((int) $country->pai_id, $storeCodes);
+        $allowedStoreCodes = array_map(fn (int|string $code) => (string) $code, array_keys($storeNames));
+        $providerResult['rows'] = collect($providerResult['rows'] ?? [])
+            ->filter(fn (array $row) => in_array(trim((string) ($row['codTienda'] ?? '')), $allowedStoreCodes, true))
+            ->values()
+            ->all();
         $activeStore = [
             'code' => $activeStoreCode,
             'name' => $this->normalizeStoreName($countryCode, $activeStoreCode, $storeNames[$activeStoreCode] ?? null),
@@ -177,7 +190,7 @@ class ProductDetailAvailabilityService
                     ->filter(fn (array $row) => trim((string) $row['codTienda']) !== $activeStoreCode && (int) $row['existencia'] > 0)
                     ->map(fn (array $row) => [
                         'code' => trim((string) $row['codTienda']),
-                        'name' => $this->normalizeStoreName($countryCode, (string) $row['codTienda'], $row['tienda'] ?: ($storeNames[$row['codTienda']] ?? null)),
+                        'name' => $this->normalizeStoreName($countryCode, (string) $row['codTienda'], $storeNames[$row['codTienda']] ?? null),
                         'quantity' => (int) $row['existencia'],
                     ])
                     ->values()
@@ -242,9 +255,10 @@ class ProductDetailAvailabilityService
         return (int) $matches[1];
     }
 
-    private function storeNamesByCode(array $storeCodes): array
+    private function storeNamesByCode(int $countryId, array $storeCodes): array
     {
         return DB::table('stj_tiendas')
+            ->where('tie_pais', $countryId)
             ->whereIn('tie_codigo', $storeCodes)
             ->pluck('tie_nombre', 'tie_codigo')
             ->map(fn ($name) => trim((string) $name))

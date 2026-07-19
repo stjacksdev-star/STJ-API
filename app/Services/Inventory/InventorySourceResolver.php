@@ -4,6 +4,7 @@ namespace App\Services\Inventory;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class InventorySourceResolver
 {
@@ -17,11 +18,13 @@ class InventorySourceResolver
             "inventory_source_rule:{$countryCode}:{$scope}",
             now()->addSeconds($cacheSeconds),
             function () use ($countryCode, $scope) {
-                $rule = DB::table('stj_inventory_source_rules')
-                    ->where('isr_country_code', strtoupper($countryCode))
-                    ->where('isr_scope', $scope)
-                    ->where('isr_is_active', 1)
-                    ->first();
+                $rule = Schema::hasTable('stj_inventory_source_rules')
+                    ? DB::table('stj_inventory_source_rules')
+                        ->where('isr_country_code', strtoupper($countryCode))
+                        ->where('isr_scope', $scope)
+                        ->where('isr_is_active', 1)
+                        ->first()
+                    : null;
 
                 if ($rule) {
                     return [
