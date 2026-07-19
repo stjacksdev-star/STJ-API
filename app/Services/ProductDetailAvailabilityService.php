@@ -14,8 +14,8 @@ class ProductDetailAvailabilityService
         private readonly InventorySourceResolver $resolver,
         private readonly ExternalInventoryProvider $externalProvider,
         private readonly LocalInventoryProvider $localProvider,
-    ) {
-    }
+        private readonly StorefrontProductPricingService $pricing,
+    ) {}
 
     public function forCountryAndSlug(string $countryCode, string $slug, ?string $storeCode = null): ?array
     {
@@ -58,7 +58,7 @@ class ProductDetailAvailabilityService
                     'fallbackTriggered' => false,
                 ],
                 'activeStore' => null,
-                'sizes' => $this->buildEmptySizes((string) $product->pro_tallas),
+                'sizes' => $this->buildEmptySizes((string) $product->pro_tallas, (int) $country->pai_id, (int) $product->pro_id, (string) $product->pro_codigo),
                 'message' => 'No hay configuracion de tiendas para este pais.',
             ];
         }
@@ -94,6 +94,9 @@ class ProductDetailAvailabilityService
                 $activeStoreCode,
                 $countryCode,
                 $storeNames,
+                (int) $country->pai_id,
+                (int) $product->pro_id,
+                (string) $product->pro_codigo,
             ),
             'message' => $providerResult['ok']
                 ? null
@@ -147,7 +150,7 @@ class ProductDetailAvailabilityService
         };
     }
 
-    private function buildSizes(string $declaredSizes, array $rows, string $activeStoreCode, string $countryCode, array $storeNames): array
+    private function buildSizes(string $declaredSizes, array $rows, string $activeStoreCode, string $countryCode, array $storeNames, int $countryId, int $productId, string $sku): array
     {
         $orderedSizes = collect(explode(',', $declaredSizes))
             ->map(fn ($size) => trim($size))
@@ -165,7 +168,7 @@ class ProductDetailAvailabilityService
             ->values();
 
         return $sizes
-            ->map(function (string $size) use ($rows, $activeStoreCode, $countryCode, $storeNames) {
+            ->map(function (string $size) use ($rows, $activeStoreCode, $countryCode, $storeNames, $countryId, $productId, $sku) {
                 $sizeRows = collect($rows)->filter(fn (array $row) => trim((string) $row['talla']) === $size);
                 $activeRow = $sizeRows->first(fn (array $row) => trim((string) $row['codTienda']) === $activeStoreCode);
                 $activeQuantity = max(0, (int) ($activeRow['existencia'] ?? 0));
@@ -187,13 +190,14 @@ class ProductDetailAvailabilityService
                     'availableElsewhere' => count($alternativeStores) > 0,
                     'alternativeStores' => $alternativeStores,
                     'totalQuantity' => (int) $sizeRows->sum(fn (array $row) => max(0, (int) $row['existencia'])),
+                    'pricing' => $this->pricing->resolve($countryId, $productId, $sku, $size, now()),
                 ];
             })
             ->values()
             ->all();
     }
 
-    private function buildEmptySizes(string $declaredSizes): array
+    private function buildEmptySizes(string $declaredSizes, int $countryId, int $productId, string $sku): array
     {
         return collect(explode(',', $declaredSizes))
             ->map(fn ($size) => trim($size))
@@ -206,6 +210,7 @@ class ProductDetailAvailabilityService
                 'availableElsewhere' => false,
                 'alternativeStores' => [],
                 'totalQuantity' => 0,
+                'pricing' => $this->pricing->resolve($countryId, $productId, $sku, $size, now()),
             ])
             ->all();
     }

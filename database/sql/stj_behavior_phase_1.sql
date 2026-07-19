@@ -53,7 +53,7 @@ CREATE TABLE `stj_carrito_detalles` (
   `cad_producto_id` BIGINT NOT NULL,
   `cad_promocion_id` BIGINT NULL,
   `cad_talla` VARCHAR(10) NOT NULL,
-  `cad_ref` VARCHAR(50) NULL,
+  `cad_ref` VARCHAR(50) NOT NULL,
   `cad_cantidad` INT UNSIGNED NOT NULL,
   `cad_precio_unitario` DECIMAL(12,2) NOT NULL,
   `cad_descuento_unitario` DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -65,9 +65,28 @@ CREATE TABLE `stj_carrito_detalles` (
   PRIMARY KEY (`cad_id`),
   KEY `stj_carrito_detalles_cad_carrito_id_cad_producto_id_index` (`cad_carrito_id`, `cad_producto_id`),
   KEY `stj_carrito_detalles_cad_promocion_id_index` (`cad_promocion_id`),
+  UNIQUE KEY `uq_cad_cart_sku_size` (`cad_carrito_id`, `cad_ref`, `cad_talla`),
   CONSTRAINT `stj_carrito_detalles_cad_carrito_id_foreign` FOREIGN KEY (`cad_carrito_id`) REFERENCES `stj_carritos` (`car_id`),
   CONSTRAINT `stj_carrito_detalles_cad_producto_id_foreign` FOREIGN KEY (`cad_producto_id`) REFERENCES `stj_productos` (`pro_id`),
   CONSTRAINT `stj_carrito_detalles_cad_promocion_id_foreign` FOREIGN KEY (`cad_promocion_id`) REFERENCES `stj_promociones` (`prm_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `stj_carrito_operaciones` (
+  `cao_id` BIGINT NOT NULL AUTO_INCREMENT,
+  `cao_uuid` CHAR(36) NOT NULL,
+  `cao_carrito_id` BIGINT NOT NULL,
+  `cao_visitante_id` BIGINT NOT NULL,
+  `cao_usu_id` BIGINT NULL,
+  `cao_tipo` VARCHAR(32) NOT NULL,
+  `cao_payload_hash` CHAR(64) NOT NULL,
+  `cao_respuesta` JSON NOT NULL,
+  `cao_creado_en` DATETIME(6) NOT NULL,
+  PRIMARY KEY (`cao_id`),
+  UNIQUE KEY `uq_cao_uuid` (`cao_uuid`),
+  KEY `idx_cao_carrito_fecha` (`cao_carrito_id`, `cao_creado_en`),
+  CONSTRAINT `fk_cao_carrito` FOREIGN KEY (`cao_carrito_id`) REFERENCES `stj_carritos` (`car_id`),
+  CONSTRAINT `fk_cao_visitante` FOREIGN KEY (`cao_visitante_id`) REFERENCES `stj_visitantes` (`vis_id`),
+  CONSTRAINT `fk_cao_usuario` FOREIGN KEY (`cao_usu_id`) REFERENCES `stj_usuarios` (`usu_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `stj_carrito_auditoria` (
@@ -87,7 +106,7 @@ CREATE TABLE `stj_carrito_auditoria` (
   KEY `stj_carrito_auditoria_cau_carrito_id_cau_ocurrido_en_index` (`cau_carrito_id`, `cau_ocurrido_en`),
   KEY `stj_carrito_auditoria_cau_usu_id_cau_ocurrido_en_index` (`cau_usu_id`, `cau_ocurrido_en`),
   CONSTRAINT `stj_carrito_auditoria_cau_carrito_id_foreign` FOREIGN KEY (`cau_carrito_id`) REFERENCES `stj_carritos` (`car_id`),
-  CONSTRAINT `stj_carrito_auditoria_cau_detalle_id_foreign` FOREIGN KEY (`cau_detalle_id`) REFERENCES `stj_carrito_detalles` (`cad_id`),
+  CONSTRAINT `fk_cau_detalle` FOREIGN KEY (`cau_detalle_id`) REFERENCES `stj_carrito_detalles` (`cad_id`) ON DELETE SET NULL,
   CONSTRAINT `stj_carrito_auditoria_cau_visitante_id_foreign` FOREIGN KEY (`cau_visitante_id`) REFERENCES `stj_visitantes` (`vis_id`),
   CONSTRAINT `stj_carrito_auditoria_cau_usu_id_foreign` FOREIGN KEY (`cau_usu_id`) REFERENCES `stj_usuarios` (`usu_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

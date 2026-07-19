@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\StorefrontPromotionController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
 use App\Http\Controllers\Api\StorefrontAccountController;
 use App\Http\Controllers\Api\StorefrontEventController;
+use App\Http\Controllers\Api\StorefrontCartController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -72,6 +73,14 @@ Route::post('/storefront/orders', [StorefrontOrderController::class, 'store']);
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
+Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
+    Route::get('/', [StorefrontCartController::class, 'show']);
+    Route::post('/items', [StorefrontCartController::class, 'storeItem']);
+    Route::patch('/items/{item}', [StorefrontCartController::class, 'updateItem'])->whereNumber('item');
+    Route::delete('/items/{item}', [StorefrontCartController::class, 'destroyItem'])->whereNumber('item');
+    Route::post('/sync', [StorefrontCartController::class, 'sync']);
+    Route::post('/merge', [StorefrontCartController::class, 'merge']);
+});
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
@@ -164,15 +173,4 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/orders/deliver', [DashboardOrderReferenceController::class, 'deliver']);
         Route::post('/tasks/put-assets', DashboardAssetPublicationController::class);
     });
-});
-
-Route::get('/debug-db', function () {
-    return [
-        'app_env' => app()->environment(),
-        'db_default' => config('database.default'),
-        'db_database' => config('database.connections.mysql.database'),
-        'sqlite_database' => config('database.connections.sqlite.database'),
-        'env_db_connection' => env('DB_CONNECTION'),
-        'env_db_database' => env('DB_DATABASE'),
-    ];
 });

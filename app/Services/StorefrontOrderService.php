@@ -4,12 +4,13 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class StorefrontOrderService
 {
     private $checkoutValidationService;
 
-    public function __construct(StorefrontCheckoutValidationService $checkoutValidationService)
+    public function __construct(StorefrontCheckoutValidationService $checkoutValidationService, private StorefrontProductPricingService $pricing)
     {
         $this->checkoutValidationService = $checkoutValidationService;
     }
@@ -56,10 +57,9 @@ class StorefrontOrderService
             $checkoutType = $payload['fulfillment']['method'] === 'store_pickup' ? 'TIENDA' : 'DOMICILIO';
             $storeCode = $this->resolveStoreCode(strtolower((string) $country->pai_codigo), $payload['fulfillment']);
             $paymentRef = $this->generatePaymentRef();
-            $items = $this->normalizeItems($payload['items'], $products);
-            $subtotal = collect($items)->sum(function (array $item) {
-                return round(((float) $item['price']) * ((int) $item['quantity']), 2);
-            });
+            $items = $this->normalizeItems($payload['items'], $products, (int) $country->pai_id);
+            $subtotalCents = collect($items)->sum(fn (array $item) => $this->cents($item['price']) * (int) $item['quantity']);
+            $subtotal = $this->decimal($subtotalCents);
             $articleCount = collect($items)->sum('quantity');
             $customer = $payload['customer'];
             $delivery = $payload['fulfillment'];
@@ -217,8 +217,8 @@ class StorefrontOrderService
                 'paymentStatus' => 'PENDIENTE',
                 'checkoutType' => $checkoutType,
                 'storeCode' => $storeCode,
-                'subtotal' => round($subtotal, 2),
-                'total' => round($subtotal, 2),
+                'subtotal' => $subtotal,
+                'total' => $subtotal,
                 'articleCount' => $articleCount,
                 'items' => $items,
             ];
@@ -261,12 +261,17 @@ class StorefrontOrderService
             ->keyBy(fn ($product) => trim((string) $product->pro_codigo));
     }
 
-    private function normalizeItems(array $items, $products): array
+    private function normalizeItems(array $items, $products, int $countryId): array
     {
         return collect($items)
-            ->map(function (array $item) use ($products) {
+            ->map(function (array $item) use ($products, $countryId) {
                 $sku = trim((string) $item['sku']);
                 $product = $products->get($sku);
+
+                $price = $this->pricing->resolve($countryId, (int) $product->pro_id, $sku, trim((string) $item['size']), now());
+                if (! $price['ok']) {
+                    throw ValidationException::withMessages(['price' => $price['message']]);
+                }
 
                 return [
                     'key' => $item['key'] ?? "{$sku}:".trim((string) $item['size']),
@@ -275,7 +280,7 @@ class StorefrontOrderService
                     'name' => trim((string) ($product->pro_nombre ?: ($item['name'] ?? $sku))),
                     'size' => trim((string) $item['size']),
                     'quantity' => max(1, (int) $item['quantity']),
-                    'price' => round((float) $product->ppa_precio, 2),
+                    'price' => $price['precio_final'],
                 ];
             })
             ->values()
@@ -316,5 +321,17 @@ class StorefrontOrderService
     private function limit(?string $value, int $length): string
     {
         return Str::limit(trim((string) $value), $length, '');
+    }
+
+    private function cents(string $value): int
+    {
+        [$whole,$fraction] = array_pad(explode('.', trim($value), 2), 2, '');
+
+        return ((int) $whole * 100) + (int) str_pad(substr($fraction, 0, 2), 2, '0');
+    }
+
+    private function decimal(int $cents): string
+    {
+        return intdiv($cents, 100).'.'.str_pad((string) ($cents % 100), 2, '0', STR_PAD_LEFT);
     }
 }
