@@ -38,7 +38,7 @@ class StorefrontCartController extends BaseController
 
     public function destroyItem(Request $request, string $country, int $item): JsonResponse
     {
-        $data = $request->validate(['operation_uuid' => ['required', 'uuid']]);
+        $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'delivery' => ['nullable', 'array'], 'delivery.city_id' => ['nullable', 'integer'], 'delivery.state_id' => ['nullable', 'integer'], 'delivery.addressLine1' => ['nullable', 'string', 'max:200'], 'delivery.reference' => ['nullable', 'string', 'max:200']]);
 
         return $this->mutation(fn () => $this->carts->remove($country, $item, $this->visitor($request), $this->customer(), $data), 'Producto eliminado.');
     }
@@ -63,7 +63,14 @@ class StorefrontCartController extends BaseController
 
     public function startCheckout(Request $request, string $country): JsonResponse
     {
-        $data = $request->validate(['operation_uuid' => ['required', 'uuid']]);
+        $data = $request->validate([
+            'operation_uuid' => ['required', 'uuid'],
+            'delivery' => ['nullable', 'array'],
+            'delivery.city_id' => ['nullable', 'integer'],
+            'delivery.state_id' => ['nullable', 'integer'],
+            'delivery.addressLine1' => ['nullable', 'string', 'max:200'],
+            'delivery.reference' => ['nullable', 'string', 'max:200'],
+        ]);
 
         return $this->mutation(fn () => $this->carts->startCheckout($country, $this->visitor($request), $this->customer(), $data), 'Checkout iniciado.');
     }

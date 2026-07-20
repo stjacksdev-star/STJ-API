@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\Payments\PowerTranzPaymentService;
+use App\Services\Payments\PowerTranzUrlFactory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,19 +25,19 @@ class PowerTranzController extends Controller
             return response()->json(['ok' => false, 'message' => $exception->getMessage()], 409);
         }
 
-        return response()->json(['ok' => true, 'message' => 'Flujo PowerTranz iniciado.', 'data' => $result]);
+        return response()->json(['ok' => true, 'message' => 'Flujo PowerTranz iniciado.', 'data' => $result])->header('Cache-Control', 'no-store, private');
     }
 
-    public function handleReturn(Request $request, string $country, string $token, PowerTranzPaymentService $service): JsonResponse|RedirectResponse
+    public function handleReturn(Request $request, string $country, string $token, PowerTranzPaymentService $service, PowerTranzUrlFactory $urls): JsonResponse|RedirectResponse
     {
         $data = $request->validate(['SpiToken' => ['required', 'string', 'max:10000'], 'TransactionIdentifier' => ['required', 'string', 'max:255'], 'Response' => ['required', 'string', 'max:10000']]);
         $result = $service->confirm($country, $token, $data);
-        $frontend = rtrim((string) config('powertranz.frontend_result_url'), '/');
+        $frontend = trim((string) config('powertranz.frontend_result_url'));
         if ($frontend !== '') {
-            return redirect()->away($frontend.'/'.strtolower($result['status']));
+            return redirect()->away($urls->frontendResultUrl($country, $result['status']))->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
         }
 
-        return response()->json(['ok' => true, 'data' => ['status' => $result['status']]]);
+        return response()->json(['ok' => true, 'data' => ['status' => $result['status']]])->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
     }
 
     public function status(Request $request, int $order): JsonResponse
@@ -45,9 +46,9 @@ class PowerTranzController extends Controller
         $customer = $this->customer();
         $cart = DB::table('stj_carritos')->where('car_pedido_id', $order)->where('car_visitante_id', $visitor->getKey())->when($customer, fn ($q) => $q->where('car_usu_id', $customer->getKey()), fn ($q) => $q->whereNull('car_usu_id'))->first();
         abort_unless($cart, 404);
-        $payment = DB::table('stj_pedidos_pago')->where('ppa_pedido', $order)->orderByDesc('ppa_id')->first(['ppa_estado', 'ppa_ref', 'ppa_fecha_procesado']);
+        $payment = DB::table('stj_pedidos_pago')->where('ppa_pedido', $order)->orderByDesc('ppa_id')->first(['ppa_tipo', 'ppa_estado', 'ppa_ref', 'ppa_autorizacion', 'ppa_fecha_procesado']);
 
-        return response()->json(['ok' => true, 'data' => ['orderId' => $order, 'status' => $payment?->ppa_estado ?? 'PENDIENTE', 'reference' => $payment?->ppa_ref, 'processedAt' => $payment?->ppa_fecha_procesado]]);
+        return response()->json(['ok' => true, 'data' => ['orderId' => $order, 'paymentType' => $payment?->ppa_tipo, 'status' => $payment?->ppa_estado ?? 'PENDIENTE', 'reference' => $payment?->ppa_ref, 'authorization' => $payment?->ppa_autorizacion, 'processedAt' => $payment?->ppa_fecha_procesado]])->header('Cache-Control', 'no-store, private');
     }
 
     private function visitor(Request $request): StorefrontVisitor

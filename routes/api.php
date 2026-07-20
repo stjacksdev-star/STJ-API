@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
 use App\Http\Controllers\Api\StorefrontStoreController;
+use App\Http\Controllers\Api\StorefrontShippingController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
 use Illuminate\Support\Facades\Route;
 
@@ -76,9 +77,12 @@ Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationControl
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
+Route::get('/storefront/shipping/{country}/states', [StorefrontShippingController::class, 'locations'])->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/shipping/{country}/states/{state}/cities', [StorefrontShippingController::class, 'cities'])->where(['country' => '[A-Za-z]{2}', 'state' => '[0-9]+']);
+Route::post('/storefront/shipping/{country}/quote', [StorefrontShippingController::class, 'quote'])->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/orders/{order}/payments/powertranz', [PowerTranzController::class, 'start'])->whereNumber('order')->middleware('throttle:5,1');
 Route::get('/storefront/orders/{order}/payment-status', [PowerTranzController::class, 'status'])->whereNumber('order');
-Route::post('/storefront/payments/powertranz/return/{country}/{token}', [PowerTranzController::class, 'handleReturn'])->where(['country' => '[A-Za-z]{2}', 'token' => '[A-Za-z0-9]{64}'])->name('powertranz.return');
+Route::post('/storefront/payments/powertranz/return/{country}/{token}', [PowerTranzController::class, 'handleReturn'])->where(['country' => '[A-Za-z]{2}', 'token' => '[A-Za-z0-9]{64}'])->middleware('throttle:30,1')->name('powertranz.return');
 Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
     Route::get('/', [StorefrontCartController::class, 'show']);
     Route::post('/items', [StorefrontCartController::class, 'storeItem']);

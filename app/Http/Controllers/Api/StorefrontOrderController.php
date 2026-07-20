@@ -24,6 +24,8 @@ class StorefrontOrderController extends Controller
             'customer.phone' => ['required', 'string', 'max:30'],
             'customer.document' => ['nullable', 'string', 'max:50'],
             'delivery' => ['nullable', 'array'],
+            'delivery.city_id' => ['nullable', 'integer'],
+            'delivery.state_id' => ['nullable', 'integer'],
             'delivery.city' => ['nullable', 'string', 'max:50'],
             'delivery.state' => ['nullable', 'string', 'max:50'],
             'delivery.addressLine1' => ['nullable', 'string', 'max:200'],

@@ -6,7 +6,9 @@ return [
     'payment_url' => env('POWERTRANZ_PAYMENT_URL', 'https://staging.ptranz.com/api/spi/payment'),
     'connect_timeout' => (int) env('POWERTRANZ_CONNECT_TIMEOUT', 5),
     'timeout' => (int) env('POWERTRANZ_TIMEOUT', 20),
+    'return_base_url' => env('POWERTRANZ_RETURN_BASE_URL', ''),
     'frontend_result_url' => env('POWERTRANZ_FRONTEND_RESULT_URL', ''),
+    'return_token_ttl_minutes' => (int) env('POWERTRANZ_RETURN_TOKEN_TTL_MINUTES', 60),
     'credentials' => collect(['sv', 'gt', 'cr', 'pa', 'hn'])->mapWithKeys(fn ($country) => [$country => [
         'id' => env('POWERTRANZ_'.strtoupper($country).'_ID', ''),
         'password' => env('POWERTRANZ_'.strtoupper($country).'_PASSWORD', ''),

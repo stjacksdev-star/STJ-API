@@ -11,6 +11,7 @@ use App\Services\StorefrontCartService;
 use App\Services\StorefrontCheckoutValidationService;
 use App\Services\StorefrontFulfillmentService;
 use App\Services\StorefrontProductPricingService;
+use App\Services\StorefrontShippingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +32,7 @@ class StorefrontPersistentCartTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), fn () => $t->string('pai_codigo', 3)));
+        Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) { $t->bigInteger('pai_id_world')->nullable(); $t->string('pai_codigo', 3); }));
         Schema::create('stj_productos', function (Blueprint $t) {
             $t->bigInteger('pro_id', true);
             $t->string('pro_codigo');
@@ -67,7 +68,7 @@ class StorefrontPersistentCartTest extends TestCase
         });
         Schema::create('stj_pedidos', fn (Blueprint $t) => $t->bigInteger('ped_id', true));
         Schema::create('stj_promociones', fn (Blueprint $t) => $t->bigInteger('prm_id', true));
-        DB::table('stj_paises')->insert([['pai_id' => 1, 'pai_codigo' => 'SV'], ['pai_id' => 2, 'pai_codigo' => 'GT']]);
+        DB::table('stj_paises')->insert([['pai_id' => 1, 'pai_id_world' => 1, 'pai_codigo' => 'SV'], ['pai_id' => 2, 'pai_id_world' => 2, 'pai_codigo' => 'GT']]);
         DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_tallas' => 'S,M', 'pro_estatus' => 'ACTIVO']);
         DB::table('stj_producto_pais')->insert([['ppa_pais' => 1, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 100, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => 10, 'ppa_origen_descuento' => 'WEB', 'ppa_promo_nombre' => 'Promo'], ['ppa_pais' => 2, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 200, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => null, 'ppa_origen_descuento' => null, 'ppa_promo_nombre' => null]]);
         DB::table('stj_tiendas')->insert([['tie_id' => 1, 'tie_codigo' => '57', 'tie_nombre' => 'Domicilio SV', 'tie_pais' => 1, 'tie_productos' => 0], ['tie_id' => 2, 'tie_codigo' => '002', 'tie_nombre' => 'Las Cascadas', 'tie_pais' => 1, 'tie_productos' => 1], ['tie_id' => 3, 'tie_codigo' => '2', 'tie_nombre' => 'Domicilio GT', 'tie_pais' => 2, 'tie_productos' => 0]]);
@@ -77,7 +78,9 @@ class StorefrontPersistentCartTest extends TestCase
         $availability->shouldReceive('forCountryAndSlug')->andReturnUsing(fn () => ['sizes' => [['size' => 'S', 'quantityInActiveStore' => 5], ['size' => 'M', 'quantityInActiveStore' => 2]]]);
         $checkout = Mockery::mock(StorefrontCheckoutValidationService::class);
         $checkout->shouldReceive('validate')->andReturn(['ok' => true, 'message' => 'ok']);
-        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver), $checkout);
+        $shipping = Mockery::mock(StorefrontShippingService::class);
+        $shipping->shouldReceive('quote')->andReturnUsing(fn ($country, $type) => ['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => $country->pai_codigo === 'GT' ? 'GTQ' : 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => null]);
+        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver), $checkout, $shipping);
     }
 
     public function test_guest_add_is_authoritative_and_idempotent(): void
