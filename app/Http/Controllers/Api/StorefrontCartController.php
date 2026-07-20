@@ -61,6 +61,13 @@ class StorefrontCartController extends BaseController
         return $this->mutation(fn () => $this->carts->merge($country, $this->visitor($request), $customer, $data), 'Carritos combinados.');
     }
 
+    public function startCheckout(Request $request, string $country): JsonResponse
+    {
+        $data = $request->validate(['operation_uuid' => ['required', 'uuid']]);
+
+        return $this->mutation(fn () => $this->carts->startCheckout($country, $this->visitor($request), $this->customer(), $data), 'Checkout iniciado.');
+    }
+
     public function previewFulfillment(Request $request, string $country): JsonResponse
     {
         $data = $request->validate(['fulfillment_type' => ['required', 'in:DOMICILIO,TIENDA'], 'store_code' => ['nullable', 'string', 'max:15']]);

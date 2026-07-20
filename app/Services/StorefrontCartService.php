@@ -16,7 +16,51 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontCartService
 {
-    public function __construct(private ProductDetailAvailabilityService $availability, private StorefrontProductPricingService $pricing, private StorefrontFulfillmentService $fulfillment) {}
+    public function __construct(private ProductDetailAvailabilityService $availability, private StorefrontProductPricingService $pricing, private StorefrontFulfillmentService $fulfillment, private StorefrontCheckoutValidationService $checkoutValidation) {}
+
+    public function startCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
+    {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $input) {
+            $cart = $this->resolveCart($countryCode, $visitor, $customer, false, false);
+            if (! $cart) {
+                throw ValidationException::withMessages(['cart' => 'No existe un carrito activo para iniciar checkout.']);
+            }
+
+            return $this->idempotent($cart, $visitor, $customer, 'CHECKOUT_START', $input['operation_uuid'], $input, function () use ($cart, $countryCode, $visitor, $customer, $input) {
+                if ($cart->car_estado !== 'ACTIVO') {
+                    throw ValidationException::withMessages(['cart' => 'El carrito ya inicio checkout o no esta activo.']);
+                }
+                if (! $cart->car_tienda_id || ! $cart->car_tienda_codigo_snapshot || ! $cart->car_inventory_source) {
+                    throw ValidationException::withMessages(['fulfillment' => 'El carrito no tiene un contexto de entrega completo.']);
+                }
+                $lines = $cart->items()->where('cad_seleccionado', 1)->where('cad_estado', 'DISPONIBLE')->lockForUpdate()->get();
+                if ($lines->isEmpty()) {
+                    throw ValidationException::withMessages(['cart' => 'El carrito no tiene lineas seleccionadas y disponibles.']);
+                }
+                $fulfillment = ['method' => $cart->car_tipo === 'TIENDA' ? 'store_pickup' : 'home_delivery', 'storeCode' => (string) $cart->car_tienda_codigo_snapshot];
+                $items = $lines->map(fn ($line) => ['key' => $line->getKey(), 'sku' => (string) $line->cad_ref, 'name' => (string) $line->cad_ref, 'size' => (string) $line->cad_talla, 'quantity' => (int) $line->cad_cantidad])->all();
+                $validation = $this->checkoutValidation->validate($countryCode, $fulfillment, $items);
+                if (! ($validation['ok'] ?? false)) {
+                    throw ValidationException::withMessages(['inventory' => $validation['message'] ?? 'No se pudo validar el inventario de checkout.']);
+                }
+                $authorized = $lines->map(function ($line) use ($cart) {
+                    $price = $this->pricing->resolve((int) $cart->car_pais_id, (int) $line->cad_producto_id, (string) $line->cad_ref, (string) $line->cad_talla, now());
+                    if (! $price['ok']) {
+                        throw ValidationException::withMessages(['price' => $price['message']]);
+                    }
+
+                    return ['itemId' => $line->getKey(), 'productId' => (int) $line->cad_producto_id, 'sku' => (string) $line->cad_ref, 'size' => (string) $line->cad_talla, 'quantity' => (int) $line->cad_cantidad, 'requestedQuantity' => (int) $line->cad_cantidad, 'availableQuantity' => (int) $line->cad_cantidad, 'ok' => true, 'message' => 'Linea autorizada.', 'regularPrice' => (float) $price['precio_regular'], 'discount' => (float) $price['descuento'], 'finalPrice' => (float) $price['precio_final'], 'lineTotal' => round((float) $price['precio_final'] * (int) $line->cad_cantidad, 2)];
+                })->values();
+                $subtotal = round($authorized->sum('lineTotal'), 2);
+                $cart->forceFill(['car_estado' => 'CHECKOUT', 'car_checkout_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
+                $summary = ['service' => $cart->car_tipo, 'store' => $this->context($cart), 'operationalStoreCode' => (string) $cart->car_tienda_codigo_snapshot, 'lines' => $authorized->all(), 'subtotal' => $subtotal, 'shipping' => 0.0, 'taxes' => 0.0, 'total' => $subtotal, 'currency' => $cart->car_moneda, 'alerts' => [], 'cartVersion' => (int) $cart->car_version];
+                $this->audit($cart, null, $visitor, $customer, 'CHECKOUT_STARTED', ['state' => 'ACTIVO'], ['state' => 'CHECKOUT', 'version' => $cart->car_version]);
+                CustomerEvent::query()->create(['cev_event_uuid' => $input['operation_uuid'] ?? (string) Str::uuid(), 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_tipo' => 'BEGIN_CHECKOUT', 'cev_valor' => $subtotal, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => ['cartVersion' => $cart->car_version]]);
+
+                return ['ok' => true, 'message' => 'Checkout autorizado.', 'cart' => $this->payload($cart)['cart'], 'checkout' => $summary];
+            });
+        });
+    }
 
     public function previewFulfillment(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
     {
@@ -33,6 +77,7 @@ class StorefrontCartService
     {
         return DB::transaction(function () use ($countryCode, $visitor, $customer, $input) {
             $cart = $this->resolveCart($countryCode, $visitor, $customer, true);
+            $this->invalidateCheckout($cart, $visitor, $customer);
 
             return $this->idempotent($cart, $visitor, $customer, 'FULFILLMENT_CHANGE', $input['operation_uuid'], $input, function () use ($cart, $countryCode, $visitor, $customer, $input) {
                 $country = $this->country($countryCode);
@@ -62,7 +107,7 @@ class StorefrontCartService
         return DB::transaction(function () use ($countryCode, $visitor, $customer) {
             $cart = $this->resolveCart($countryCode, $visitor, $customer, true);
 
-            return $this->payload($cart, $this->refreshPrices($cart, $visitor, $customer));
+            return $this->payload($cart, $cart->car_estado === 'CHECKOUT' ? [] : $this->refreshPrices($cart, $visitor, $customer));
         });
     }
 
@@ -216,6 +261,7 @@ class StorefrontCartService
     {
         return DB::transaction(function () use ($type, $uuid, $input, $country, $visitor, $customer, $callback) {
             $cart = $this->resolveCart($country, $visitor, $customer, true);
+            $this->invalidateCheckout($cart, $visitor, $customer);
 
             return $this->idempotent($cart, $visitor, $customer, $type, $uuid, $input, fn () => $callback($cart));
         });
@@ -250,13 +296,13 @@ class StorefrontCartService
         return json_decode($old->cao_respuesta, true);
     }
 
-    private function resolveCart(string $code, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, bool $create): StorefrontCart
+    private function resolveCart(string $code, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, bool $create, bool $hydrateContext = true): ?StorefrontCart
     {
         $country = $this->country($code);
-        $q = StorefrontCart::query()->where('car_pais_id', $country->pai_id)->where('car_estado', 'ACTIVO');
+        $q = StorefrontCart::query()->where('car_pais_id', $country->pai_id)->whereIn('car_estado', ['ACTIVO', 'CHECKOUT']);
         $customer ? $q->where('car_usu_id', $customer->getKey()) : $q->whereNull('car_usu_id')->where('car_visitante_id', $visitor->getKey());
         $cart = $q->lockForUpdate()->first();
-        if ($cart && ! $cart->car_tienda_codigo_snapshot) {
+        if ($hydrateContext && $cart && ! $cart->car_tienda_codigo_snapshot) {
             $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, ['fulfillment_type' => 'DOMICILIO']);
             $cart->forceFill(['car_tipo' => $context['type'], 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource']])->save();
         }
@@ -277,7 +323,7 @@ class StorefrontCartService
             throw ValidationException::withMessages(['price' => $price['message']]);
         } $country = DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo');
         $slug = Str::slug($price['name']).'-'.$price['productId'];
-        $availability = $this->availability->forCountryAndSlug(strtolower($country), $slug, (string) $cart->car_tienda_codigo_snapshot);
+        $availability = $this->availability->forCountryAndSlug(strtolower($country), $slug, (string) $cart->car_tienda_codigo_snapshot, 'cart');
         $sizeData = collect($availability['sizes'] ?? [])->firstWhere('size', $price['size']);
         $available = (int) ($sizeData['quantityInActiveStore'] ?? 0);
         if ($available < 1) {
@@ -380,6 +426,15 @@ class StorefrontCartService
     private function touch(StorefrontCart $cart): void
     {
         $cart->forceFill(['car_version' => $cart->car_version + 1, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addDays(30), 'car_actualizado_en' => now()])->save();
+    }
+
+    private function invalidateCheckout(StorefrontCart $cart, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): void
+    {
+        if ($cart->car_estado !== 'CHECKOUT') {
+            return;
+        }
+        $cart->forceFill(['car_estado' => 'ACTIVO', 'car_checkout_en' => null, 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
+        $this->audit($cart, null, $visitor, $customer, 'CHECKOUT_INVALIDATED', ['state' => 'CHECKOUT'], ['state' => 'ACTIVO']);
     }
 
     private function audit(StorefrontCart $cart, ?StorefrontCartItem $line, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $action, ?array $old, ?array $new): void

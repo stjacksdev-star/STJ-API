@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreRe
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
 use App\Http\Controllers\Api\PedidoController;
+use App\Http\Controllers\Api\PowerTranzController;
 use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\PushSendController;
 use App\Http\Controllers\Api\StorefrontAccountController;
@@ -72,10 +73,12 @@ Route::get('/storefront/product/{country}/{slug}', [StorefrontProductController:
 Route::get('/storefront/product/{country}/{slug}/availability', [StorefrontProductAvailabilityController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationController::class);
-Route::post('/storefront/orders', [StorefrontOrderController::class, 'store']);
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
+Route::post('/storefront/orders/{order}/payments/powertranz', [PowerTranzController::class, 'start'])->whereNumber('order')->middleware('throttle:5,1');
+Route::get('/storefront/orders/{order}/payment-status', [PowerTranzController::class, 'status'])->whereNumber('order');
+Route::post('/storefront/payments/powertranz/return/{country}/{token}', [PowerTranzController::class, 'handleReturn'])->where(['country' => '[A-Za-z]{2}', 'token' => '[A-Za-z0-9]{64}'])->name('powertranz.return');
 Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
     Route::get('/', [StorefrontCartController::class, 'show']);
     Route::post('/items', [StorefrontCartController::class, 'storeItem']);
@@ -83,6 +86,8 @@ Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])
     Route::delete('/items/{item}', [StorefrontCartController::class, 'destroyItem'])->whereNumber('item');
     Route::post('/sync', [StorefrontCartController::class, 'sync']);
     Route::post('/merge', [StorefrontCartController::class, 'merge']);
+    Route::post('/checkout/start', [StorefrontCartController::class, 'startCheckout']);
+    Route::post('/orders', [StorefrontOrderController::class, 'store']);
 });
 Route::post('/storefront/fulfillment/{country}/preview', [StorefrontCartController::class, 'previewFulfillment'])->where('country', '[A-Za-z]{2}');
 Route::put('/storefront/fulfillment/{country}', [StorefrontCartController::class, 'applyFulfillment'])->where('country', '[A-Za-z]{2}');

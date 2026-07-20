@@ -17,7 +17,7 @@ class ProductDetailAvailabilityService
         private readonly StorefrontProductPricingService $pricing,
     ) {}
 
-    public function forCountryAndSlug(string $countryCode, string $slug, ?string $storeCode = null): ?array
+    public function forCountryAndSlug(string $countryCode, string $slug, ?string $storeCode = null, string $scope = 'product_detail'): ?array
     {
         $country = $this->resolveCountry($countryCode);
         $productId = $this->extractProductId($slug);
@@ -71,7 +71,7 @@ class ProductDetailAvailabilityService
             ];
         }
 
-        $rule = $this->resolver->resolve($countryCode, 'product_detail');
+        $rule = $this->resolver->resolve($countryCode, $scope);
         $providerResult = $this->fetchAvailability(
             (int) $country->pai_id,
             $countryCode,

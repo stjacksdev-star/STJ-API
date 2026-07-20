@@ -8,6 +8,7 @@ use App\Models\StorefrontVisitor;
 use App\Services\Inventory\InventorySourceResolver;
 use App\Services\ProductDetailAvailabilityService;
 use App\Services\StorefrontCartService;
+use App\Services\StorefrontCheckoutValidationService;
 use App\Services\StorefrontFulfillmentService;
 use App\Services\StorefrontProductPricingService;
 use Illuminate\Database\Schema\Blueprint;
@@ -74,7 +75,9 @@ class StorefrontPersistentCartTest extends TestCase
         $this->visitor = StorefrontVisitor::query()->create(['vis_uuid' => (string) Str::uuid(), 'vis_origen' => 'WEB', 'vis_pais_id' => 1, 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
         $availability = Mockery::mock(ProductDetailAvailabilityService::class);
         $availability->shouldReceive('forCountryAndSlug')->andReturnUsing(fn () => ['sizes' => [['size' => 'S', 'quantityInActiveStore' => 5], ['size' => 'M', 'quantityInActiveStore' => 2]]]);
-        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver));
+        $checkout = Mockery::mock(StorefrontCheckoutValidationService::class);
+        $checkout->shouldReceive('validate')->andReturn(['ok' => true, 'message' => 'ok']);
+        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver), $checkout);
     }
 
     public function test_guest_add_is_authoritative_and_idempotent(): void
@@ -219,6 +222,30 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertSame(4, $leadingZeros['proposed']['storeId']);
         $this->assertSame('001', $leadingZeros['proposed']['storeCode']);
         $this->assertSame(6, $one['proposed']['storeId']);
+    }
+
+    public function test_checkout_start_is_authoritative_idempotent_and_mutation_invalidates_it(): void
+    {
+        $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $operation = ['operation_uuid' => (string) Str::uuid()];
+        $first = $this->service->startCheckout('sv', $this->visitor, null, $operation);
+        $retry = $this->service->startCheckout('sv', $this->visitor, null, $operation);
+        $this->assertSame($first, $retry);
+        $this->assertSame('CHECKOUT', $first['cart']['state']);
+        $this->assertSame('57', $first['checkout']['operationalStoreCode']);
+        $this->assertSame(1, DB::table('stj_cliente_eventos')->where('cev_tipo', 'BEGIN_CHECKOUT')->count());
+
+        $this->service->add('sv', $this->visitor, null, $this->item('M', 1));
+        $this->assertDatabaseHas('stj_carritos', ['car_estado' => 'ACTIVO', 'car_checkout_en' => null]);
+        $this->assertDatabaseHas('stj_carrito_auditoria', ['cau_accion' => 'CHECKOUT_INVALIDATED']);
+    }
+
+    public function test_cart_without_fulfillment_context_cannot_start_checkout(): void
+    {
+        $result = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        DB::table('stj_carritos')->where('car_id', $result['cart']['id'])->update(['car_tienda_id' => null, 'car_tienda_codigo_snapshot' => null, 'car_inventory_source' => null]);
+        $this->expectException(ValidationException::class);
+        $this->service->startCheckout('sv', $this->visitor, null, ['operation_uuid' => (string) Str::uuid()]);
     }
 
     private function item(string $size, int $quantity): array

@@ -2,6 +2,11 @@
 
 namespace App\Services;
 
+use App\Exceptions\CartOperationConflict;
+use App\Models\CustomerEvent;
+use App\Models\StorefrontCart;
+use App\Models\StorefrontCustomer;
+use App\Models\StorefrontVisitor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -13,6 +18,70 @@ class StorefrontOrderService
     public function __construct(StorefrontCheckoutValidationService $checkoutValidationService, private StorefrontProductPricingService $pricing)
     {
         $this->checkoutValidationService = $checkoutValidationService;
+    }
+
+    public function createFromCart(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $payload): array
+    {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $payload) {
+            $country = $this->resolveCountry($countryCode);
+            if (! $country) {
+                throw ValidationException::withMessages(['country' => 'Pais no soportado.']);
+            }
+            $query = StorefrontCart::query()->where('car_pais_id', $country->pai_id)->whereIn('car_estado', ['CHECKOUT', 'CONVERTIDO']);
+            $customer ? $query->where('car_usu_id', $customer->getKey()) : $query->whereNull('car_usu_id')->where('car_visitante_id', $visitor->getKey());
+            $cart = $query->lockForUpdate()->first();
+            if (! $cart) {
+                throw ValidationException::withMessages(['cart' => 'No existe un checkout autorizado para esta identidad.']);
+            }
+            $hash = hash('sha256', json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+            $operation = DB::table('stj_carrito_operaciones')->where('cao_uuid', $payload['operation_uuid'])->lockForUpdate()->first();
+            if ($operation) {
+                if ((int) $operation->cao_carrito_id !== $cart->getKey() || ! hash_equals((string) $operation->cao_payload_hash, $hash)) {
+                    throw new CartOperationConflict('operation_uuid ya fue utilizado con otro contenido o carrito.');
+                }
+
+                return json_decode($operation->cao_respuesta, true);
+            }
+            if ($cart->car_estado !== 'CHECKOUT' || $cart->car_pedido_id) {
+                throw ValidationException::withMessages(['cart' => 'El carrito ya fue convertido o no continua en checkout.']);
+            }
+            $store = DB::table('stj_tiendas')->where('tie_id', $cart->car_tienda_id)->where('tie_pais', $cart->car_pais_id)->where('tie_codigo', (string) $cart->car_tienda_codigo_snapshot)->first();
+            if (! $store) {
+                throw ValidationException::withMessages(['fulfillment' => 'La fuente operativa del carrito ya no es valida.']);
+            }
+            $storeCode = (string) $store->tie_codigo;
+            if (mb_strlen($storeCode) > 10) {
+                throw ValidationException::withMessages(['fulfillment' => 'El codigo operativo excede la capacidad actual de stj_pedidos.ped_tienda.']);
+            }
+            if ($cart->car_tipo === 'DOMICILIO' && $storeCode !== (string) config('inventory.domicilio_store_by_country.'.strtolower((string) $country->pai_codigo))) {
+                throw ValidationException::withMessages(['fulfillment' => 'La fuente de Domicilio no coincide con la configuracion autorizada.']);
+            }
+            if ($cart->car_tipo === 'DOMICILIO' && trim((string) data_get($payload, 'delivery.addressLine1')) === '') {
+                throw ValidationException::withMessages(['delivery.addressLine1' => 'La direccion es obligatoria para entrega a domicilio.']);
+            }
+            $lines = $cart->items()->where('cad_seleccionado', 1)->where('cad_estado', 'DISPONIBLE')->lockForUpdate()->get();
+            if ($lines->isEmpty()) {
+                throw ValidationException::withMessages(['cart' => 'No hay lineas autorizadas para crear el pedido.']);
+            }
+            $trustedItems = $lines->map(fn ($line) => ['key' => (string) $line->getKey(), 'sku' => (string) $line->cad_ref, 'name' => (string) $line->cad_ref, 'size' => (string) $line->cad_talla, 'quantity' => (int) $line->cad_cantidad])->all();
+            $method = $cart->car_tipo === 'TIENDA' ? 'store_pickup' : 'home_delivery';
+            $validation = $this->checkoutValidationService->validate($countryCode, ['method' => $method, 'storeCode' => $storeCode], $trustedItems);
+            if (! ($validation['ok'] ?? false)) {
+                throw ValidationException::withMessages(['inventory' => $validation['message'] ?? 'El inventario cambio durante checkout.']);
+            }
+            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $payload['payment_type'] ?? 'TARJETA'];
+            $result = $this->create($trustedPayload);
+            if (! ($result['ok'] ?? false)) {
+                throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
+            }
+            $orderId = (int) $result['order']['pedidoId'];
+            $cart->forceFill(['car_pedido_id' => $orderId, 'car_estado' => 'CONVERTIDO', 'car_convertido_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
+            DB::table('stj_carrito_auditoria')->insert(['cau_carrito_id' => $cart->getKey(), 'cau_visitante_id' => $visitor->getKey(), 'cau_usu_id' => $customer?->getKey(), 'cau_accion' => 'ORDER_CREATED', 'cau_origen' => 'WEB', 'cau_datos_anteriores' => json_encode(['state' => 'CHECKOUT']), 'cau_datos_nuevos' => json_encode(['state' => 'CONVERTIDO', 'orderId' => $orderId]), 'cau_ocurrido_en' => now()]);
+            CustomerEvent::query()->create(['cev_event_uuid' => $payload['operation_uuid'], 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_pedido_id' => $orderId, 'cev_tipo' => 'ORDER_CREATED', 'cev_valor' => $result['order']['total'], 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
+            DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => $payload['operation_uuid'], 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_usu_id' => $customer?->getKey(), 'cao_tipo' => 'ORDER_CREATE', 'cao_payload_hash' => $hash, 'cao_respuesta' => json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'cao_creado_en' => now()]);
+
+            return $result;
+        });
     }
 
     public function create(array $payload): array
@@ -158,7 +227,7 @@ class StorefrontOrderService
             }
 
             $pagoId = DB::table('stj_pedidos_pago')->insertGetId([
-                'ppa_tipo' => 'TARJETA',
+                'ppa_tipo' => $payload['paymentType'] ?? 'TARJETA',
                 'ppa_estado' => 'PENDIENTE',
                 'ppa_ref' => $paymentRef,
                 'ppa_fecha' => $now,

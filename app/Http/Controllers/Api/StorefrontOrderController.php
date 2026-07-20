@@ -2,47 +2,46 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\CartOperationConflict;
 use App\Http\Controllers\Controller;
+use App\Models\StorefrontCustomer;
+use App\Models\StorefrontVisitor;
 use App\Services\StorefrontOrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class StorefrontOrderController extends Controller
 {
-    public function store(Request $request, StorefrontOrderService $service): JsonResponse
+    public function store(Request $request, string $country, StorefrontOrderService $service): JsonResponse
     {
         $payload = $request->validate([
-            'country' => ['required', 'string', 'size:2'],
-            'guestCartId' => ['required', 'string', 'max:250'],
+            'operation_uuid' => ['required', 'uuid'],
             'customer' => ['required', 'array'],
             'customer.firstName' => ['required', 'string', 'max:30'],
             'customer.lastName' => ['required', 'string', 'max:30'],
             'customer.email' => ['required', 'email', 'max:50'],
             'customer.phone' => ['required', 'string', 'max:30'],
             'customer.document' => ['nullable', 'string', 'max:50'],
-            'fulfillment' => ['required', 'array'],
-            'fulfillment.method' => ['required', 'string', 'in:home_delivery,store_pickup'],
-            'fulfillment.storeCode' => ['nullable', 'string', 'max:40'],
-            'fulfillment.storeName' => ['nullable', 'string', 'max:120'],
-            'fulfillment.city' => ['nullable', 'string', 'max:50'],
-            'fulfillment.state' => ['nullable', 'string', 'max:50'],
-            'fulfillment.addressLine1' => ['nullable', 'string', 'max:200'],
-            'fulfillment.reference' => ['nullable', 'string', 'max:200'],
+            'delivery' => ['nullable', 'array'],
+            'delivery.city' => ['nullable', 'string', 'max:50'],
+            'delivery.state' => ['nullable', 'string', 'max:50'],
+            'delivery.addressLine1' => ['nullable', 'string', 'max:200'],
+            'delivery.reference' => ['nullable', 'string', 'max:200'],
+            'payment_type' => ['sometimes', 'in:TARJETA,EFECTIVO'],
             'notes' => ['nullable', 'string', 'max:500'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.key' => ['nullable', 'string', 'max:255'],
-            'items.*.sku' => ['required', 'string', 'max:120'],
-            'items.*.name' => ['nullable', 'string', 'max:255'],
-            'items.*.size' => ['required', 'string', 'max:40'],
-            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:99'],
         ]);
+        $visitor = $request->attributes->get('storefrontVisitor');
+        abort_unless($visitor instanceof StorefrontVisitor, 401);
+        $user = Auth::guard('sanctum')->user();
+        $customer = $user instanceof StorefrontCustomer ? $user : null;
 
-        $result = $service->create($payload);
+        try {
+            $result = $service->createFromCart($country, $visitor, $customer, $payload);
+        } catch (CartOperationConflict $exception) {
+            return response()->json(['ok' => false, 'message' => $exception->getMessage()], 409);
+        }
 
-        return response()->json([
-            'ok' => (bool) $result['ok'],
-            'message' => $result['message'],
-            'data' => $result,
-        ], (int) $result['status']);
+        return response()->json(['ok' => true, 'message' => $result['message'], 'data' => $result], 201);
     }
 }

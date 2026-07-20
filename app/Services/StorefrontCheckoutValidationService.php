@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\DB;
 class StorefrontCheckoutValidationService
 {
     private $resolver;
+
     private $externalProvider;
+
     private $localProvider;
 
     public function __construct(
@@ -46,7 +48,7 @@ class StorefrontCheckoutValidationService
             ];
         }
 
-        $rule = $this->resolver->resolve($countryCode, 'checkout');
+        $rule = $this->resolver->resolveRequired($countryCode, 'checkout');
         $productCodes = collect($items)
             ->pluck('sku')
             ->map(function ($sku) {
@@ -76,7 +78,7 @@ class StorefrontCheckoutValidationService
                     'fallbackSource' => $rule['fallback_source'] ?? null,
                     'fallbackTriggered' => (bool) ($providerResult['fallback_triggered'] ?? false),
                 ],
-                'store' => $this->storePayload($countryCode, $storeCode),
+                'store' => $this->storePayload((int) $country->pai_id, $countryCode, $storeCode),
                 'lines' => $this->emptyLines($items, 'Inventario no disponible para validacion.'),
             ];
         }
@@ -132,7 +134,7 @@ class StorefrontCheckoutValidationService
                 'fallbackSource' => $rule['fallback_source'] ?? null,
                 'fallbackTriggered' => (bool) $providerResult['fallback_triggered'],
             ],
-            'store' => $this->storePayload($countryCode, $storeCode),
+            'store' => $this->storePayload((int) $country->pai_id, $countryCode, $storeCode),
             'lines' => $lines,
         ];
     }
@@ -173,10 +175,10 @@ class StorefrontCheckoutValidationService
 
             default:
                 return [
-                'ok' => false,
-                'rows' => [],
-                'source' => $source,
-                'error' => "Fuente de inventario no soportada: {$source}",
+                    'ok' => false,
+                    'rows' => [],
+                    'source' => $source,
+                    'error' => "Fuente de inventario no soportada: {$source}",
                 ];
         }
     }
@@ -201,9 +203,10 @@ class StorefrontCheckoutValidationService
         return trim((string) config("inventory.domicilio_store_by_country.{$countryCode}", config("inventory.default_store_by_country.{$countryCode}", '')));
     }
 
-    private function storePayload(string $countryCode, string $storeCode): array
+    private function storePayload(int $countryId, string $countryCode, string $storeCode): array
     {
         $storeName = DB::table('stj_tiendas')
+            ->where('tie_pais', $countryId)
             ->where('tie_codigo', $storeCode)
             ->value('tie_nombre');
 
@@ -222,14 +225,14 @@ class StorefrontCheckoutValidationService
         return collect($items)
             ->map(function (array $item) use ($message) {
                 return [
-                'key' => $item['key'] ?? trim((string) ($item['sku'] ?? '')),
-                'sku' => trim((string) ($item['sku'] ?? '')),
-                'name' => $item['name'] ?? trim((string) ($item['sku'] ?? '')),
-                'size' => trim((string) ($item['size'] ?? '')),
-                'requestedQuantity' => max(1, (int) ($item['quantity'] ?? 1)),
-                'availableQuantity' => 0,
-                'ok' => false,
-                'message' => $message,
+                    'key' => $item['key'] ?? trim((string) ($item['sku'] ?? '')),
+                    'sku' => trim((string) ($item['sku'] ?? '')),
+                    'name' => $item['name'] ?? trim((string) ($item['sku'] ?? '')),
+                    'size' => trim((string) ($item['size'] ?? '')),
+                    'requestedQuantity' => max(1, (int) ($item['quantity'] ?? 1)),
+                    'availableQuantity' => 0,
+                    'ok' => false,
+                    'message' => $message,
                 ];
             })
             ->values()
