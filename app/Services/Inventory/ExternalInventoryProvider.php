@@ -143,7 +143,7 @@ class ExternalInventoryProvider
         }
 
         return collect($rows)
-            ->map(function ($row) {
+            ->map(function ($row) use ($fallbackStoreCode) {
                 $style = $row['estilo'] ?? $row['codigo'] ?? $row['inv_codigo'] ?? null;
                 $size = $row['talla'] ?? $row['inv_talla'] ?? null;
                 $quantity = $row['existencia'] ?? $row['cantidad'] ?? $row['inv_cantidad'] ?? 0;

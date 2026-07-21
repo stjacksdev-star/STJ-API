@@ -18,8 +18,12 @@ class ExternalInventoryProviderTest extends TestCase
             'inventory.external.sv_categories_url' => 'https://corepos.test/api/existencias/categorias',
         ]);
 
+    }
+
+    public function test_detail_response_uses_the_requested_canonical_store_code(): void
+    {
         Http::fake([
-            'https://corepos.test/*' => Http::response([
+            'https://corepos.test/api/existencias/detalle' => Http::response([
                 'RESULTADO' => true,
                 'datos' => [[
                     'estilo' => '3000182503',
@@ -30,10 +34,7 @@ class ExternalInventoryProviderTest extends TestCase
                 ]],
             ]),
         ]);
-    }
 
-    public function test_detail_response_uses_the_requested_canonical_store_code(): void
-    {
         $result = app(ExternalInventoryProvider::class)
             ->fetchProductDetailAvailability(1, 'sv', ['002'], '3000182503');
 
