@@ -2,12 +2,12 @@
 
 namespace Tests\Feature;
 
-use App\Models\User;
 use App\Models\StorefrontCustomer;
+use App\Models\User;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -88,6 +88,26 @@ class StorefrontProductViewEventTest extends TestCase
         $this->assertDatabaseHas('stj_cliente_eventos', [
             'cev_usu_id' => 77,
         ]);
+    }
+
+    public function test_recommendation_click_accepts_only_bounded_metadata(): void
+    {
+        $payload = $this->payload((string) Str::uuid());
+        $payload['type'] = 'RECOMMENDATION_CLICK';
+        $payload['metadata'] = ['placement' => 'PDP_RELATED', 'recommendation_reason' => 'SAME_CATEGORY', 'position' => 2, 'ignored' => 'private text'];
+        $this->postJson('/api/storefront/events', $payload)->assertCreated();
+        $metadata = DB::table('stj_cliente_eventos')->value('cev_metadata');
+        $this->assertStringNotContainsString('ignored', (string) $metadata);
+    }
+
+    public function test_add_to_cart_drawer_impression_is_accepted(): void
+    {
+        $payload = $this->payload((string) Str::uuid());
+        $payload['type'] = 'RECOMMENDATION_IMPRESSION';
+        $payload['metadata'] = ['placement' => 'ADD_TO_CART_DRAWER', 'recommendation_reason' => 'SAME_CATEGORY', 'position' => 1];
+
+        $this->postJson('/api/storefront/events', $payload)->assertCreated();
+        $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'RECOMMENDATION_IMPRESSION']);
     }
 
     private function payload(string $uuid): array

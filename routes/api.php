@@ -34,6 +34,7 @@ use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
+use App\Http\Controllers\Api\StorefrontRecommendationController;
 use App\Http\Controllers\Api\StorefrontStoreController;
 use App\Http\Controllers\Api\StorefrontShippingController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
@@ -77,6 +78,11 @@ Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationControl
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
+Route::prefix('/storefront/recommendations/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
+    Route::get('/recently-viewed', [StorefrontRecommendationController::class, 'recentlyViewed']);
+    Route::get('/product/{product}', [StorefrontRecommendationController::class, 'product'])->whereNumber('product');
+    Route::get('/cart', [StorefrontRecommendationController::class, 'cart']);
+});
 Route::get('/storefront/shipping/{country}/states', [StorefrontShippingController::class, 'locations'])->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/shipping/{country}/states/{state}/cities', [StorefrontShippingController::class, 'cities'])->where(['country' => '[A-Za-z]{2}', 'state' => '[0-9]+']);
 Route::post('/storefront/shipping/{country}/quote', [StorefrontShippingController::class, 'quote'])->where('country', '[A-Za-z]{2}');

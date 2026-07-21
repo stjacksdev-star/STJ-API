@@ -9,6 +9,7 @@ use App\Models\StorefrontCartAudit;
 use App\Models\StorefrontCartItem;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
+use App\Support\StorefrontImageUrl;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -57,7 +58,7 @@ class StorefrontCartService
                 $shippingAmount = (float) $shipping['shipping_amount'];
                 $total = round($subtotal + $shippingAmount, 2);
                 $taxes = strtoupper((string) $country->pai_codigo) === 'HN' ? round($total * 15 / 115, 2) : 0.0;
-                $destinationHash = $this->destinationHash($input['delivery'] ?? []);
+                $destinationHash = $this->destinationHash($cart->car_tipo === 'TIENDA' ? [] : ($input['delivery'] ?? []));
                 $previousState = (string) $cart->car_estado;
                 $cart->forceFill(['car_estado' => 'CHECKOUT', 'car_checkout_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
                 $summary = ['service' => $cart->car_tipo, 'store' => $this->context($cart), 'operationalStoreCode' => (string) $cart->car_tienda_codigo_snapshot, 'lines' => $authorized->all(), 'subtotal' => $subtotal, 'shipping' => $shippingAmount, 'taxes' => $taxes, 'total' => $total, 'currency' => $cart->car_moneda, 'shipping_source' => $shipping['source'], 'shipping_quote' => $shipping, 'destinationHash' => $destinationHash, 'alerts' => [], 'cartVersion' => (int) $cart->car_version];
@@ -143,6 +144,9 @@ class StorefrontCartService
                 $this->touch($cart);
                 $this->audit($cart, $line, $visitor, $customer, 'ITEM_ADDED', $old, $this->auditLine($line));
                 $this->event($cart, $line, $visitor, $customer, 'ADD_TO_CART', $input['operation_uuid']);
+                if (! empty($input['recommendation_placement'])) {
+                    CustomerEvent::query()->create(['cev_event_uuid' => (string) Str::uuid(), 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_producto_id' => $line->cad_producto_id, 'cev_carrito_id' => $cart->getKey(), 'cev_tipo' => 'ADD_FROM_RECOMMENDATION', 'cev_cantidad' => (int) $input['quantity'], 'cev_valor' => $line->cad_precio_final_unitario, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => ['placement' => $input['recommendation_placement'], 'recommendation_reason' => $input['recommendation_reason'] ?? null, 'position' => $input['recommendation_position'] ?? null]]);
+                }
                 $alerts = $quantity < $requested ? [['type' => 'INVENTORY_ADJUSTED', 'message' => "Cantidad limitada a {$quantity}."]] : [];
 
                 return $this->payload($cart, $alerts);
@@ -382,7 +386,9 @@ class StorefrontCartService
 
     private function context(StorefrontCart $cart): array
     {
-        return ['type' => $cart->car_tipo, 'storeId' => $cart->car_tienda_id ? (int) $cart->car_tienda_id : null, 'storeCode' => (string) $cart->car_tienda_codigo_snapshot, 'storeName' => $cart->car_tipo === 'DOMICILIO' ? 'Domicilio' : DB::table('stj_tiendas')->where('tie_id', $cart->car_tienda_id)->where('tie_pais', $cart->car_pais_id)->value('tie_nombre'), 'inventorySource' => $cart->car_inventory_source];
+        $store = DB::table('stj_tiendas')->where('tie_id', $cart->car_tienda_id)->where('tie_pais', $cart->car_pais_id)->first();
+
+        return ['type' => $cart->car_tipo, 'storeId' => $cart->car_tienda_id ? (int) $cart->car_tienda_id : null, 'storeCode' => (string) $cart->car_tienda_codigo_snapshot, 'storeName' => $cart->car_tipo === 'DOMICILIO' ? 'Domicilio' : data_get($store, 'tie_nombre'), 'storeAddress' => data_get($store, 'tie_direccion'), 'storePhone' => data_get($store, 'tie_telefono'), 'storeEmail' => data_get($store, 'tie_correo'), 'storeSchedule' => data_get($store, 'tie_horario'), 'inventorySource' => $cart->car_inventory_source];
     }
 
     private function evaluateContext(StorefrontCart $cart, array $context): array
@@ -462,8 +468,8 @@ class StorefrontCartService
     private function payload(StorefrontCart $cart, array $alerts = []): array
     {
         $cart->load('items');
-        $products = DB::table('stj_productos')->whereIn('pro_id', $cart->items->pluck('cad_producto_id'))->pluck('pro_nombre', 'pro_id');
-        $items = $cart->items->map(fn ($i) => ['id' => $i->getKey(), 'key' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')).':'.$i->cad_ref.':'.$i->cad_talla, 'countryCode' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')), 'productId' => (int) $i->cad_producto_id, 'name' => $products[$i->cad_producto_id] ?? $i->cad_ref, 'sku' => $i->cad_ref, 'size' => $i->cad_talla, 'quantity' => (int) $i->cad_cantidad, 'selected' => (bool) $i->cad_seleccionado, 'status' => $i->cad_estado ?? 'DISPONIBLE', 'unavailableReason' => $i->cad_motivo_no_disponible, 'price' => (float) $i->cad_precio_final_unitario, 'regularPrice' => (float) $i->cad_precio_unitario, 'discount' => (float) $i->cad_descuento_unitario, 'finalPrice' => (float) $i->cad_precio_final_unitario, 'lineSubtotal' => ($i->cad_estado ?? 'DISPONIBLE') === 'DISPONIBLE' && $i->cad_seleccionado ? round($i->cad_precio_final_unitario * $i->cad_cantidad, 2) : 0, 'currency' => $cart->car_moneda])->values();
+        $products = DB::table('stj_productos')->whereIn('pro_id', $cart->items->pluck('cad_producto_id'))->get(['pro_id', 'pro_nombre', 'pro_thumbs'])->keyBy('pro_id');
+        $items = $cart->items->map(fn ($i) => ['id' => $i->getKey(), 'key' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')).':'.$i->cad_ref.':'.$i->cad_talla, 'countryCode' => strtolower(DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo')), 'productId' => (int) $i->cad_producto_id, 'name' => $products[$i->cad_producto_id]->pro_nombre ?? $i->cad_ref, 'imageUrl' => StorefrontImageUrl::image($products[$i->cad_producto_id]->pro_thumbs ?? null, 'p100'), 'sku' => $i->cad_ref, 'size' => $i->cad_talla, 'quantity' => (int) $i->cad_cantidad, 'selected' => (bool) $i->cad_seleccionado, 'status' => $i->cad_estado ?? 'DISPONIBLE', 'unavailableReason' => $i->cad_motivo_no_disponible, 'price' => (float) $i->cad_precio_final_unitario, 'regularPrice' => (float) $i->cad_precio_unitario, 'discount' => (float) $i->cad_descuento_unitario, 'finalPrice' => (float) $i->cad_precio_final_unitario, 'lineSubtotal' => ($i->cad_estado ?? 'DISPONIBLE') === 'DISPONIBLE' && $i->cad_seleccionado ? round($i->cad_precio_final_unitario * $i->cad_cantidad, 2) : 0, 'currency' => $cart->car_moneda])->values();
         $subtotal = round($items->sum('lineSubtotal'), 2);
 
         return ['cart' => ['id' => $cart->getKey(), 'uuid' => $cart->car_uuid, 'state' => $cart->car_estado, 'type' => $cart->car_tipo, 'fulfillment' => $this->context($cart), 'version' => (int) $cart->car_version, 'currency' => $cart->car_moneda, 'items' => $items->all(), 'totals' => ['subtotal' => $subtotal, 'discount' => round($items->filter(fn ($i) => $i['status'] === 'DISPONIBLE' && $i['selected'])->sum(fn ($i) => $i['discount'] * $i['quantity']), 2), 'total' => $subtotal, 'currency' => $cart->car_moneda], 'alerts' => $alerts, 'updatedAt' => $cart->car_actualizado_en]];
@@ -487,6 +493,7 @@ class StorefrontCartService
     private function destinationHash(array $delivery): string
     {
         $normalized = ['city_id' => (int) ($delivery['city_id'] ?? 0), 'state_id' => (int) ($delivery['state_id'] ?? 0), 'address' => mb_strtolower(trim((string) ($delivery['addressLine1'] ?? ''))), 'reference' => mb_strtolower(trim((string) ($delivery['reference'] ?? '')))];
+
         return hash('sha256', json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 

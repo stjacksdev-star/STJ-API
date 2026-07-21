@@ -50,7 +50,8 @@ class StorefrontOrderService
             }
             $checkoutOperation = DB::table('stj_carrito_operaciones')->where('cao_carrito_id', $cart->getKey())->where('cao_tipo', 'CHECKOUT_START')->orderByDesc('cao_id')->first();
             $authorizedCheckout = $checkoutOperation ? json_decode((string) $checkoutOperation->cao_respuesta, true) : null;
-            if (! hash_equals((string) data_get($authorizedCheckout, 'checkout.destinationHash', ''), $this->destinationHash($payload['delivery'] ?? []))) {
+            $deliveryForHash = $cart->car_tipo === 'TIENDA' ? [] : ($payload['delivery'] ?? []);
+            if (! hash_equals((string) data_get($authorizedCheckout, 'checkout.destinationHash', ''), $this->destinationHash($deliveryForHash))) {
                 throw ValidationException::withMessages(['delivery' => 'El destino cambio despues de validar el checkout. Valida nuevamente.']);
             }
             $store = DB::table('stj_tiendas')->where('tie_id', $cart->car_tienda_id)->where('tie_pais', $cart->car_pais_id)->where('tie_codigo', (string) $cart->car_tienda_codigo_snapshot)->first();
@@ -74,6 +75,15 @@ class StorefrontOrderService
             if ($cart->car_tipo !== 'TIENDA' && $paymentType !== 'TARJETA') {
                 throw ValidationException::withMessages(['payment_type' => 'El pago en efectivo solo esta disponible para retiro en tienda.']);
             }
+            $pickup = $payload['pickup'] ?? [];
+            $samePickupPerson = (bool) ($pickup['samePerson'] ?? true);
+            if ($cart->car_tipo === 'TIENDA' && ! $samePickupPerson) {
+                foreach (['person' => 'nombre', 'phone' => 'telefono', 'identification' => 'identificacion'] as $field => $label) {
+                    if (trim((string) ($pickup[$field] ?? '')) === '') {
+                        throw ValidationException::withMessages(["pickup.{$field}" => "La {$label} de quien retirara es obligatoria."]);
+                    }
+                }
+            }
             $lines = $cart->items()->where('cad_seleccionado', 1)->where('cad_estado', 'DISPONIBLE')->lockForUpdate()->get();
             if ($lines->isEmpty()) {
                 throw ValidationException::withMessages(['cart' => 'No hay lineas autorizadas para crear el pedido.']);
@@ -87,11 +97,13 @@ class StorefrontOrderService
             $subtotalCents = 0;
             foreach ($lines as $line) {
                 $price = $this->pricing->resolve((int) $country->pai_id, (int) $line->cad_producto_id, (string) $line->cad_ref, (string) $line->cad_talla, now());
-                if (! $price['ok']) throw ValidationException::withMessages(['price' => $price['message']]);
+                if (! $price['ok']) {
+                    throw ValidationException::withMessages(['price' => $price['message']]);
+                }
                 $subtotalCents += $this->cents((string) $price['precio_final']) * (int) $line->cad_cantidad;
             }
             $shippingQuote = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($payload, 'delivery.city_id'), $this->decimal($subtotalCents));
-            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'shippingQuote' => $shippingQuote, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
+            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'shippingQuote' => $shippingQuote, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
             $result = $this->create($trustedPayload);
             if (! ($result['ok'] ?? false)) {
                 throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
@@ -244,12 +256,12 @@ class StorefrontOrderService
             } else {
                 DB::table('stj_pedidos_tienda')->insert([
                     'pti_pedido' => $pedidoId,
-                    'pti_misma_persona' => 'SI',
+                    'pti_misma_persona' => ($payload['pickup']['samePerson'] ?? true) ? 'SI' : 'NO',
                     'pti_pais' => strtoupper((string) $country->pai_codigo),
                     'pti_tienda' => $storeCode,
-                    'pti_persona' => $this->limit(trim(($customer['firstName'] ?? '').' '.($customer['lastName'] ?? '')), 100),
-                    'pti_telefono' => $this->limit($customer['phone'] ?? '', 100),
-                    'pti_identificacion' => $this->limit($customer['document'] ?? '', 50),
+                    'pti_persona' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? trim(($customer['firstName'] ?? '').' '.($customer['lastName'] ?? '')) : ($payload['pickup']['person'] ?? ''), 100),
+                    'pti_telefono' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['phone'] ?? '') : ($payload['pickup']['phone'] ?? ''), 100),
+                    'pti_identificacion' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['document'] ?? '') : ($payload['pickup']['identification'] ?? ''), 50),
                     'pti_a_usuario' => 'storefront',
                     'pti_a_ip' => request()->ip(),
                     'pti_a_fecha' => $now,
@@ -442,6 +454,7 @@ class StorefrontOrderService
     private function destinationHash(array $delivery): string
     {
         $normalized = ['city_id' => (int) ($delivery['city_id'] ?? 0), 'state_id' => (int) ($delivery['state_id'] ?? 0), 'address' => mb_strtolower(trim((string) ($delivery['addressLine1'] ?? ''))), 'reference' => mb_strtolower(trim((string) ($delivery['reference'] ?? '')))];
+
         return hash('sha256', json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 }

@@ -18,13 +18,16 @@ class StorefrontEventController extends BaseController
     {
         $data = $request->validate([
             'event_uuid' => ['required', 'uuid'],
-            'type' => ['required', Rule::in(['PRODUCT_VIEW'])],
+            'type' => ['required', Rule::in(['PRODUCT_VIEW', 'RECOMMENDATION_VIEW', 'RECOMMENDATION_IMPRESSION', 'RECOMMENDATION_CLICK'])],
             'country' => ['required', 'string', 'size:2'],
             'product_id' => ['required', 'integer'],
             'occurred_at' => ['required', 'date', 'before_or_equal:now'],
             'metadata' => ['sometimes', 'array'],
             'metadata.slug' => ['sometimes', 'string', 'max:255'],
             'metadata.sku' => ['sometimes', 'string', 'max:50'],
+            'metadata.placement' => ['sometimes', Rule::in(['PDP_RELATED', 'CART_RECOMMENDATIONS', 'ADD_TO_CART_RECOMMENDATIONS', 'ADD_TO_CART_DRAWER', 'RECENTLY_VIEWED'])],
+            'metadata.recommendation_reason' => ['sometimes', Rule::in(['SAME_COLLECTION', 'SAME_CATEGORY', 'SAME_BRAND', 'SIMILAR_PRICE', 'POPULAR', 'RECENTLY_VIEWED'])],
+            'metadata.position' => ['sometimes', 'integer', 'min:1', 'max:10'],
         ]);
 
         /** @var StorefrontVisitor|null $visitor */
@@ -58,11 +61,11 @@ class StorefrontEventController extends BaseController
                 'cev_usu_id' => $customerId,
                 'cev_pais_id' => (int) $countryId,
                 'cev_producto_id' => (int) $data['product_id'],
-                'cev_tipo' => 'PRODUCT_VIEW',
+                'cev_tipo' => $data['type'],
                 'cev_origen' => 'WEB',
                 'cev_ocurrido_en' => $data['occurred_at'],
                 'cev_recibido_en' => now(),
-                'cev_metadata' => array_intersect_key($data['metadata'] ?? [], array_flip(['slug', 'sku'])),
+                'cev_metadata' => array_intersect_key($data['metadata'] ?? [], array_flip(['slug', 'sku', 'placement', 'recommendation_reason', 'position'])),
             ]);
         } catch (QueryException $exception) {
             if (! in_array((string) ($exception->errorInfo[1] ?? ''), ['1062', '19'], true)) {

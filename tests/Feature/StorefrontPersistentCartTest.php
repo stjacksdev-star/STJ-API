@@ -105,6 +105,13 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertDatabaseHas('stj_carrito_detalles', ['cad_talla' => 'S', 'cad_cantidad' => 3]);
     }
 
+    public function test_add_from_recommendation_is_derived_from_successful_cart_add(): void
+    {
+        $this->service->add('sv', $this->visitor, null, $this->item('S', 1) + ['recommendation_placement' => 'PDP_RELATED', 'recommendation_reason' => 'SAME_CATEGORY', 'recommendation_position' => 2]);
+        $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'ADD_TO_CART', 'cev_producto_id' => 10]);
+        $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'ADD_FROM_RECOMMENDATION', 'cev_producto_id' => 10]);
+    }
+
     public function test_remove_writes_audit_and_event(): void
     {
         $result = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));

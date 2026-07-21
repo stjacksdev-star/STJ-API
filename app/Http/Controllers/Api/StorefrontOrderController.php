@@ -30,6 +30,11 @@ class StorefrontOrderController extends Controller
             'delivery.state' => ['nullable', 'string', 'max:50'],
             'delivery.addressLine1' => ['nullable', 'string', 'max:200'],
             'delivery.reference' => ['nullable', 'string', 'max:200'],
+            'pickup' => ['nullable', 'array'],
+            'pickup.samePerson' => ['nullable', 'boolean'],
+            'pickup.person' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
+            'pickup.phone' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
+            'pickup.identification' => ['nullable', 'string', 'max:50', 'not_regex:/[<>]/'],
             'payment_type' => ['sometimes', 'in:TARJETA,EFECTIVO'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);

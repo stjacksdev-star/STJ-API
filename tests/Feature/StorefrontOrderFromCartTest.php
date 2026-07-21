@@ -4,20 +4,21 @@ namespace Tests\Feature;
 
 use App\Models\StorefrontCart;
 use App\Models\StorefrontVisitor;
+use App\Services\Payments\PowerTranzClient;
+use App\Services\Payments\PowerTranzConfigResolver;
+use App\Services\Payments\PowerTranzPayloadFactory;
+use App\Services\Payments\PowerTranzPaymentService;
 use App\Services\StorefrontCheckoutValidationService;
 use App\Services\StorefrontOrderService;
 use App\Services\StorefrontPaymentEventService;
 use App\Services\StorefrontProductPricingService;
 use App\Services\StorefrontShippingService;
-use App\Services\Payments\PowerTranzClient;
-use App\Services\Payments\PowerTranzConfigResolver;
-use App\Services\Payments\PowerTranzPaymentService;
-use App\Services\Payments\PowerTranzPayloadFactory;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -45,12 +46,15 @@ class StorefrontOrderFromCartTest extends TestCase
         $shipping->shouldReceive('quote')->times($allowed ? 1 : 0)->andReturn(['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => $type === 'DOMICILIO' ? ['id' => 11, 'name' => 'SPS', 'stateId' => 2, 'state' => 'Cortes', 'urbanId' => null] : null]);
         $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping);
         $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '9999', 'document' => 'ID'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
-        $destination = ['city_id' => 11, 'state_id' => 2, 'address' => 'direccion', 'reference' => ''];
+        $destination = $type === 'TIENDA'
+            ? ['city_id' => 0, 'state_id' => 0, 'address' => '', 'reference' => '']
+            : ['city_id' => 11, 'state_id' => 2, 'address' => 'direccion', 'reference' => ''];
         DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => (string) Str::uuid(), 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_tipo' => 'CHECKOUT_START', 'cao_payload_hash' => hash('sha256', 'checkout'), 'cao_respuesta' => json_encode(['checkout' => ['destinationHash' => hash('sha256', json_encode($destination, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))]]), 'cao_creado_en' => now()]);
 
         if (! $allowed) {
-            $this->expectException(\Illuminate\Validation\ValidationException::class);
+            $this->expectException(ValidationException::class);
             $service->createFromCart($countryCode, $visitor, null, $payload);
+
             return;
         }
 
@@ -78,6 +82,7 @@ class StorefrontOrderFromCartTest extends TestCase
             $configuration->shouldReceive('forCountry')->twice()->andReturn(['environment' => 'staging', 'sale_url' => 'https://staging.ptranz.com/api/spi/sale', 'payment_url' => 'https://staging.ptranz.com/api/spi/payment', 'id' => 'id', 'password' => 'password', 'currency' => $countryCode === 'hn' ? '340' : ($countryCode === 'gt' ? '320' : ($countryCode === 'cr' ? '188' : '840')), 'connect_timeout' => 2, 'timeout' => 5]);
             $client->shouldReceive('sale')->once()->andReturnUsing(function ($config, $payload) use (&$returnToken) {
                 $returnToken = basename($payload['ExtendedData']['MerchantResponseUrl']);
+
                 return ['RedirectData' => '<form method="post"></form>'];
             });
             $client->shouldReceive('confirm')->once()->andReturn(['Approved' => $gatewayApproved, 'TransactionIdentifier' => $operationUuid, 'OrderIdentifier' => $paymentReference, 'CurrencyCode' => $countryCode === 'hn' ? '340' : ($countryCode === 'gt' ? '320' : ($countryCode === 'cr' ? '188' : '840')), 'TotalAmount' => '50.00', 'AuthorizationCode' => $gatewayApproved ? 'AUTH' : null, 'IsoResponseCode' => $gatewayApproved ? '00' : '05', 'ResponseMessage' => $gatewayApproved ? 'Approved' : 'Declined']);
@@ -96,7 +101,7 @@ class StorefrontOrderFromCartTest extends TestCase
             try {
                 $powerTranz->start((int) $first['order']['pedidoId'], $visitor, null, ['operation_uuid' => (string) Str::uuid(), 'card' => ['pan' => str_repeat('4', 16), 'cvv' => '123', 'expiration' => '3012', 'holder' => 'ANA LOPEZ']]);
                 $this->fail('Un pago EFECTIVO no debe iniciar PowerTranz.');
-            } catch (\Illuminate\Validation\ValidationException) {
+            } catch (ValidationException) {
                 $this->assertSame(0, DB::table('stj_powertranz_operaciones')->count());
             }
         }
@@ -128,7 +133,10 @@ class StorefrontOrderFromCartTest extends TestCase
 
     private function schema(): void
     {
-        Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) { $t->bigInteger('pai_id_world')->nullable(); $t->string('pai_codigo', 3); }));
+        Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) {
+            $t->bigInteger('pai_id_world')->nullable();
+            $t->string('pai_codigo', 3);
+        }));
         Schema::create('stj_tiendas', fn (Blueprint $t) => tap($t->bigInteger('tie_id', true), function () use ($t) {
             $t->bigInteger('tie_pais');
             $t->string('tie_codigo', 15);
@@ -181,7 +189,9 @@ class StorefrontOrderFromCartTest extends TestCase
                 $t->bigInteger($c)->nullable();
             } foreach (['pdi_tipo_envio', 'pdi_id_urbano', 'pdi_id_shipping', 'pdi_costo_envio', 'pdi_costo_envio_txt', 'pdi_costo_envio_final', 'pdi_aplica_envio_gratis', 'pdi_moneda_envio', 'pdi_mensaje_envio', 'pdi_a_usuario', 'pdi_a_ip'] as $c) {
                 $t->string($c)->nullable();
-            } $t->decimal('pdi_monto_minimo_envio', 10, 2)->nullable(); $t->decimal('pdi_falta_envio_gratis', 10, 2)->nullable(); $t->dateTime('pdi_a_fecha')->nullable();
+            } $t->decimal('pdi_monto_minimo_envio', 10, 2)->nullable();
+            $t->decimal('pdi_falta_envio_gratis', 10, 2)->nullable();
+            $t->dateTime('pdi_a_fecha')->nullable();
         });
         Schema::create('stj_pedidos_tienda', function (Blueprint $t) {
             $t->bigInteger('pti_id', true);
