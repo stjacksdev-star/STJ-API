@@ -110,6 +110,24 @@ class StorefrontProductViewEventTest extends TestCase
         $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'RECOMMENDATION_IMPRESSION']);
     }
 
+    public function test_event_accepts_a_small_client_clock_difference(): void
+    {
+        $payload = $this->payload((string) Str::uuid());
+        $payload['occurred_at'] = now()->addMinutes(4)->toISOString();
+
+        $this->postJson('/api/storefront/events', $payload)->assertCreated();
+    }
+
+    public function test_event_rejects_a_timestamp_beyond_the_clock_tolerance(): void
+    {
+        $payload = $this->payload((string) Str::uuid());
+        $payload['occurred_at'] = now()->addMinutes(6)->toISOString();
+
+        $this->postJson('/api/storefront/events', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('occurred_at');
+    }
+
     private function payload(string $uuid): array
     {
         return [

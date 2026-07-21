@@ -21,7 +21,7 @@ class StorefrontEventController extends BaseController
             'type' => ['required', Rule::in(['PRODUCT_VIEW', 'RECOMMENDATION_VIEW', 'RECOMMENDATION_IMPRESSION', 'RECOMMENDATION_CLICK'])],
             'country' => ['required', 'string', 'size:2'],
             'product_id' => ['required', 'integer'],
-            'occurred_at' => ['required', 'date', 'before_or_equal:now'],
+            'occurred_at' => ['required', 'date', 'before_or_equal:'.now()->addMinutes(5)->toISOString()],
             'metadata' => ['sometimes', 'array'],
             'metadata.slug' => ['sometimes', 'string', 'max:255'],
             'metadata.sku' => ['sometimes', 'string', 'max:50'],
