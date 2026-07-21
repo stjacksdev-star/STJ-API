@@ -46,7 +46,7 @@ class ExternalInventoryProvider
 
             return [
                 'ok' => true,
-                'rows' => $this->canonicalizeStoreCodes($this->normalizeRows($data), [$storeCode]),
+                'rows' => $this->canonicalizeStoreCodes($this->normalizeRows($data, $storeCode), [$storeCode]),
                 'source' => 'external_api',
             ];
         } catch (\Throwable $exception) {
@@ -132,7 +132,7 @@ class ExternalInventoryProvider
             : trim((string) config('inventory.external.generic_categories_url', ''));
     }
 
-    private function normalizeRows(mixed $data): array
+    private function normalizeRows(mixed $data, ?string $fallbackStoreCode = null): array
     {
         $rows = [];
 
@@ -147,7 +147,7 @@ class ExternalInventoryProvider
                 $style = $row['estilo'] ?? $row['codigo'] ?? $row['inv_codigo'] ?? null;
                 $size = $row['talla'] ?? $row['inv_talla'] ?? null;
                 $quantity = $row['existencia'] ?? $row['cantidad'] ?? $row['inv_cantidad'] ?? 0;
-                $storeCode = $row['codTienda'] ?? $row['tiendaCodigo'] ?? $row['inv_tienda'] ?? null;
+                $storeCode = $row['codTienda'] ?? $row['tiendaCodigo'] ?? $row['inv_tienda'] ?? $fallbackStoreCode;
                 $storeName = $row['tienda'] ?? $row['tiendaNombre'] ?? null;
 
                 return [

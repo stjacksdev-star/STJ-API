@@ -44,10 +44,28 @@ class ExternalInventoryProviderTest extends TestCase
 
     public function test_list_response_uses_the_requested_canonical_store_code(): void
     {
+        Http::fake([
+            'https://corepos.test/api/existencias/categorias' => Http::response([
+                'ok' => true,
+                'mensaje' => '',
+                'cantidad' => 1,
+                'registros' => [
+                    'codigos' => '3000182503',
+                    'existencia' => [[
+                        'estilo' => '3000182503',
+                        'talla' => '6X',
+                        'existencia' => 2,
+                    ]],
+                ],
+            ]),
+        ]);
+
         $result = app(ExternalInventoryProvider::class)
             ->fetchProductListAvailability(1, 'sv', '002', ['3000182503']);
 
         $this->assertTrue($result['ok']);
         $this->assertSame('002', $result['rows'][0]['codTienda']);
+        $this->assertSame('6X', $result['rows'][0]['talla']);
+        $this->assertSame(2, $result['rows'][0]['existencia']);
     }
 }
