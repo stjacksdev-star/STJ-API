@@ -46,7 +46,7 @@ class ExternalInventoryProvider
 
             return [
                 'ok' => true,
-                'rows' => $this->normalizeRows($data),
+                'rows' => $this->canonicalizeStoreCodes($this->normalizeRows($data), [$storeCode]),
                 'source' => 'external_api',
             ];
         } catch (\Throwable $exception) {
@@ -103,7 +103,7 @@ class ExternalInventoryProvider
 
             return [
                 'ok' => true,
-                'rows' => $this->normalizeRows($data),
+                'rows' => $this->canonicalizeStoreCodes($this->normalizeRows($data), $storeCodes),
                 'source' => 'external_api',
             ];
         } catch (\Throwable $exception) {
@@ -160,6 +160,43 @@ class ExternalInventoryProvider
             })
             ->filter(fn (array $row) => $row['estilo'] !== '' && $row['talla'] !== '' && $row['codTienda'] !== '')
             ->values()
+            ->all();
+    }
+
+    private function canonicalizeStoreCodes(array $rows, array $requestedStoreCodes): array
+    {
+        $canonicalCodes = collect($requestedStoreCodes)
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+
+        return collect($rows)
+            ->map(function (array $row) use ($canonicalCodes) {
+                $externalCode = trim((string) ($row['codTienda'] ?? ''));
+                $exactCode = $canonicalCodes->first(fn (string $code) => $code === $externalCode);
+
+                if ($exactCode !== null) {
+                    $row['codTienda'] = $exactCode;
+
+                    return $row;
+                }
+
+                if ($externalCode === '' || ! ctype_digit($externalCode)) {
+                    return $row;
+                }
+
+                $numericCode = ltrim($externalCode, '0') ?: '0';
+                $equivalentCodes = $canonicalCodes
+                    ->filter(fn (string $code) => ctype_digit($code) && (ltrim($code, '0') ?: '0') === $numericCode)
+                    ->values();
+
+                if ($equivalentCodes->count() === 1) {
+                    $row['codTienda'] = $equivalentCodes->first();
+                }
+
+                return $row;
+            })
             ->all();
     }
 }
