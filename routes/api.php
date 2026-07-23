@@ -120,6 +120,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/promotions', [DashboardPromotionController::class, 'index']);
         Route::post('/promotions', [DashboardPromotionController::class, 'store']);
         Route::post('/promotions/{promotion}/schedule', [DashboardPromotionController::class, 'updateSchedule']);
+        Route::post('/promotions/{promotion}/products', [DashboardPromotionController::class, 'replaceProducts']);
         Route::get('/promotions/{promotion}/assets', [DashboardPromotionAssetController::class, 'index']);
         Route::post('/promotions/{promotion}/assets', [DashboardPromotionAssetController::class, 'store']);
         Route::post('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'update']);

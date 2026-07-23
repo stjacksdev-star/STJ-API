@@ -11,8 +11,7 @@ class PromotionAssetController extends BaseController
 {
     public function __construct(
         private readonly PromotionAssetService $assets,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request, int $promotion)
     {
@@ -40,6 +39,7 @@ class PromotionAssetController extends BaseController
                 $validated,
                 $request->file('image'),
                 $request->file('mobileImage'),
+                $validated['actor'] ?? [],
             ),
             'Asset de promocion creado correctamente'
         );
@@ -59,6 +59,7 @@ class PromotionAssetController extends BaseController
                 $validated,
                 $request->file('image'),
                 $request->file('mobileImage'),
+                $validated['actor'] ?? [],
             ),
             'Asset de promocion actualizado correctamente'
         );
@@ -70,7 +71,8 @@ class PromotionAssetController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
-        $this->assets->delete($asset);
+        $validated = $request->validate($this->actorRules());
+        $this->assets->delete($asset, $validated['actor'] ?? []);
 
         return $this->success([], 'Asset de promocion eliminado correctamente');
     }
@@ -81,12 +83,13 @@ class PromotionAssetController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
-        $request->validate([
+        $validated = $request->validate([
             'header' => ['required', 'image', 'max:5120'],
+            ...$this->actorRules(),
         ]);
 
         return $this->success(
-            $this->assets->updateHeader($promotion, $request->file('header')),
+            $this->assets->updateHeader($promotion, $request->file('header'), $validated['actor'] ?? []),
             'Banner de promocion actualizado correctamente'
         );
     }
@@ -107,6 +110,18 @@ class PromotionAssetController extends BaseController
             'title' => ['nullable', 'string', 'max:255'],
             'image' => [$imageRequired ? 'required' : 'nullable', 'image', 'max:5120'],
             'mobileImage' => ['nullable', 'image', 'max:5120'],
+            ...$this->actorRules(),
+        ];
+    }
+
+    private function actorRules(): array
+    {
+        return [
+            'actor' => ['nullable', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:255'],
+            'actor.username' => ['nullable', 'string', 'max:120'],
         ];
     }
 }

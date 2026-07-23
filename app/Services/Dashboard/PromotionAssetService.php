@@ -13,8 +13,8 @@ class PromotionAssetService
 {
     public function __construct(
         private readonly ImageOptimizer $images,
-    ) {
-    }
+        private readonly PromotionHistoryService $history,
+    ) {}
 
     public function index(int $promotionId): array
     {
@@ -35,9 +35,9 @@ class PromotionAssetService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
-    public function create(int $promotionId, array $data, UploadedFile $image, ?UploadedFile $mobileImage = null): array
+    public function create(int $promotionId, array $data, UploadedFile $image, ?UploadedFile $mobileImage = null, array $actor = []): array
     {
         $promotion = $this->promotion($promotionId);
         $this->ensurePromotionEditable($promotion);
@@ -46,32 +46,37 @@ class PromotionAssetService
         $countryCode = strtolower((string) $promotion->pai_codigo);
         $this->ensureUniqueType($promotionId, $type);
 
-        $id = DB::table('stj_assets')->insertGetId([
-            'ast_pais' => (int) $promotion->prm_pais,
-            'ast_plataforma' => $data['platform'] ?? 'WEB',
-            'ast_tipo' => $type,
-            'ast_posicion' => $data['position'] ?? null,
-            'ast_orden' => $data['order'] ?? 1,
-            'ast_estado' => $data['status'] ?? 'PENDIENTE',
-            'ast_imagen' => $this->storeImage($image, $type, $countryCode, $promotionId, 'desktop'),
-            'ast_imagen_movil' => $mobileImage
-                ? $this->storeImage($mobileImage, $type, $countryCode, $promotionId, 'mobile')
-                : null,
-            'ast_inicio' => $data['startAt'],
-            'ast_fin' => $data['endAt'],
-            'ast_link' => $this->promotionLink($promotion),
-            'ast_tipo_accion' => 1,
-            'ast_idpromocion' => $promotionId,
-            'ast_titulo' => $data['title'] ?? null,
-        ]);
+        $id = DB::transaction(function () use ($promotionId, $data, $image, $mobileImage, $type, $countryCode, $promotion, $actor) {
+            $assetId = DB::table('stj_assets')->insertGetId([
+                'ast_pais' => (int) $promotion->prm_pais,
+                'ast_plataforma' => $data['platform'] ?? 'WEB',
+                'ast_tipo' => $type,
+                'ast_posicion' => $data['position'] ?? null,
+                'ast_orden' => $data['order'] ?? 1,
+                'ast_estado' => $data['status'] ?? 'PENDIENTE',
+                'ast_imagen' => $this->storeImage($image, $type, $countryCode, $promotionId, 'desktop'),
+                'ast_imagen_movil' => $mobileImage
+                    ? $this->storeImage($mobileImage, $type, $countryCode, $promotionId, 'mobile')
+                    : null,
+                'ast_inicio' => $data['startAt'],
+                'ast_fin' => $data['endAt'],
+                'ast_link' => $this->promotionLink($promotion),
+                'ast_tipo_accion' => 1,
+                'ast_idpromocion' => $promotionId,
+                'ast_titulo' => $data['title'] ?? null,
+            ]);
+            $this->history->record($promotionId, 'ARTES', "Asset {$type} #{$assetId} creado.", $actor);
+
+            return $assetId;
+        });
 
         return $this->findAsset($id);
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
-    public function update(int $assetId, array $data, ?UploadedFile $image = null, ?UploadedFile $mobileImage = null): array
+    public function update(int $assetId, array $data, ?UploadedFile $image = null, ?UploadedFile $mobileImage = null, array $actor = []): array
     {
         $asset = $this->promotionAsset($assetId);
         $promotionId = (int) $asset->ast_idpromocion;
@@ -108,21 +113,28 @@ class PromotionAssetService
             );
         }
 
-        DB::table('stj_assets')->where('ast_id', $assetId)->update($updates);
+        DB::transaction(function () use ($assetId, $updates, $promotionId, $type, $image, $mobileImage, $actor) {
+            DB::table('stj_assets')->where('ast_id', $assetId)->update($updates);
+            $images = $image || $mobileImage ? ' (imagenes reemplazadas)' : '';
+            $this->history->record($promotionId, 'ARTES', "Asset {$type} #{$assetId} actualizado{$images}.", $actor);
+        });
 
         return $this->findAsset($assetId);
     }
 
-    public function delete(int $assetId): void
+    public function delete(int $assetId, array $actor = []): void
     {
         $asset = $this->promotionAsset($assetId);
         $promotion = $this->promotion((int) $asset->ast_idpromocion);
         $this->ensurePromotionEditable($promotion);
 
-        DB::table('stj_assets')->where('ast_id', $assetId)->delete();
+        DB::transaction(function () use ($assetId, $asset, $actor) {
+            DB::table('stj_assets')->where('ast_id', $assetId)->delete();
+            $this->history->record((int) $asset->ast_idpromocion, 'ARTES', "Asset {$asset->ast_tipo} #{$assetId} eliminado.", $actor);
+        });
     }
 
-    public function updateHeader(int $promotionId, UploadedFile $header): array
+    public function updateHeader(int $promotionId, UploadedFile $header, array $actor = []): array
     {
         $promotion = $this->promotion($promotionId);
         $this->ensurePromotionEditable($promotion);
@@ -130,11 +142,12 @@ class PromotionAssetService
         $countryCode = strtolower((string) $promotion->pai_codigo);
         $path = $this->storeImage($header, 'BANNER', $countryCode, $promotionId, 'header');
 
-        DB::table('stj_promociones')
-            ->where('prm_id', $promotionId)
-            ->update([
+        DB::transaction(function () use ($promotionId, $path, $actor) {
+            DB::table('stj_promociones')->where('prm_id', $promotionId)->update([
                 'prm_encabezado' => $this->withCacheVersion($path),
             ]);
+            $this->history->record($promotionId, 'ARTES', 'Banner/encabezado de la promocion actualizado.', $actor);
+        });
 
         return $this->normalizePromotion($this->promotion($promotionId));
     }

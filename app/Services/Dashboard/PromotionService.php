@@ -6,6 +6,8 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
+use Throwable;
 
 class PromotionService
 {
@@ -13,6 +15,7 @@ class PromotionService
 
     public function __construct(
         private readonly PromotionProductImportService $imports,
+        private readonly PromotionHistoryService $history,
     ) {}
 
     public function index(?string $country = null, ?string $status = null, int $limit = 200): array
@@ -91,7 +94,7 @@ class PromotionService
     /**
      * @param  array<string, mixed>  $data
      */
-    public function create(array $data, ?UploadedFile $products = null): array
+    public function create(array $data, ?UploadedFile $products = null, array $actor = []): array
     {
         $country = $this->resolveCountry($data['country'] ?? null);
         $startAt = $this->dashboardDateTime($data['startAt']);
@@ -126,7 +129,7 @@ class PromotionService
             );
         }
 
-        $id = DB::transaction(function () use ($data, $country, $startAt, $endAt, $type, $productRows) {
+        $id = DB::transaction(function () use ($data, $country, $startAt, $endAt, $type, $productRows, $actor) {
             $promotionId = DB::table('stj_promociones')->insertGetId([
                 'prm_ticket' => '0000',
                 'prm_pais' => $country['id'],
@@ -185,13 +188,24 @@ class PromotionService
                 );
             }
 
+            $this->history->record($promotionId, 'GENERAL', 'Promocion creada desde Dashboard.', $actor);
+
+            if ($productRows !== []) {
+                $this->history->record(
+                    $promotionId,
+                    'PRODUCTOS',
+                    count($productRows).' producto(s) asociados al crear la promocion.',
+                    $actor,
+                );
+            }
+
             return $promotionId;
         });
 
         return $this->find($id);
     }
 
-    public function updateSchedule(int $id, array $data): array
+    public function updateSchedule(int $id, array $data, array $actor = []): array
     {
         $promotion = DB::table('stj_promociones')
             ->where('prm_id', $id)
@@ -218,9 +232,15 @@ class PromotionService
 
         if (! $updatesSchedule) {
             if ($promotionUpdates !== []) {
-                DB::table('stj_promociones')
-                    ->where('prm_id', $id)
-                    ->update($promotionUpdates);
+                $newName = $promotionUpdates['prm_nombre_comercial'];
+                $oldName = $this->stringOrNull($promotion->prm_nombre_comercial);
+
+                if ($newName !== $oldName) {
+                    DB::transaction(function () use ($id, $promotionUpdates, $oldName, $newName, $actor) {
+                        DB::table('stj_promociones')->where('prm_id', $id)->update($promotionUpdates);
+                        $this->history->record($id, 'INFORMACION', $this->commercialNameDescription($oldName, $newName), $actor);
+                    });
+                }
             }
 
             return $this->find($id);
@@ -256,7 +276,11 @@ class PromotionService
                 ]);
             }
 
-            DB::transaction(function () use ($id, $schedule, $startAt, $endAt, $promotionUpdates, $syncAssetsEndAt) {
+            DB::transaction(function () use ($id, $schedule, $startAt, $endAt, $promotionUpdates, $syncAssetsEndAt, $promotion, $actor) {
+                $nameChanged = array_key_exists('prm_nombre_comercial', $promotionUpdates)
+                    && $promotionUpdates['prm_nombre_comercial'] !== $this->stringOrNull($promotion->prm_nombre_comercial);
+                $scheduleChanged = $startAt->format('Y-m-d H:i:s') !== (string) $schedule->pho_inicio
+                    || $endAt->format('Y-m-d H:i:s') !== (string) $schedule->pho_fin;
                 if ($promotionUpdates !== []) {
                     DB::table('stj_promociones')
                         ->where('prm_id', $id)
@@ -272,6 +296,13 @@ class PromotionService
 
                 if ($syncAssetsEndAt) {
                     $this->syncPromotionAssetsEndAt($id, $endAt);
+                }
+
+                if ($nameChanged) {
+                    $this->history->record($id, 'INFORMACION', $this->commercialNameDescription($this->stringOrNull($promotion->prm_nombre_comercial), $promotionUpdates['prm_nombre_comercial']), $actor);
+                }
+                if ($scheduleChanged) {
+                    $this->history->record($id, 'HORARIO', "Horario actualizado: {$startAt->format('Y-m-d H:i:s')} a {$endAt->format('Y-m-d H:i:s')}.", $actor);
                 }
             });
 
@@ -293,7 +324,10 @@ class PromotionService
                 ]);
             }
 
-            DB::transaction(function () use ($id, $schedule, $endAt, $promotionUpdates, $syncAssetsEndAt) {
+            DB::transaction(function () use ($id, $schedule, $endAt, $promotionUpdates, $syncAssetsEndAt, $promotion, $actor) {
+                $nameChanged = array_key_exists('prm_nombre_comercial', $promotionUpdates)
+                    && $promotionUpdates['prm_nombre_comercial'] !== $this->stringOrNull($promotion->prm_nombre_comercial);
+                $scheduleChanged = $endAt->format('Y-m-d H:i:s') !== (string) $schedule->pho_fin;
                 if ($promotionUpdates !== []) {
                     DB::table('stj_promociones')
                         ->where('prm_id', $id)
@@ -309,6 +343,13 @@ class PromotionService
                 if ($syncAssetsEndAt) {
                     $this->syncPromotionAssetsEndAt($id, $endAt);
                 }
+
+                if ($nameChanged) {
+                    $this->history->record($id, 'INFORMACION', $this->commercialNameDescription($this->stringOrNull($promotion->prm_nombre_comercial), $promotionUpdates['prm_nombre_comercial']), $actor);
+                }
+                if ($scheduleChanged) {
+                    $this->history->record($id, 'HORARIO', "Fecha final actualizada a {$endAt->format('Y-m-d H:i:s')}.", $actor);
+                }
             });
 
             return $this->find($id);
@@ -317,6 +358,217 @@ class PromotionService
         throw ValidationException::withMessages([
             'promotion' => 'Solo se pueden editar horarios de promociones pendientes o en proceso.',
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $actor
+     */
+    public function replaceProducts(int $id, UploadedFile $products, array $actor = []): array
+    {
+        $promotion = DB::table('stj_promociones')->where('prm_id', $id)->first();
+
+        if (! $promotion) {
+            throw ValidationException::withMessages(['promotion' => 'La promocion seleccionada no existe.']);
+        }
+
+        if ((string) $promotion->prm_estado !== 'EN-PROCESO') {
+            throw ValidationException::withMessages([
+                'promotion' => 'Los productos solo pueden reemplazarse en promociones EN-PROCESO.',
+            ]);
+        }
+
+        if ((string) $promotion->prm_tipo === 'TODO') {
+            throw ValidationException::withMessages([
+                'promotion' => 'Las promociones tipo TODO aplican a todo el pais y no manejan productos asociados.',
+            ]);
+        }
+
+        $productRows = $this->resolveProducts(
+            $this->imports->read($products),
+            (int) $promotion->prm_pais,
+            (string) $promotion->prm_tipo_promocion,
+        );
+
+        try {
+            $result = DB::transaction(function () use ($id, $productRows, $actor) {
+                $lockedPromotion = DB::table('stj_promociones')
+                    ->where('prm_id', $id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $lockedPromotion || (string) $lockedPromotion->prm_estado !== 'EN-PROCESO') {
+                    throw new RuntimeException('La promocion dejo de estar disponible para edicion.');
+                }
+
+                if ((string) $lockedPromotion->prm_tipo === 'TODO') {
+                    throw new RuntimeException('Las promociones tipo TODO no manejan productos asociados.');
+                }
+
+                $previousCount = DB::table('stj_promociones_producto')
+                    ->where('ppr_promocion', $id)
+                    ->count();
+
+                $this->resetPromotionProductFields($lockedPromotion);
+
+                if ((string) $lockedPromotion->prm_tipo !== 'TODO') {
+                    DB::table('stj_promociones_producto')
+                        ->where('ppr_promocion', $id)
+                        ->delete();
+                }
+
+                if (DB::table('stj_promociones_producto')->where('ppr_promocion', $id)->exists()) {
+                    throw new RuntimeException('No fue posible eliminar todos los productos actuales de la promocion.');
+                }
+
+                DB::table('stj_promociones_producto')->insert(
+                    array_map(fn (array $row) => [
+                        'ppr_promocion' => $id,
+                        'ppr_producto' => $row['productId'],
+                        'ppr_descuento' => $row['discount'],
+                        'ppr_precio' => $row['price'],
+                    ], $productRows),
+                );
+
+                $insertedCount = DB::table('stj_promociones_producto')
+                    ->where('ppr_promocion', $id)
+                    ->count();
+
+                if ($insertedCount !== count($productRows)) {
+                    throw new RuntimeException('El conteo de productos insertados no coincide con el Excel.');
+                }
+
+                $this->activatePromotionProductFields($lockedPromotion);
+                $this->history->record(
+                    $id,
+                    'PRODUCTOS',
+                    "Productos reemplazados desde Excel: {$previousCount} eliminados y {$insertedCount} insertados.",
+                    $actor,
+                );
+
+                return ['previousCount' => $previousCount, 'insertedCount' => $insertedCount];
+            });
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw ValidationException::withMessages([
+                'products' => 'No fue posible completar el reemplazo. Todos los cambios fueron revertidos.',
+            ]);
+        }
+
+        return [...$result, 'promotion' => $this->find($id)];
+    }
+
+    private function resetPromotionProductFields(object $promotion): void
+    {
+        $query = DB::table('stj_producto_pais')->where('ppa_pais', (int) $promotion->prm_pais);
+
+        if ((string) $promotion->prm_tipo !== 'TODO') {
+            $productIds = DB::table('stj_promociones_producto')
+                ->where('ppr_promocion', (int) $promotion->prm_id)
+                ->select('ppr_producto');
+            $query->whereIn('ppa_producto', $productIds);
+        }
+
+        $query->update([
+            'ppa_origen_descuento' => null,
+            'ppa_tipo_descuento' => null,
+            'ppa_descuento' => null,
+            'ppa_precio_tienda' => null,
+            'ppa_promo_logo' => null,
+            'ppa_promo_nombre' => null,
+        ]);
+    }
+
+    private function activatePromotionProductFields(object $promotion): void
+    {
+        $promotionId = (int) $promotion->prm_id;
+        $countryId = (int) $promotion->prm_pais;
+        $origin = (string) $promotion->prm_origen;
+        $symbol = match ($countryId) {
+            1, 5 => '$',
+            2 => 'Q',
+            3 => 'C',
+            7 => 'L',
+            default => '',
+        };
+
+        if ((string) $promotion->prm_tipo_promocion === 'DESCUENTO') {
+            $discount = (float) $promotion->prm_porcentaje;
+            DB::table('stj_producto_pais')->where('ppa_pais', $countryId)->update([
+                'ppa_origen_descuento' => $origin,
+                'ppa_tipo_descuento' => $promotion->prm_aplica,
+                'ppa_descuento' => $discount,
+                'ppa_promo_nombre' => round($discount).'% DE DESCUENTO',
+            ]);
+
+            return;
+        }
+
+        $query = DB::table('stj_producto_pais as pp')
+            ->join('stj_promociones_producto as pr', 'pr.ppr_producto', '=', 'pp.ppa_producto')
+            ->where('pr.ppr_promocion', $promotionId)
+            ->where('pp.ppa_pais', $countryId);
+
+        if ((string) $promotion->prm_tipo_promocion === 'DESCUENTO-SKU') {
+            if ((float) $promotion->prm_porcentaje > 0) {
+                $discount = (float) $promotion->prm_porcentaje;
+                $query->update([
+                    'ppa_origen_descuento' => $origin,
+                    'ppa_tipo_descuento' => $promotion->prm_aplica,
+                    'ppa_descuento' => $discount,
+                    'ppa_promo_nombre' => round($discount).'% DE DESCUENTO',
+                ]);
+            } else {
+                $query->update([
+                    'ppa_origen_descuento' => $origin,
+                    'ppa_tipo_descuento' => $promotion->prm_aplica,
+                    'ppa_descuento' => DB::raw('pr.ppr_descuento'),
+                    'ppa_promo_nombre' => DB::raw("CONCAT(ROUND(pr.ppr_descuento, 0), '% DE DESCUENTO')"),
+                ]);
+            }
+
+            return;
+        }
+
+        if ((string) $promotion->prm_tipo_promocion === 'PUNTO-PRECIO') {
+            $price = $promotion->prm_precio !== null ? (float) $promotion->prm_precio : 0.0;
+            $priceExpression = $price > 0
+                ? ($countryId === 5 ? round($price / 1.07) : $price)
+                : DB::raw($countryId === 5 ? 'ROUND(pr.ppr_precio / 1.07, 0)' : 'pr.ppr_precio');
+            $nameExpression = $price > 0
+                ? 'Llevatelo a '.$symbol.round((float) $priceExpression)
+                : DB::raw("CONCAT('Llevatelo a {$symbol}', ROUND(".($countryId === 5 ? 'pr.ppr_precio / 1.07' : 'pr.ppr_precio').', 0))');
+            $query->update([
+                'ppa_origen_descuento' => $origin,
+                'ppa_tipo_descuento' => 'PRECIO_TODO',
+                'ppa_precio_tienda' => $priceExpression,
+                'ppa_promo_nombre' => $nameExpression,
+            ]);
+
+            return;
+        }
+
+        if ((string) $promotion->prm_tipo_promocion !== 'CONDICION-SKU') {
+            return;
+        }
+
+        $restriction = (string) $promotion->prm_restriccion;
+        $name = match ($restriction) {
+            '2xPP' => 'Aplica 2x'.$symbol.round((float) $promotion->prm_precio),
+            '21/2' => '2da prenda con el 50% desc',
+            '2doPrecio' => 'Aplica 2da Prenda a '.$symbol.round((float) $promotion->prm_precio),
+            '2x1' => 'Promocion 2x1',
+            default => null,
+        };
+
+        if ($name !== null) {
+            $query->update([
+                'ppa_origen_descuento' => $restriction === '2x1' ? 'TODO' : $origin,
+                'ppa_tipo_descuento' => $restriction === '2x1' ? 'TODO' : 'PRECIO_TODO',
+                'ppa_descuento' => $restriction === '2x1' ? null : DB::raw('pp.ppa_descuento'),
+                'ppa_promo_nombre' => $name,
+            ]);
+        }
     }
 
     private function dashboardDateTime(mixed $value): Carbon
@@ -483,6 +735,11 @@ class PromotionService
         $value = trim((string) $value);
 
         return $value !== '' ? $value : null;
+    }
+
+    private function commercialNameDescription(?string $oldName, ?string $newName): string
+    {
+        return sprintf('Titulo comercial actualizado de "%s" a "%s".', $oldName ?? '', $newName ?? '');
     }
 
     private function baseQuery()

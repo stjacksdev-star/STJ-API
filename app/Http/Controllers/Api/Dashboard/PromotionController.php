@@ -11,8 +11,7 @@ class PromotionController extends BaseController
 {
     public function __construct(
         private readonly PromotionService $promotions,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request)
     {
@@ -50,10 +49,11 @@ class PromotionController extends BaseController
             'startAt' => ['required', 'date'],
             'endAt' => ['required', 'date', 'after:startAt'],
             'products' => ['nullable', 'file', 'max:5120'],
+            ...$this->actorRules(),
         ]);
 
         return $this->success(
-            $this->promotions->create($validated, $request->file('products')),
+            $this->promotions->create($validated, $request->file('products'), $validated['actor'] ?? []),
             'Promocion creada correctamente'
         );
     }
@@ -68,11 +68,40 @@ class PromotionController extends BaseController
             'commercialName' => ['nullable', 'string', 'max:255'],
             'startAt' => ['nullable', 'date'],
             'endAt' => ['nullable', 'date'],
+            ...$this->actorRules(),
         ]);
 
         return $this->success(
-            $this->promotions->updateSchedule($promotion, $validated),
+            $this->promotions->updateSchedule($promotion, $validated, $validated['actor'] ?? []),
             'Horario de promocion actualizado correctamente'
         );
+    }
+
+    public function replaceProducts(Request $request, int $promotion)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'products' => ['required', 'file', 'max:5120'],
+            ...$this->actorRules(),
+        ]);
+
+        return $this->success(
+            $this->promotions->replaceProducts($promotion, $request->file('products'), $validated['actor'] ?? []),
+            'Productos de la promocion reemplazados correctamente'
+        );
+    }
+
+    private function actorRules(): array
+    {
+        return [
+            'actor' => ['nullable', 'array'],
+            'actor.id' => ['nullable'],
+            'actor.name' => ['nullable', 'string', 'max:150'],
+            'actor.email' => ['nullable', 'string', 'max:255'],
+            'actor.username' => ['nullable', 'string', 'max:120'],
+        ];
     }
 }
