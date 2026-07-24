@@ -14,6 +14,8 @@ class OrderReferenceService
 {
     private const CARD_AMOUNT_INCREASE_TOLERANCE = 0.05;
 
+    private const REFUND_MINIMUM = 0.05;
+
     public function __construct(
         private readonly Smtp2GoMailer $mailer,
     ) {
@@ -637,7 +639,8 @@ class OrderReferenceService
                 ]);
             }
 
-            $refund = $isCardPayment && $difference < 0 ? abs($difference) : 0.0;
+            $refundDifference = $isCardPayment && $difference < 0 ? abs($difference) : 0.0;
+            $refund = $refundDifference >= self::REFUND_MINIMUM ? $refundDifference : 0.0;
             $refundObservation = trim((string) $refundObservation);
 
             if ($refund > 0 && mb_strlen($refundObservation) < 20) {
