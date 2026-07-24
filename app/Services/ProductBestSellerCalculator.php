@@ -20,34 +20,42 @@ class ProductBestSellerCalculator
         $this->assertSupported($countryId, $days);
 
         return DB::table('stj_pedidos as ped')
-            ->join('stj_pedidos_pago as pag', 'pag.ppa_pedido', '=', 'ped.ped_id')
-            ->join('stj_pedidos_detalle as det', 'det.car_ref', '=', 'pag.ppa_ref')
+            ->join('stj_pedidos_pago as pag', function ($join) {
+                $join->on('pag.ppa_pedido', '=', 'ped.ped_id')
+                    ->where('pag.ppa_estado', 'APROBADA');
+            })
+            ->join('stj_pedidos_detalle as det', function ($join) {
+                $join->on('det.car_ref', '=', 'pag.ppa_ref')
+                    ->on('det.car_pais', '=', 'ped.ped_id_pais');
+            })
             ->join('stj_productos as pro', 'pro.pro_id', '=', 'det.car_producto')
             ->join('stj_producto_pais as ppa', function ($join) {
                 $join->on('ppa.ppa_producto', '=', 'pro.pro_id')
                     ->on('ppa.ppa_pais', '=', 'ped.ped_id_pais');
             })
             ->where('ped.ped_id_pais', $countryId)
-            ->where('pag.ppa_estado', 'APROBADA')
             ->where('det.car_accion', 'AGREGADO')
-            ->where('pro.pro_estatus', 'ACTIVO')
             ->where('ppa.ppa_estado', 'ACTIVO')
-            ->whereNotIn('pro.pro_id', [5645, 5646])
-            ->whereRaw($this->dateFilter($days))
-            ->groupBy('pro.pro_id')
+            ->whereNotIn('det.car_producto', [5645, 5646])
+            ->whereRaw($this->dateFilter(), [$days])
+            ->groupBy('det.car_producto', 'ped.ped_id_pais')
             ->orderByDesc('unidades_vendidas')
             ->orderByDesc('monto_vendido')
             ->selectRaw('
-                pro.pro_id AS producto_id,
+                det.car_producto AS producto_id,
+                ped.ped_id_pais AS pais,
                 SUM(det.car_cantidad) AS unidades_vendidas,
                 COUNT(DISTINCT ped.ped_id) AS pedidos_diferentes,
-                SUM(
-                    ROUND(
-                        det.car_precio
-                        * det.car_cantidad
-                        * (1 - COALESCE(det.car_descuento, 0) / 100),
-                        2
-                    )
+                ROUND(
+                    SUM(
+                        ROUND(
+                            det.car_precio
+                            * det.car_cantidad
+                            * (1 - COALESCE(det.car_descuento, 0) / 100),
+                            2
+                        )
+                    ),
+                    2
                 ) AS monto_vendido
             ')
             ->get();
@@ -115,12 +123,12 @@ class ProductBestSellerCalculator
         $this->period($days);
     }
 
-    private function dateFilter(int $days): string
+    private function dateFilter(): string
     {
         if (DB::getDriverName() === 'sqlite') {
-            return "pag.ppa_fecha >= date('now', '-{$days} days')";
+            return "pag.ppa_fecha >= date('now', '-' || ? || ' days')";
         }
 
-        return "pag.ppa_fecha >= DATE_SUB(CURDATE(), INTERVAL {$days} DAY)";
+        return 'pag.ppa_fecha >= DATE_SUB(CURDATE(), INTERVAL ? DAY)';
     }
 }
