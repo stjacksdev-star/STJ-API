@@ -9,6 +9,11 @@ class StorefrontHomeService
 {
     private const LEGACY_HOST = 'https://stjacks.com';
 
+    public function __construct(
+        private readonly StorefrontBestSellerRankingService $bestSellerRankings,
+    ) {
+    }
+
     public function forCountry(string $country): array
     {
         $country = strtolower($country);
@@ -23,7 +28,7 @@ class StorefrontHomeService
                 'center' => $this->mapPromoItems(Arr::get($payload, 'new_arrivals.center', [])),
                 'right' => $this->mapPromoItems(Arr::get($payload, 'new_arrivals.right', [])),
             ],
-            'bestSellers' => $this->mapBestSellers(Arr::get($payload, 'best_sellers', [])),
+            'bestSellers' => $this->bestSellerRankings->paginate($country, 30, 15)->items(),
         ];
     }
 

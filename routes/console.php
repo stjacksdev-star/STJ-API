@@ -120,3 +120,6 @@ Artisan::command('assets:put', function (AssetPublicationService $assets) {
 
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 Schedule::command('push:send-pending')->hourly();
+Schedule::command('productos:calcular-mas-vendidos')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

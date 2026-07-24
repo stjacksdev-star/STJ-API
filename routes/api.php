@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\PushSendController;
 use App\Http\Controllers\Api\StorefrontAccountController;
 use App\Http\Controllers\Api\StorefrontAssetController;
+use App\Http\Controllers\Api\StorefrontBestSellerController;
 use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
@@ -61,6 +62,8 @@ Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/best-sellers/{country}', [StorefrontBestSellerController::class, 'index'])
+    ->where('country', '[A-Za-z0-9]+');
 Route::get('/storefront/promotions/{country}', [StorefrontPromotionController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/stores/{country}', [StorefrontStoreController::class, 'index'])
