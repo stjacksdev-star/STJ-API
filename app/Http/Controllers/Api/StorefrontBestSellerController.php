@@ -18,14 +18,19 @@ class StorefrontBestSellerController extends BaseController
             'period' => ['sometimes', 'integer', 'in:7,14,30'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'page' => ['sometimes', 'integer', 'min:1'],
+            'all' => ['sometimes', 'boolean'],
         ]);
 
+        $days = (int) ($validated['period'] ?? 30);
+
         return $this->success(
-            $this->rankings->paginate(
-                $country,
-                (int) ($validated['period'] ?? 30),
-                (int) ($validated['per_page'] ?? 15),
-            ),
+            ($validated['all'] ?? false)
+                ? ['products' => $this->rankings->all($country, $days), 'period' => $days]
+                : $this->rankings->paginate(
+                    $country,
+                    $days,
+                    (int) ($validated['per_page'] ?? 15),
+                ),
             'Ranking de productos más vendidos obtenido',
         );
     }

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -13,15 +14,47 @@ class StorefrontBestSellerRankingService
     {
         $countryRow = $this->country($country);
         $period = app(ProductBestSellerCalculator::class)->period($days);
+        $currency = $this->currency((string) $countryRow->pai_codigo);
+        $perPage = min(100, max(1, $perPage));
 
-        $paginator = DB::table('stj_producto_metricas as metrics')
+        $paginator = $this->query((int) $countryRow->pai_id, $period)
+            ->paginate($perPage)
+            ->appends(['period' => $days, 'per_page' => $perPage]);
+
+        $paginator->through(fn (object $row) => $this->normalize($row, $currency));
+
+        return $paginator;
+    }
+
+    /**
+     * Devuelve todo el ranking sin LIMIT para las landings con filtros locales.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function all(string $country, int $days): array
+    {
+        $countryRow = $this->country($country);
+        $period = app(ProductBestSellerCalculator::class)->period($days);
+        $currency = $this->currency((string) $countryRow->pai_codigo);
+
+        return $this->query((int) $countryRow->pai_id, $period)
+            ->get()
+            ->map(fn (object $row) => $this->normalize($row, $currency))
+            ->unique('id')
+            ->values()
+            ->all();
+    }
+
+    private function query(int $countryId, string $period): Builder
+    {
+        return DB::table('stj_producto_metricas as metrics')
             ->join('stj_productos as product', 'product.pro_id', '=', 'metrics.pme_producto')
             ->join('stj_producto_pais as country_product', function ($join) {
                 $join->on('country_product.ppa_producto', '=', 'product.pro_id')
                     ->on('country_product.ppa_pais', '=', 'metrics.pme_pais');
             })
             ->leftJoin('stj_categorias as category', 'category.cat_id', '=', 'product.pro_categoria')
-            ->where('metrics.pme_pais', $countryRow->pai_id)
+            ->where('metrics.pme_pais', $countryId)
             ->where('metrics.pme_periodo', $period)
             ->where('product.pro_estatus', 'ACTIVO')
             ->where('country_product.ppa_estado', 'ACTIVO')
@@ -31,6 +64,8 @@ class StorefrontBestSellerRankingService
                 'product.pro_codigo',
                 'product.pro_nombre',
                 'product.pro_marca',
+                'product.pro_oc_genero',
+                'product.pro_tallas',
                 'product.pro_thumbs',
                 'country_product.ppa_precio',
                 'country_product.ppa_descuento',
@@ -41,47 +76,45 @@ class StorefrontBestSellerRankingService
                 'metrics.pme_monto_vendido',
                 'metrics.pme_ranking_ventas',
                 'metrics.pme_fecha_calculo',
-            ])
-            ->paginate(min(100, max(1, $perPage)))
-            ->appends([
-                'period' => $days,
-                'per_page' => min(100, max(1, $perPage)),
             ]);
+    }
 
-        $currency = $this->currency((string) $countryRow->pai_codigo);
-        $paginator->through(function (object $row) use ($currency) {
-            $discount = max(0, min(100, (float) ($row->ppa_descuento ?? 0)));
-            $regularPrice = (float) $row->ppa_precio;
+    /**
+     * @return array<string, mixed>
+     */
+    private function normalize(object $row, string $currency): array
+    {
+        $discount = max(0, min(100, (float) ($row->ppa_descuento ?? 0)));
+        $regularPrice = (float) $row->ppa_precio;
 
-            return [
-                'id' => (int) $row->pro_id,
-                'slug' => Str::slug((string) $row->pro_nombre).'-'.$row->pro_id,
-                'sku' => (string) $row->pro_codigo,
-                'name' => (string) $row->pro_nombre,
-                'brand' => (string) ($row->pro_marca ?? ''),
-                'category' => (string) ($row->cat_nombre ?? ''),
-                'imageUrl' => StorefrontImageUrl::image((string) $row->pro_thumbs, 'p400'),
-                'price' => round($regularPrice * (1 - $discount / 100), 2),
-                'previousPrice' => $discount > 0 ? $regularPrice : null,
-                'currency' => $currency,
-                'promoName' => (string) ($row->ppa_promo_nombre ?? ''),
-                'sales' => [
-                    'units' => (int) $row->pme_ventas_unidades,
-                    'orders' => (int) $row->pme_ventas_pedidos,
-                    'amount' => (float) $row->pme_monto_vendido,
-                    'rank' => (int) $row->pme_ranking_ventas,
-                    'calculatedAt' => (string) $row->pme_fecha_calculo,
-                ],
-            ];
-        });
-
-        return $paginator;
+        return [
+            'id' => (int) $row->pro_id,
+            'slug' => Str::slug((string) $row->pro_nombre).'-'.$row->pro_id,
+            'sku' => (string) $row->pro_codigo,
+            'name' => (string) $row->pro_nombre,
+            'brand' => (string) ($row->pro_marca ?? ''),
+            'group' => (string) ($row->pro_oc_genero ?? ''),
+            'category' => (string) ($row->cat_nombre ?? ''),
+            'imageUrl' => StorefrontImageUrl::image((string) $row->pro_thumbs, 'p400'),
+            'price' => round($regularPrice * (1 - $discount / 100), 2),
+            'previousPrice' => $discount > 0 ? $regularPrice : null,
+            'currency' => $currency,
+            'promoName' => (string) ($row->ppa_promo_nombre ?? ''),
+            'badge' => '#'.(int) $row->pme_ranking_ventas,
+            'availableSizes' => array_values(array_filter(array_map('trim', explode(',', (string) ($row->pro_tallas ?? ''))))),
+            'sales' => [
+                'units' => (int) $row->pme_ventas_unidades,
+                'orders' => (int) $row->pme_ventas_pedidos,
+                'amount' => (float) $row->pme_monto_vendido,
+                'rank' => (int) $row->pme_ranking_ventas,
+                'calculatedAt' => (string) $row->pme_fecha_calculo,
+            ],
+        ];
     }
 
     private function country(string $country): object
     {
         $query = DB::table('stj_paises')->select(['pai_id', 'pai_codigo']);
-
         $row = ctype_digit($country)
             ? $query->where('pai_id', (int) $country)->first()
             : $query->where('pai_codigo', strtoupper($country))->first();
