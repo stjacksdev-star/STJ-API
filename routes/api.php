@@ -29,15 +29,17 @@ use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
+use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontHomeController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
+use App\Http\Controllers\Api\StorefrontPromotionLandingController;
 use App\Http\Controllers\Api\StorefrontRecommendationController;
-use App\Http\Controllers\Api\StorefrontStoreController;
 use App\Http\Controllers\Api\StorefrontShippingController;
+use App\Http\Controllers\Api\StorefrontStoreController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
 use Illuminate\Support\Facades\Route;
 
@@ -66,10 +68,16 @@ Route::get('/storefront/best-sellers/{country}', [StorefrontBestSellerController
     ->where('country', '[A-Za-z0-9]+');
 Route::get('/storefront/promotions/{country}', [StorefrontPromotionController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/promotion/{country}/{promotion}', [StorefrontPromotionLandingController::class, 'show'])
+    ->where('country', '[A-Za-z]{2}')
+    ->whereNumber('promotion');
 Route::get('/storefront/stores/{country}', [StorefrontStoreController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/collections/{country}/{collection}', [StorefrontCollectionController::class, 'show'])
+    ->where('country', '[A-Za-z]{2}')
+    ->whereNumber('collection');
 Route::get('/storefront/brands/{country}/{brand}', [StorefrontBrandController::class, 'show'])
     ->where('country', '[A-Za-z]{2}')
     ->where('brand', '[A-Za-z0-9-]+');

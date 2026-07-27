@@ -9,15 +9,15 @@ class StorefrontProductAvailabilityController extends BaseController
 {
     public function __construct(
         private readonly ProductDetailAvailabilityService $availabilityService,
-    ) {
-    }
+    ) {}
 
     public function show(Request $request, string $country, string $slug)
     {
         $availability = $this->availabilityService->forCountryAndSlug(
             $country,
             $slug,
-            $request->query('store')
+            $request->query('store'),
+            $request->query('scope') === 'product_list' ? 'product_list' : 'product_detail',
         );
 
         if (! $availability) {

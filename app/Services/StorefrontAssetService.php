@@ -16,10 +16,10 @@ class StorefrontAssetService
         return [
             'country' => $country,
             'generatedAt' => $payload['generatedAt'] ?? null,
-            'heroSlides' => $this->mapSlider($assets['slider'] ?? []),
-            'banners' => $this->mapBanners($assets['banner'] ?? []),
-            'newArrivals' => $this->mapNewArrivals($assets['lo-mas-nuevo'] ?? []),
-            'coupons' => $this->mapCoupons($assets['cupon'] ?? []),
+            'heroSlides' => $this->mapSlider($assets['slider'] ?? [], $country),
+            'banners' => $this->mapBanners($assets['banner'] ?? [], $country),
+            'newArrivals' => $this->mapNewArrivals($assets['lo-mas-nuevo'] ?? [], $country),
+            'coupons' => $this->mapCoupons($assets['cupon'] ?? [], $country),
         ];
     }
 
@@ -36,7 +36,7 @@ class StorefrontAssetService
         return is_array($payload) ? $payload : [];
     }
 
-    private function mapSlider(array $assets): array
+    private function mapSlider(array $assets, string $country): array
     {
         return collect($assets)
             ->sortBy([
@@ -49,13 +49,15 @@ class StorefrontAssetService
                 'desktopImage' => $this->assetUrl($asset['ast_imagen'] ?? $asset['imagen'] ?? $asset['desktopImage'] ?? $asset['image'] ?? null),
                 'mobileImage' => $this->assetUrl($asset['ast_imagen_movil'] ?? $asset['imagen_movil'] ?? $asset['mobileImage'] ?? null),
                 'href' => $this->linkUrl($asset['link'] ?? null),
+                'collection' => $this->collectionLink($asset['link'] ?? null, $country),
+                'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
             ])
             ->filter(fn (array $asset) => $asset['imagen'] || $asset['imagen_movil'])
             ->values()
             ->all();
     }
 
-    private function mapBanners(array $assets): array
+    private function mapBanners(array $assets, string $country): array
     {
         return collect($assets)
             ->sortBy([
@@ -68,13 +70,15 @@ class StorefrontAssetService
                 'desktopImage' => $this->assetUrl($asset['ast_imagen'] ?? $asset['imagen'] ?? $asset['desktopImage'] ?? $asset['image'] ?? null),
                 'mobileImage' => $this->assetUrl($asset['ast_imagen_movil'] ?? $asset['imagen_movil'] ?? $asset['mobileImage'] ?? null),
                 'href' => $this->linkUrl($asset['link'] ?? null),
+                'collection' => $this->collectionLink($asset['link'] ?? null, $country),
+                'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
             ])
             ->filter(fn (array $asset) => $asset['imagen'] || $asset['imagen_movil'])
             ->values()
             ->all();
     }
 
-    private function mapNewArrivals(array $assets): array
+    private function mapNewArrivals(array $assets, string $country): array
     {
         $columns = [
             'left' => [],
@@ -88,7 +92,7 @@ class StorefrontAssetService
                 fn (array $asset) => (int) ($asset['order'] ?? 0),
                 fn (array $asset) => (int) ($asset['id'] ?? 0),
             ])
-            ->each(function (array $asset) use (&$columns) {
+            ->each(function (array $asset) use (&$columns, $country) {
                 $column = $this->positionColumn($asset['position'] ?? null);
                 $image = $this->assetUrl($asset['image'] ?? null);
 
@@ -99,6 +103,8 @@ class StorefrontAssetService
                 $columns[$column][] = [
                     'image' => $image,
                     'href' => $this->linkUrl($asset['link'] ?? null),
+                    'collection' => $this->collectionLink($asset['link'] ?? null, $country),
+                    'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
                     'position' => $asset['position'] ?? null,
                     'order' => $asset['order'] ?? null,
                 ];
@@ -107,7 +113,7 @@ class StorefrontAssetService
         return $columns;
     }
 
-    private function mapCoupons(array $assets): array
+    private function mapCoupons(array $assets, string $country): array
     {
         return collect($assets)
             ->sortBy([
@@ -120,6 +126,8 @@ class StorefrontAssetService
                 'image' => $this->assetUrl($asset['image'] ?? $asset['desktopImage'] ?? null),
                 'mobileImage' => $this->assetUrl($asset['mobileImage'] ?? null),
                 'href' => $this->linkUrl($asset['link'] ?? null),
+                'collection' => $this->collectionLink($asset['link'] ?? null, $country),
+                'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
                 'order' => $asset['order'] ?? null,
             ])
             ->filter(fn (array $asset) => $asset['image'] || $asset['mobileImage'])
@@ -175,5 +183,35 @@ class StorefrontAssetService
         }
 
         return $path;
+    }
+
+    private function collectionLink(mixed $path, string $country): ?array
+    {
+        $path = trim((string) $path);
+
+        if (! preg_match('~/Productos/Colecciones/?\?id=(\d+)(?:&([^#]*))?~i', $path, $matches)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $matches[1],
+            'slug' => str($matches[2] ?? 'coleccion')->slug()->toString(),
+            'countryCode' => strtolower($country),
+        ];
+    }
+
+    private function promotionLink(mixed $path, string $country): ?array
+    {
+        $path = trim((string) $path);
+
+        if (! preg_match('~Promociones/?\?idPromocion=(\d+)~i', $path, $matches)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $matches[1],
+            'slug' => 'promocion',
+            'countryCode' => strtolower($country),
+        ];
     }
 }

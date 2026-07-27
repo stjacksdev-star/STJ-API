@@ -10,6 +10,10 @@ use Illuminate\Support\Str;
 
 class StorefrontBestSellerRankingService
 {
+    public function __construct(
+        private readonly ProductListAvailabilityService $productListAvailability,
+    ) {}
+
     public function paginate(string $country, int $days, int $perPage = 15): LengthAwarePaginator
     {
         $countryRow = $this->country($country);
@@ -21,7 +25,17 @@ class StorefrontBestSellerRankingService
             ->paginate($perPage)
             ->appends(['period' => $days, 'per_page' => $perPage]);
 
-        $paginator->through(fn (object $row) => $this->normalize($row, $currency));
+        $availability = $this->productListAvailability->summarize(
+            (string) $countryRow->pai_codigo,
+            $paginator->getCollection()->all(),
+        );
+        $availabilityBySku = $availability['availabilityBySku'] ?? [];
+
+        $paginator->through(fn (object $row) => $this->normalize(
+            $row,
+            $currency,
+            $availabilityBySku[trim((string) $row->pro_codigo)] ?? null,
+        ));
 
         return $paginator;
     }
@@ -37,9 +51,20 @@ class StorefrontBestSellerRankingService
         $period = app(ProductBestSellerCalculator::class)->period($days);
         $currency = $this->currency((string) $countryRow->pai_codigo);
 
-        return $this->query((int) $countryRow->pai_id, $period)
-            ->get()
-            ->map(fn (object $row) => $this->normalize($row, $currency))
+        $rows = $this->query((int) $countryRow->pai_id, $period)->get();
+        $availability = $this->productListAvailability->summarize(
+            (string) $countryRow->pai_codigo,
+            $rows->all(),
+        );
+        $availabilityBySku = $availability['availabilityBySku'] ?? [];
+
+        return $rows
+            ->map(fn (object $row) => $this->normalize(
+                $row,
+                $currency,
+                $availabilityBySku[trim((string) $row->pro_codigo)] ?? null,
+            ))
+            ->filter(fn (array $product) => $product['hasStock'])
             ->unique('id')
             ->values()
             ->all();
@@ -82,7 +107,7 @@ class StorefrontBestSellerRankingService
     /**
      * @return array<string, mixed>
      */
-    private function normalize(object $row, string $currency): array
+    private function normalize(object $row, string $currency, ?array $availability = null): array
     {
         $discount = max(0, min(100, (float) ($row->ppa_descuento ?? 0)));
         $regularPrice = (float) $row->ppa_precio;
@@ -101,7 +126,9 @@ class StorefrontBestSellerRankingService
             'currency' => $currency,
             'promoName' => (string) ($row->ppa_promo_nombre ?? ''),
             'badge' => '#'.(int) $row->pme_ranking_ventas,
-            'availableSizes' => array_values(array_filter(array_map('trim', explode(',', (string) ($row->pro_tallas ?? ''))))),
+            'availableSizes' => $availability['availableSizes'] ?? [],
+            'hasStock' => (bool) ($availability['hasStock'] ?? false),
+            'stockTotal' => (int) ($availability['totalQuantity'] ?? 0),
             'sales' => [
                 'units' => (int) $row->pme_ventas_unidades,
                 'orders' => (int) $row->pme_ventas_pedidos,
