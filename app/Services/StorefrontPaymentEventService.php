@@ -25,6 +25,10 @@ class StorefrontPaymentEventService
             DB::table('stj_pedidos_pago')->where('ppa_id', $paymentId)->update(['ppa_estado' => $status, 'ppa_fecha_procesado' => now()]);
             $purchaseCreated = false;
             if ($status === 'APROBADA') {
+                DB::table('stj_pedidos')
+                    ->where('ped_id', $payment->ppa_pedido)
+                    ->where('ped_estatus', 'PENDIENTE_PAGO')
+                    ->update(['ped_estatus' => 'RECIBIDO']);
                 $cart = DB::table('stj_carritos')->where('car_pedido_id', $payment->ppa_pedido)->first();
                 if ($cart && ! DB::table('stj_cliente_eventos')->where('cev_pedido_id', $payment->ppa_pedido)->where('cev_tipo', 'PURCHASE')->exists()) {
                     CustomerEvent::query()->create(['cev_event_uuid' => $eventUuid, 'cev_visitante_id' => $cart->car_visitante_id, 'cev_usu_id' => $cart->car_usu_id, 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->car_id, 'cev_pedido_id' => $payment->ppa_pedido, 'cev_tipo' => 'PURCHASE', 'cev_valor' => $payment->ppa_monto, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => $metadata + ['paymentId' => $paymentId]]);

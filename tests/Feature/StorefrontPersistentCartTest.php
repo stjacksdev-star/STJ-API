@@ -11,6 +11,7 @@ use App\Services\StorefrontCartService;
 use App\Services\StorefrontCheckoutValidationService;
 use App\Services\StorefrontFulfillmentService;
 use App\Services\StorefrontProductPricingService;
+use App\Services\StorefrontPromotionResolver;
 use App\Services\StorefrontShippingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -32,7 +33,10 @@ class StorefrontPersistentCartTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) { $t->bigInteger('pai_id_world')->nullable(); $t->string('pai_codigo', 3); }));
+        Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) {
+            $t->bigInteger('pai_id_world')->nullable();
+            $t->string('pai_codigo', 3);
+        }));
         Schema::create('stj_productos', function (Blueprint $t) {
             $t->bigInteger('pro_id', true);
             $t->string('pro_codigo');
@@ -67,7 +71,41 @@ class StorefrontPersistentCartTest extends TestCase
             $t->boolean('tie_productos');
         });
         Schema::create('stj_pedidos', fn (Blueprint $t) => $t->bigInteger('ped_id', true));
-        Schema::create('stj_promociones', fn (Blueprint $t) => $t->bigInteger('prm_id', true));
+        Schema::create('stj_promociones', function (Blueprint $t) {
+            $t->bigInteger('prm_id', true);
+            $t->bigInteger('prm_pais');
+            $t->string('prm_nombre');
+            $t->string('prm_nombre_comercial')->nullable();
+            $t->string('prm_tipo');
+            $t->string('prm_tipo_promocion');
+            $t->string('prm_restriccion')->nullable();
+            $t->decimal('prm_porcentaje', 5, 2)->nullable();
+            $t->decimal('prm_precio', 12, 2)->nullable();
+            $t->string('prm_tipo_checkout')->nullable();
+            $t->string('prm_alcance_tienda')->nullable();
+            $t->string('prm_aplica')->nullable();
+            $t->string('prm_estado');
+            $t->string('prm_modalidad');
+            $t->string('prm_origen');
+        });
+        Schema::create('stj_promociones_horario', function (Blueprint $t) {
+            $t->bigInteger('pho_id', true);
+            $t->bigInteger('pho_promocion');
+            $t->string('pho_tipo');
+            $t->dateTime('pho_inicio');
+            $t->dateTime('pho_fin');
+            $t->string('pho_estado');
+        });
+        Schema::create('stj_promociones_producto', function (Blueprint $t) {
+            $t->bigInteger('ppr_promocion');
+            $t->bigInteger('ppr_producto');
+            $t->decimal('ppr_descuento', 5, 2)->nullable();
+            $t->decimal('ppr_precio', 12, 2)->nullable();
+        });
+        Schema::create('stj_promociones_tienda', function (Blueprint $t) {
+            $t->bigInteger('prt_promocion');
+            $t->bigInteger('prt_tienda');
+        });
         DB::table('stj_paises')->insert([['pai_id' => 1, 'pai_id_world' => 1, 'pai_codigo' => 'SV'], ['pai_id' => 2, 'pai_id_world' => 2, 'pai_codigo' => 'GT']]);
         DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_tallas' => 'S,M', 'pro_estatus' => 'ACTIVO']);
         DB::table('stj_producto_pais')->insert([['ppa_pais' => 1, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 100, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => 10, 'ppa_origen_descuento' => 'WEB', 'ppa_promo_nombre' => 'Promo'], ['ppa_pais' => 2, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 200, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => null, 'ppa_origen_descuento' => null, 'ppa_promo_nombre' => null]]);
@@ -80,7 +118,7 @@ class StorefrontPersistentCartTest extends TestCase
         $checkout->shouldReceive('validate')->andReturn(['ok' => true, 'message' => 'ok']);
         $shipping = Mockery::mock(StorefrontShippingService::class);
         $shipping->shouldReceive('quote')->andReturnUsing(fn ($country, $type) => ['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => $country->pai_codigo === 'GT' ? 'GTQ' : 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => null]);
-        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver), $checkout, $shipping);
+        $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver), $checkout, $shipping, app(StorefrontPromotionResolver::class));
     }
 
     public function test_guest_add_is_authoritative_and_idempotent(): void
@@ -94,6 +132,87 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'ADD_TO_CART', 'cev_usu_id' => null, 'cev_producto_id' => 10]);
         $this->expectException(CartOperationConflict::class);
         $this->service->add('sv', $this->visitor, null, array_merge($input, ['quantity' => 2]));
+    }
+
+    public function test_cart_ignores_global_product_country_discount_without_an_eligible_promotion(): void
+    {
+        $result = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+
+        $this->assertEquals(100.0, $result['cart']['items'][0]['price']);
+        $this->assertNull($result['cart']['items'][0]['promotion']);
+        $this->assertEquals(0.0, $result['cart']['totals']['discount']);
+        $this->assertEquals(100.0, $result['cart']['totals']['total']);
+    }
+
+    public function test_cart_applies_product_percentage_from_the_central_resolver(): void
+    {
+        $this->promotion(100, 'DESCUENTO-SKU');
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 100,
+            'ppr_producto' => 10,
+            'ppr_descuento' => 25,
+        ]);
+
+        $result = $this->service->add('sv', $this->visitor, null, $this->item('S', 2));
+
+        $this->assertEquals(75.0, $result['cart']['items'][0]['price']);
+        $this->assertEquals(50.0, $result['cart']['items'][0]['promotionDiscount']);
+        $this->assertSame(100, $result['cart']['items'][0]['promotion']['id']);
+        $this->assertSame('25% de descuento', $result['cart']['items'][0]['promotion']['benefitLabel']);
+        $this->assertEquals(200.0, $result['cart']['totals']['baseSubtotal']);
+        $this->assertEquals(50.0, $result['cart']['totals']['discount']);
+        $this->assertEquals(150.0, $result['cart']['totals']['total']);
+    }
+
+    public function test_cart_evaluates_two_for_one_using_the_complete_quantity(): void
+    {
+        $this->promotion(101, 'CONDICION-SKU', ['prm_restriccion' => '2x1']);
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 101,
+            'ppr_producto' => 10,
+        ]);
+
+        $one = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $two = $this->service->update('sv', $one['cart']['items'][0]['id'], $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(),
+            'quantity' => 2,
+        ]);
+
+        $this->assertEquals(0.0, $one['cart']['totals']['discount']);
+        $this->assertEquals(100.0, $two['cart']['totals']['discount']);
+        $this->assertEquals(100.0, $two['cart']['totals']['total']);
+        $this->assertSame('Aplica 2x1', $two['cart']['items'][0]['promotion']['benefitLabel']);
+    }
+
+    public function test_cart_recalculates_selected_store_promotion_after_fulfillment_change(): void
+    {
+        $this->promotion(102, 'DESCUENTO-SKU', [
+            'prm_tipo_checkout' => 'T',
+            'prm_alcance_tienda' => 'SELECCIONADAS',
+        ]);
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 102,
+            'ppr_producto' => 10,
+            'ppr_descuento' => 30,
+        ]);
+        DB::table('stj_promociones_tienda')->insert([
+            'prt_promocion' => 102,
+            'prt_tienda' => 2,
+        ]);
+
+        $home = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $store = $this->service->applyFulfillment('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(),
+            'fulfillment_type' => 'TIENDA',
+            'store_code' => '002',
+            'confirm_affected' => true,
+        ]);
+
+        $this->assertEquals(0.0, $home['cart']['totals']['discount']);
+        $this->assertEquals(30.0, $store['cart']['totals']['discount']);
+        $this->assertEquals(70.0, $store['cart']['totals']['total']);
+        $this->assertSame(102, $store['cart']['items'][0]['promotion']['id']);
+        $this->assertSame(2, $store['cart']['items'][0]['promotion']['store']['id']);
     }
 
     public function test_same_variant_updates_and_other_size_creates_line(): void
@@ -250,6 +369,49 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertDatabaseHas('stj_carrito_auditoria', ['cau_accion' => 'CHECKOUT_INVALIDATED']);
     }
 
+    public function test_checkout_start_uses_the_same_central_promotion_resolution_as_the_cart(): void
+    {
+        $this->promotion(103, 'DESCUENTO-SKU');
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 103,
+            'ppr_producto' => 10,
+            'ppr_descuento' => 25,
+        ]);
+        $cart = $this->service->add('sv', $this->visitor, null, $this->item('S', 2));
+
+        $result = $this->service->startCheckout('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(),
+        ]);
+
+        $this->assertEquals($cart['cart']['totals']['baseSubtotal'], $result['checkout']['baseSubtotal']);
+        $this->assertEquals($cart['cart']['totals']['discount'], $result['checkout']['discount']);
+        $this->assertEquals($cart['cart']['totals']['total'], $result['checkout']['subtotal']);
+        $this->assertEquals(25.0, $result['checkout']['discountPercentage']);
+        $this->assertEquals(150.0, $result['checkout']['total']);
+        $this->assertSame(103, $result['checkout']['lines'][0]['promotion']['id']);
+        $this->assertSame('25% de descuento', $result['checkout']['lines'][0]['promotion']['benefitLabel']);
+    }
+
+    public function test_checkout_start_resolves_two_for_one_from_the_complete_basket(): void
+    {
+        $this->promotion(104, 'CONDICION-SKU', ['prm_restriccion' => '2x1']);
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 104,
+            'ppr_producto' => 10,
+        ]);
+        $this->service->add('sv', $this->visitor, null, $this->item('S', 2));
+
+        $result = $this->service->startCheckout('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(),
+        ]);
+
+        $this->assertEquals(200.0, $result['checkout']['baseSubtotal']);
+        $this->assertEquals(100.0, $result['checkout']['discount']);
+        $this->assertEquals(50.0, $result['checkout']['discountPercentage']);
+        $this->assertEquals(100.0, $result['checkout']['subtotal']);
+        $this->assertSame('Aplica 2x1', $result['checkout']['lines'][0]['promotion']['benefitLabel']);
+    }
+
     public function test_cart_without_fulfillment_context_cannot_start_checkout(): void
     {
         $result = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
@@ -261,5 +423,36 @@ class StorefrontPersistentCartTest extends TestCase
     private function item(string $size, int $quantity): array
     {
         return ['operation_uuid' => (string) Str::uuid(), 'product_id' => 10, 'sku' => 'SKU10', 'size' => $size, 'quantity' => $quantity];
+    }
+
+    private function promotion(int $id, string $type, array $overrides = []): void
+    {
+        DB::table('stj_promociones')->insert([
+            ...[
+                'prm_id' => $id,
+                'prm_pais' => 1,
+                'prm_nombre' => "Promoción {$id}",
+                'prm_nombre_comercial' => "Promoción {$id}",
+                'prm_tipo' => 'SKU',
+                'prm_tipo_promocion' => $type,
+                'prm_restriccion' => null,
+                'prm_porcentaje' => null,
+                'prm_precio' => null,
+                'prm_tipo_checkout' => 'TODO',
+                'prm_alcance_tienda' => 'TODAS',
+                'prm_aplica' => 'TODO',
+                'prm_estado' => 'EN-PROCESO',
+                'prm_modalidad' => 'PROGRAMADO',
+                'prm_origen' => 'WEB',
+            ],
+            ...$overrides,
+        ]);
+        DB::table('stj_promociones_horario')->insert([
+            'pho_promocion' => $id,
+            'pho_tipo' => 'NORMAL',
+            'pho_inicio' => now()->subHour(),
+            'pho_fin' => now()->addHour(),
+            'pho_estado' => 'ACTIVO',
+        ]);
     }
 }

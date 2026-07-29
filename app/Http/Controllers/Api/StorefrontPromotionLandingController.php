@@ -19,6 +19,8 @@ class StorefrontPromotionLandingController extends BaseController
             'sort' => $request->string('sort')->toString(),
             'page' => max(1, $request->integer('page', 1)),
             'perPage' => min(48, max(4, $request->integer('per_page', 24))),
+            'checkoutType' => $request->string('checkout_type', 'DOMICILIO')->toString(),
+            'storeCode' => $request->string('store')->toString(),
         ]);
 
         if (! $data) {

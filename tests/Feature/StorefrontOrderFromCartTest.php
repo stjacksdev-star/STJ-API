@@ -32,9 +32,31 @@ class StorefrontOrderFromCartTest extends TestCase
     {
         $this->schema();
         DB::table('stj_paises')->insert(['pai_id' => $countryId, 'pai_id_world' => $countryId, 'pai_codigo' => strtoupper($countryCode)]);
+        DB::table('stj_world_countries')->insert(['id' => $countryId, 'iso2' => strtoupper($countryCode), 'name' => "Country {$countryCode}", 'phonecode' => '503']);
+        DB::table('stj_world_states')->insert(['id' => 2, 'country_id' => $countryId, 'name' => 'Cortes', 'estado' => 1]);
+        DB::table('stj_world_cities')->insert(['id' => 11, 'state_id' => 2, 'country_id' => $countryId, 'name' => 'SPS']);
         DB::table('stj_tiendas')->insert(['tie_id' => 8, 'tie_pais' => $countryId, 'tie_codigo' => $storeCode, 'tie_nombre' => 'Tienda autorizada']);
         DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_tallas' => 'S', 'pro_estatus' => 'ACTIVO']);
         DB::table('stj_producto_pais')->insert(['ppa_pais' => $countryId, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 25, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => 0]);
+        $hasPromotion = $type === 'TIENDA' && $paymentType === 'EFECTIVO';
+        if ($hasPromotion) {
+            DB::table('stj_promociones')->insert([
+                'prm_id' => 2000, 'prm_pais' => $countryId, 'prm_nombre' => 'PROMO TEST',
+                'prm_nombre_comercial' => 'Promoción central de prueba', 'prm_tipo' => 'PRODUCTOS',
+                'prm_tipo_promocion' => 'DESCUENTO', 'prm_porcentaje' => 20,
+                'prm_tipo_checkout' => 'T', 'prm_alcance_tienda' => 'SELECCIONADAS',
+                'prm_aplica' => 'TODO', 'prm_estado' => 'EN-PROCESO',
+                'prm_modalidad' => 'PROGRAMADO', 'prm_origen' => 'WEB',
+            ]);
+            DB::table('stj_promociones_horario')->insert([
+                'pho_promocion' => 2000, 'pho_tipo' => 'NORMAL',
+                'pho_inicio' => now()->subHour(), 'pho_fin' => now()->addHour(), 'pho_estado' => 'ACTIVO',
+            ]);
+            DB::table('stj_promociones_producto')->insert([
+                'ppr_promocion' => 2000, 'ppr_producto' => 10, 'ppr_descuento' => null, 'ppr_precio' => null,
+            ]);
+            DB::table('stj_promociones_tienda')->insert(['prt_promocion' => 2000, 'prt_tienda' => 8]);
+        }
         $visitor = StorefrontVisitor::query()->create(['vis_uuid' => (string) Str::uuid(), 'vis_origen' => 'WEB', 'vis_pais_id' => $countryId, 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
         $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_pais_id' => $countryId, 'car_tipo' => $type, 'car_tienda_id' => 8, 'car_tienda_codigo_snapshot' => $storeCode, 'car_inventory_source' => 'external_api', 'car_estado' => 'CHECKOUT', 'car_origen' => 'WEB', 'car_moneda' => 'USD', 'car_version' => 2, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addMonth(), 'car_checkout_en' => now(), 'car_creado_en' => now(), 'car_actualizado_en' => now()]);
         StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_pais_id' => $countryId, 'car_tipo' => $type, 'car_tienda_id' => 8, 'car_tienda_codigo_snapshot' => $storeCode, 'car_inventory_source' => 'external_api', 'car_estado' => 'CONVERTIDO', 'car_origen' => 'WEB', 'car_moneda' => 'USD', 'car_version' => 3, 'car_ultima_actividad_en' => now()->subMinute(), 'car_expira_en' => now()->addMonth(), 'car_checkout_en' => now()->subMinutes(2), 'car_convertido_en' => now()->subMinute(), 'car_creado_en' => now()->subMinutes(3), 'car_actualizado_en' => now()->subMinute()]);
@@ -45,7 +67,7 @@ class StorefrontOrderFromCartTest extends TestCase
         $shipping = Mockery::mock(StorefrontShippingService::class);
         $shipping->shouldReceive('quote')->times($allowed ? 1 : 0)->andReturn(['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => $type === 'DOMICILIO' ? ['id' => 11, 'name' => 'SPS', 'stateId' => 2, 'state' => 'Cortes', 'urbanId' => null] : null]);
         $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping);
-        $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '9999', 'document' => 'ID'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
+        $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '9999', 'documentType' => 'DUI', 'document' => 'ID', 'countryId' => $countryId, 'stateId' => 2, 'cityId' => 11, 'address' => 'Residencia'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
         $destination = $type === 'TIENDA'
             ? ['city_id' => 0, 'state_id' => 0, 'address' => '', 'reference' => '']
             : ['city_id' => 11, 'state_id' => 2, 'address' => 'direccion', 'reference' => ''];
@@ -63,11 +85,19 @@ class StorefrontOrderFromCartTest extends TestCase
 
         $this->assertSame($first, $retry);
         $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tienda' => $storeCode]);
+        $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tipo_identificacion' => 'DUI', 'ped_identificacion' => 'ID', 'ped_departamento' => 2, 'ped_municipio' => 11, 'ped_direccion' => 'Residencia', 'ped_estatus' => $paymentType === 'EFECTIVO' ? 'RECIBIDO' : 'PENDIENTE_PAGO']);
         $relation = $type === 'DOMICILIO' ? 'stj_pedidos_direccion' : 'stj_pedidos_tienda';
         $foreign = $type === 'DOMICILIO' ? 'pdi_pedido' : 'pti_pedido';
         $this->assertDatabaseHas($relation, [$foreign => $first['order']['pedidoId']]);
         $this->assertDatabaseHas('stj_carritos', ['car_id' => $cart->getKey(), 'car_estado' => 'CONVERTIDO', 'car_pedido_id' => $first['order']['pedidoId']]);
         $this->assertDatabaseHas('stj_pedidos_detalle', ['car_precio' => 25, 'car_cantidad' => 2]);
+        if ($hasPromotion) {
+            $this->assertSame('50.00', $first['order']['baseSubtotal']);
+            $this->assertSame('10.00', $first['order']['discount']);
+            $this->assertSame('40.00', $first['order']['total']);
+            $this->assertDatabaseHas('stj_pedidos_detalle', ['car_promocion_id' => 2000, 'car_promocion' => 'Promoción central de prueba', 'car_descuento' => 20]);
+            $this->assertDatabaseHas('stj_pedidos_pago', ['ppa_monto_sdesc' => 50, 'ppa_monto_senv' => 40, 'ppa_monto' => 40]);
+        }
         $this->assertDatabaseHas('stj_pedidos_pago', ['ppa_id' => $first['order']['pagoId'], 'ppa_tipo' => $paymentType]);
         $this->assertDatabaseHas('stj_pedidos_pago', ['ppa_id' => $first['order']['pagoId'], 'ppa_estado' => $paymentType === 'EFECTIVO' ? 'APROBADA' : 'PENDIENTE', 'ppa_autorizacion' => $paymentType === 'EFECTIVO' ? 'Efectivo' : null, 'ppa_pagado' => $paymentType === 'EFECTIVO' ? 'NO' : 'N/A']);
         $configuration = Mockery::mock(PowerTranzConfigResolver::class);
@@ -96,6 +126,7 @@ class StorefrontOrderFromCartTest extends TestCase
             $this->assertSame($gatewayApproved ? 'APROBADA' : 'DENEGADA', $confirmed['status']);
             $this->assertSame($confirmed, $repeated);
             $this->assertDatabaseHas('stj_pedidos_pago', ['ppa_id' => $first['order']['pagoId'], 'ppa_estado' => $gatewayApproved ? 'APROBADA' : 'DENEGADA', 'ppa_autorizacion' => $gatewayApproved ? 'AUTH' : null, 'ppa_rsp_codigo' => $gatewayApproved ? '00' : '05', 'ppa_rsp_mensaje' => $gatewayApproved ? 'Approved' : 'Declined']);
+            $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_estatus' => $gatewayApproved ? 'RECIBIDO' : 'PENDIENTE_PAGO']);
             $this->assertSame($gatewayApproved ? 1 : 0, DB::table('stj_cliente_eventos')->where('cev_tipo', 'PURCHASE')->count());
         } else {
             try {
@@ -133,6 +164,24 @@ class StorefrontOrderFromCartTest extends TestCase
 
     private function schema(): void
     {
+        Schema::create('stj_world_countries', function (Blueprint $t) {
+            $t->bigInteger('id');
+            $t->string('iso2', 3);
+            $t->string('name');
+            $t->string('phonecode');
+        });
+        Schema::create('stj_world_states', function (Blueprint $t) {
+            $t->bigInteger('id');
+            $t->bigInteger('country_id');
+            $t->string('name');
+            $t->boolean('estado')->default(true);
+        });
+        Schema::create('stj_world_cities', function (Blueprint $t) {
+            $t->bigInteger('id');
+            $t->bigInteger('state_id');
+            $t->bigInteger('country_id');
+            $t->string('name');
+        });
         Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) {
             $t->bigInteger('pai_id_world')->nullable();
             $t->string('pai_codigo', 3);
@@ -165,7 +214,32 @@ class StorefrontOrderFromCartTest extends TestCase
             $t->decimal('pta_precio', 12, 2);
         }));
         Schema::create('stj_usuarios', fn (Blueprint $t) => $t->bigInteger('usu_id', true));
-        Schema::create('stj_promociones', fn (Blueprint $t) => $t->bigInteger('prm_id', true));
+        Schema::create('stj_promociones', function (Blueprint $t) {
+            $t->bigInteger('prm_id', true);
+            $t->bigInteger('prm_pais');
+            foreach (['prm_nombre', 'prm_nombre_comercial', 'prm_tipo', 'prm_tipo_promocion', 'prm_restriccion', 'prm_tipo_checkout', 'prm_alcance_tienda', 'prm_aplica', 'prm_estado', 'prm_modalidad', 'prm_origen'] as $c) {
+                $t->string($c)->nullable();
+            }
+            $t->decimal('prm_porcentaje', 12, 2)->nullable();
+            $t->decimal('prm_precio', 12, 2)->nullable();
+        });
+        Schema::create('stj_promociones_horario', function (Blueprint $t) {
+            $t->bigInteger('pho_promocion');
+            $t->string('pho_tipo');
+            $t->dateTime('pho_inicio');
+            $t->dateTime('pho_fin');
+            $t->string('pho_estado');
+        });
+        Schema::create('stj_promociones_producto', function (Blueprint $t) {
+            $t->bigInteger('ppr_promocion');
+            $t->bigInteger('ppr_producto');
+            $t->decimal('ppr_descuento', 12, 2)->nullable();
+            $t->decimal('ppr_precio', 12, 2)->nullable();
+        });
+        Schema::create('stj_promociones_tienda', function (Blueprint $t) {
+            $t->bigInteger('prt_promocion');
+            $t->bigInteger('prt_tienda');
+        });
         Schema::create('stj_pedidos', function (Blueprint $t) {
             $t->bigInteger('ped_id', true);
             foreach (['ped_id_pais', 'ped_user', 'ped_a_version'] as $c) {

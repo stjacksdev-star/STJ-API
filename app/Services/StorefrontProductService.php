@@ -8,7 +8,11 @@ use Illuminate\Support\Str;
 
 class StorefrontProductService
 {
-    public function forCountryAndSlug(string $countryCode, string $slug): ?array
+    public function __construct(
+        private readonly StorefrontPromotionResolver $promotionResolver,
+    ) {}
+
+    public function forCountryAndSlug(string $countryCode, string $slug, array $context = []): ?array
     {
         $productId = $this->extractProductId($slug);
         $country = $this->resolveCountry($countryCode);
@@ -38,7 +42,6 @@ class StorefrontProductService
                 'p.pro_tags',
                 'p.pro_tallas',
                 'pp.ppa_precio',
-                'pp.ppa_promo_nombre',
                 'pp.ppa_es_popular',
                 'sc.sca_nombre as subcategoria_nombre',
                 'c.cat_nombre as categoria_nombre',
@@ -51,6 +54,13 @@ class StorefrontProductService
 
         $normalized = $this->normalizeProduct($product, strtolower((string) $country->pai_codigo));
         $related = $this->relatedProducts($country->pai_id, (int) $product->pro_id, trim((string) ($product->categoria_nombre ?: '')));
+        [$normalized, $related] = $this->resolvePromotions(
+            $normalized,
+            $related,
+            (int) $country->pai_id,
+            strtolower((string) $country->pai_codigo),
+            $context,
+        );
 
         return [
             'product' => $normalized,
@@ -86,7 +96,8 @@ class StorefrontProductService
             'sku' => trim((string) $product->pro_codigo),
             'price' => (float) $product->ppa_precio,
             'currency' => $this->currencyForCountry($countryCode),
-            'badge' => trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible'))),
+            'badge' => $product->ppa_es_popular ? 'Popular' : 'Disponible',
+            'isPopular' => (bool) $product->ppa_es_popular,
             'category' => $category,
             'subcategory' => $subcategory,
             'brand' => trim((string) ($product->pro_marca ?: 'ST JACKS')),
@@ -122,7 +133,6 @@ class StorefrontProductService
                 'p.pro_marca',
                 'p.pro_tallas',
                 'pp.ppa_precio',
-                'pp.ppa_promo_nombre',
                 'pp.ppa_es_popular',
                 'c.cat_nombre as categoria_nombre',
             ])
@@ -136,7 +146,8 @@ class StorefrontProductService
                 'slug' => Str::slug((string) $related->pro_nombre).'-'.$related->pro_id,
                 'sku' => trim((string) $related->pro_codigo),
                 'price' => (float) $related->ppa_precio,
-                'badge' => trim((string) ($related->ppa_promo_nombre ?: ($related->ppa_es_popular ? 'Popular' : 'Disponible'))),
+                'badge' => $related->ppa_es_popular ? 'Popular' : 'Disponible',
+                'isPopular' => (bool) $related->ppa_es_popular,
                 'category' => trim((string) ($related->categoria_nombre ?: 'Catalogo')),
                 'brand' => trim((string) ($related->pro_marca ?: 'ST JACKS')),
                 'sizes' => trim((string) ($related->pro_tallas ?: '')),
@@ -144,6 +155,54 @@ class StorefrontProductService
             ])
             ->values()
             ->all();
+    }
+
+    private function resolvePromotions(
+        array $product,
+        array $related,
+        int $countryId,
+        string $countryCode,
+        array $context,
+    ): array {
+        $products = collect([$product, ...$related]);
+        $checkoutType = in_array(strtoupper(trim((string) ($context['checkoutType'] ?? 'DOMICILIO'))), ['T', 'TIENDA'], true)
+            ? 'TIENDA'
+            : 'DOMICILIO';
+        $resolution = $this->promotionResolver->resolve([
+            'countryId' => $countryId,
+            'checkoutType' => $checkoutType,
+            'storeCode' => $context['storeCode'] ?? null,
+            'currencySymbol' => $this->currencySymbol($countryCode),
+            'includeUntriggered' => true,
+            'lines' => $products->map(fn (array $item) => [
+                'key' => (string) $item['id'],
+                'productId' => (int) $item['id'],
+                'quantity' => 1,
+                'unitPrice' => (float) $item['price'],
+            ])->all(),
+        ]);
+        $resolved = collect($resolution['lines'])->keyBy('productId');
+        $apply = function (array $item) use ($resolved): array {
+            $commercial = $resolved->get((int) $item['id']);
+            $promotion = $commercial['promotion'] ?? null;
+            $basePrice = (float) $item['price'];
+            $finalPrice = (float) ($commercial['finalTotal'] ?? $basePrice);
+
+            return [
+                ...$item,
+                'price' => $finalPrice,
+                'previousPrice' => $finalPrice < $basePrice ? $basePrice : null,
+                'discountPercentage' => $promotion['discountPercentage'] ?? null,
+                'badge' => $promotion['displayLabel'] ?? $item['badge'],
+                'promoName' => $promotion['displayLabel'] ?? '',
+                'promotion' => $promotion,
+            ];
+        };
+
+        return [
+            $apply($product),
+            collect($related)->map($apply)->values()->all(),
+        ];
     }
 
     private function extractProductId(string $slug): ?int
@@ -172,6 +231,17 @@ class StorefrontProductService
             'hn' => 'HNL',
             've' => 'USD',
             default => 'USD',
+        };
+    }
+
+    private function currencySymbol(string $countryCode): string
+    {
+        return match ($countryCode) {
+            'gt' => 'Q',
+            'cr' => '₡',
+            'hn' => 'L',
+            'do' => 'RD$',
+            default => '$',
         };
     }
 

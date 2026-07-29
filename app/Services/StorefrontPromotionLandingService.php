@@ -14,6 +14,7 @@ class StorefrontPromotionLandingService
 
     public function __construct(
         private readonly ProductListAvailabilityService $availabilityService,
+        private readonly StorefrontPromotionResolver $promotionResolver,
     ) {}
 
     public function find(string $countryCode, int $promotionId, array $filters = []): ?array
@@ -27,7 +28,7 @@ class StorefrontPromotionLandingService
             ->where('promotion.prm_estado', 'EN-PROCESO')
             ->where('schedule.pho_tipo', 'NORMAL')
             ->where('schedule.pho_inicio', '<=', $now)
-            ->where('schedule.pho_fin', '>=', $now)
+            ->where('schedule.pho_fin', '>', $now)
             ->whereIn('schedule.pho_estado', ['ACTIVO', 'PENDIENTE'])
             ->select([
                 'promotion.prm_id',
@@ -35,6 +36,11 @@ class StorefrontPromotionLandingService
                 'promotion.prm_nombre_comercial',
                 'promotion.prm_tipo',
                 'promotion.prm_tipo_promocion',
+                'promotion.prm_porcentaje',
+                'promotion.prm_precio',
+                'promotion.prm_restriccion',
+                'promotion.prm_tipo_checkout',
+                'promotion.prm_alcance_tienda',
                 'promotion.prm_encabezado',
                 'country.pai_id',
                 'country.pai_codigo',
@@ -66,7 +72,7 @@ class StorefrontPromotionLandingService
             $baseQuery->where('product.pro_oc_genero', $gender);
         }
 
-        $this->applySort($baseQuery, $sort);
+        $this->applySort($baseQuery, $sort, $promotion);
 
         $paginator = $baseQuery
             ->select([
@@ -80,8 +86,6 @@ class StorefrontPromotionLandingService
                 'product.pro_thumbs',
                 'product.pro_registro',
                 'country_product.ppa_precio',
-                'country_product.ppa_descuento',
-                'country_product.ppa_promo_nombre',
                 'category.cat_nombre',
                 'subcategory.sca_nombre',
             ])
@@ -93,13 +97,35 @@ class StorefrontPromotionLandingService
         );
         $availabilityBySku = $availability['availabilityBySku'] ?? [];
         $currency = $this->currency((string) $promotion->pai_codigo);
+        $checkoutType = $this->checkoutType($filters['checkoutType'] ?? 'DOMICILIO');
+        $resolvedByProduct = collect();
+        if ($paginator->getCollection()->isNotEmpty()) {
+            $resolution = $this->promotionResolver->resolve([
+                'countryId' => (int) $promotion->pai_id,
+                'checkoutType' => $checkoutType,
+                'storeCode' => $filters['storeCode'] ?? null,
+                'currencySymbol' => $this->currencySymbol((string) $promotion->pai_codigo),
+                'promotionId' => (int) $promotion->prm_id,
+                'includeUntriggered' => true,
+                'lines' => $paginator->getCollection()->map(fn (object $product) => [
+                    'key' => (string) $product->pro_id,
+                    'productId' => (int) $product->pro_id,
+                    'quantity' => 1,
+                    'unitPrice' => (float) $product->ppa_precio,
+                ])->all(),
+            ]);
+            $resolvedByProduct = collect($resolution['lines'])->keyBy('productId');
+        }
 
         $products = $paginator->getCollection()
-            ->map(function (object $product) use ($availabilityBySku, $currency) {
+            ->map(function (object $product) use ($availabilityBySku, $currency, $resolvedByProduct) {
                 $sku = trim((string) $product->pro_codigo);
                 $stock = $availabilityBySku[$sku] ?? null;
-                $discount = max(0, min(100, (float) ($product->ppa_descuento ?? 0)));
                 $regularPrice = (float) $product->ppa_precio;
+                $resolved = $resolvedByProduct->get((int) $product->pro_id);
+                $promotion = $resolved['promotion'] ?? null;
+                $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
+                $discount = $promotion['discountPercentage'] ?? null;
                 $category = trim((string) ($product->cat_nombre ?: 'Promocion'));
                 $description = trim((string) $product->pro_descripcion)
                     ?: trim((string) ($product->sca_nombre ?: "Categoria {$category}"));
@@ -115,12 +141,13 @@ class StorefrontPromotionLandingService
                     'description' => $description,
                     'sizes' => trim((string) $product->pro_tallas),
                     'imageUrl' => StorefrontImageUrl::image((string) $product->pro_thumbs, 'p400'),
-                    'price' => round($regularPrice * (1 - $discount / 100), 2),
-                    'previousPrice' => $discount > 0 ? $regularPrice : null,
+                    'price' => $finalPrice,
+                    'previousPrice' => $finalPrice < $regularPrice ? $regularPrice : null,
                     'discountPercentage' => $discount,
                     'currency' => $currency,
-                    'promoName' => trim((string) $product->ppa_promo_nombre),
-                    'badge' => $discount > 0 ? $this->formatDiscount($discount).' de descuento' : 'Promocion',
+                    'promoName' => $promotion['displayLabel'] ?? '',
+                    'badge' => $promotion['displayLabel'] ?? 'Promocion',
+                    'promotion' => $promotion,
                     'availableSizes' => $stock['availableSizes'] ?? [],
                     'hasStock' => (bool) ($stock['hasStock'] ?? false),
                     'stockTotal' => (int) ($stock['totalQuantity'] ?? 0),
@@ -137,6 +164,8 @@ class StorefrontPromotionLandingService
                 'slug' => Str::slug((string) ($promotion->prm_nombre_comercial ?: $promotion->prm_nombre)),
                 'type' => (string) $promotion->prm_tipo,
                 'promotionType' => (string) $promotion->prm_tipo_promocion,
+                'checkoutType' => (string) $promotion->prm_tipo_checkout,
+                'storeScope' => $promotion->prm_alcance_tienda,
                 'headerImage' => StorefrontImageUrl::asset((string) $promotion->prm_encabezado),
                 'startsAt' => $promotion->pho_inicio,
                 'endsAt' => $promotion->pho_fin,
@@ -209,22 +238,38 @@ class StorefrontPromotionLandingService
             ->all();
     }
 
-    private function applySort(Builder $query, string $sort): void
+    private function applySort(Builder $query, string $sort, object $promotion): void
     {
+        $fixedPercentage = (float) ($promotion->prm_porcentaje ?? 0);
+        $hasFixedPercentage = $fixedPercentage > 0;
+        $discountExpression = (string) $promotion->prm_tipo !== 'TODO'
+            ? 'COALESCE(promotion_product.ppr_descuento, 0)'
+            : '0';
+
         match ($sort) {
-            'discount_asc' => $query->orderByRaw('COALESCE(country_product.ppa_descuento, 0) ASC')->orderByDesc('product.pro_registro'),
+            'discount_asc' => $hasFixedPercentage
+                ? $query->orderByDesc('product.pro_registro')
+                : $query->orderByRaw("{$discountExpression} ASC")->orderByDesc('product.pro_registro'),
             'newest' => $query->orderByDesc('product.pro_registro'),
-            'price_asc' => $query->orderByRaw('(country_product.ppa_precio * (1 - COALESCE(country_product.ppa_descuento, 0) / 100)) ASC'),
-            'price_desc' => $query->orderByRaw('(country_product.ppa_precio * (1 - COALESCE(country_product.ppa_descuento, 0) / 100)) DESC'),
-            default => $query->orderByRaw('COALESCE(country_product.ppa_descuento, 0) DESC')->orderByDesc('product.pro_registro'),
+            'price_asc' => $hasFixedPercentage
+                ? $query->orderByRaw('(country_product.ppa_precio * ?) ASC', [1 - ($fixedPercentage / 100)])
+                : $query->orderByRaw("(country_product.ppa_precio * (1 - {$discountExpression} / 100)) ASC"),
+            'price_desc' => $hasFixedPercentage
+                ? $query->orderByRaw('(country_product.ppa_precio * ?) DESC', [1 - ($fixedPercentage / 100)])
+                : $query->orderByRaw("(country_product.ppa_precio * (1 - {$discountExpression} / 100)) DESC"),
+            default => $hasFixedPercentage
+                ? $query->orderByDesc('product.pro_registro')
+                : $query->orderByRaw("{$discountExpression} DESC")->orderByDesc('product.pro_registro'),
         };
 
         $query->orderBy('product.pro_id');
     }
 
-    private function formatDiscount(float $discount): string
+    private function checkoutType(mixed $value): string
     {
-        return rtrim(rtrim(number_format($discount, 2, '.', ''), '0'), '.').'%';
+        return in_array(strtoupper(trim((string) $value)), ['T', 'TIENDA'], true)
+            ? 'TIENDA'
+            : 'DOMICILIO';
     }
 
     private function currency(string $countryCode): string
@@ -235,6 +280,17 @@ class StorefrontPromotionLandingService
             'DO' => 'DOP',
             'HN' => 'HNL',
             default => 'USD',
+        };
+    }
+
+    private function currencySymbol(string $countryCode): string
+    {
+        return match (strtoupper($countryCode)) {
+            'GT' => 'Q',
+            'CR' => '₡',
+            'HN' => 'L',
+            'DO' => 'RD$',
+            default => '$',
         };
     }
 }

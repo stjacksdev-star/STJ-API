@@ -1,0 +1,281 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Services\ProductListAvailabilityService;
+use App\Services\StorefrontProductService;
+use App\Services\StorefrontPromotionLandingService;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Mockery;
+use Tests\TestCase;
+
+class StorefrontPromotionReadIntegrationTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        config()->set('promotions.timezone', 'America/El_Salvador');
+        $this->createSchema();
+        $this->seedData();
+    }
+
+    public function test_promotion_landing_uses_resolver_instead_of_global_product_country_fields(): void
+    {
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $result = app(StorefrontPromotionLandingService::class)->find('SV', 10, [
+            'page' => 1,
+            'perPage' => 24,
+            'checkoutType' => 'DOMICILIO',
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertSame(10, $result['products'][0]['promotion']['id']);
+        $this->assertSame(75.0, $result['products'][0]['price']);
+        $this->assertSame(100.0, $result['products'][0]['previousPrice']);
+        $this->assertSame(25.0, $result['products'][0]['discountPercentage']);
+        $this->assertSame('25% de descuento', $result['products'][0]['badge']);
+        $this->assertNotSame('GLOBAL INCORRECTO', $result['products'][0]['promoName']);
+    }
+
+    public function test_country_wide_fixed_percentage_landing_does_not_order_by_the_percentage_as_a_column(): void
+    {
+        DB::table('stj_promociones')->insert([
+            'prm_id' => 11,
+            'prm_pais' => 1,
+            'prm_origen' => 'WEB',
+            'prm_nombre' => 'Promoción general',
+            'prm_nombre_comercial' => 'Promoción general',
+            'prm_modalidad' => 'PROGRAMADO',
+            'prm_tipo' => 'TODO',
+            'prm_estado' => 'EN-PROCESO',
+            'prm_tipo_promocion' => 'DESCUENTO',
+            'prm_restriccion' => null,
+            'prm_porcentaje' => 20,
+            'prm_precio' => null,
+            'prm_tipo_checkout' => 'TODO',
+            'prm_alcance_tienda' => 'TODAS',
+            'prm_aplica' => 'TODO',
+            'prm_encabezado' => null,
+        ]);
+        DB::table('stj_promociones_horario')->insert([
+            'pho_id' => 11,
+            'pho_tipo' => 'NORMAL',
+            'pho_promocion' => 11,
+            'pho_inicio' => now()->subDay(),
+            'pho_fin' => now()->addDay(),
+            'pho_estado' => 'ACTIVO',
+        ]);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $result = app(StorefrontPromotionLandingService::class)->find('SV', 11, [
+            'sort' => 'discount_desc',
+            'checkoutType' => 'DOMICILIO',
+        ]);
+
+        $this->assertNotNull($result);
+        $this->assertSame(80.0, $result['products'][0]['price']);
+        $this->assertSame(20.0, $result['products'][0]['discountPercentage']);
+    }
+
+    public function test_pdp_uses_resolver_and_returns_structured_promotion(): void
+    {
+        $result = app(StorefrontProductService::class)->forCountryAndSlug(
+            'SV',
+            'producto-prueba-100',
+            ['checkoutType' => 'DOMICILIO'],
+        );
+
+        $this->assertNotNull($result);
+        $this->assertSame(75.0, $result['product']['price']);
+        $this->assertSame(100.0, $result['product']['previousPrice']);
+        $this->assertSame(25.0, $result['product']['discountPercentage']);
+        $this->assertSame('25% de descuento', $result['product']['badge']);
+        $this->assertSame(10, $result['product']['promotion']['id']);
+        $this->assertSame('25% de descuento', $result['product']['promotion']['benefitLabel']);
+    }
+
+    private function seedData(): void
+    {
+        DB::table('stj_paises')->insert([
+            'pai_id' => 1,
+            'pai_codigo' => 'SV',
+        ]);
+        DB::table('stj_categorias')->insert([
+            'cat_id' => 1,
+            'cat_nombre' => 'Pijamas',
+        ]);
+        DB::table('stj_productos')->insert([
+            'pro_id' => 100,
+            'pro_codigo' => 'SKU100',
+            'pro_nombre' => 'Producto prueba',
+            'pro_descripcion' => 'Descripción',
+            'pro_marca' => 'ST JACKS',
+            'pro_oc_genero' => 'NIÑA',
+            'pro_oc_categoria' => 'Pijamas',
+            'pro_oc_coleccion' => '',
+            'pro_personaje' => '',
+            'pro_tags' => '',
+            'pro_tallas' => '4,6',
+            'pro_thumbs' => 'producto.jpg',
+            'pro_categoria' => 1,
+            'pro_sub_categoria' => null,
+            'pro_estatus' => 'ACTIVO',
+            'pro_registro' => '2026-07-29 10:00:00',
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            'ppa_id' => 1,
+            'ppa_pais' => 1,
+            'ppa_producto' => 100,
+            'ppa_estado' => 'ACTIVO',
+            'ppa_precio' => 100,
+            'ppa_descuento' => 5,
+            'ppa_promo_nombre' => 'GLOBAL INCORRECTO',
+            'ppa_es_popular' => 0,
+        ]);
+        DB::table('stj_promociones')->insert([
+            'prm_id' => 10,
+            'prm_pais' => 1,
+            'prm_origen' => 'WEB',
+            'prm_nombre' => 'Promoción resolver',
+            'prm_nombre_comercial' => 'Promoción resolver',
+            'prm_modalidad' => 'PROGRAMADO',
+            'prm_tipo' => 'SKU',
+            'prm_estado' => 'EN-PROCESO',
+            'prm_tipo_promocion' => 'DESCUENTO-SKU',
+            'prm_restriccion' => null,
+            'prm_porcentaje' => null,
+            'prm_precio' => null,
+            'prm_tipo_checkout' => 'TODO',
+            'prm_alcance_tienda' => 'TODAS',
+            'prm_aplica' => 'TODO',
+            'prm_encabezado' => null,
+        ]);
+        DB::table('stj_promociones_horario')->insert([
+            'pho_id' => 10,
+            'pho_tipo' => 'NORMAL',
+            'pho_promocion' => 10,
+            'pho_inicio' => now()->subDay(),
+            'pho_fin' => now()->addDay(),
+            'pho_estado' => 'ACTIVO',
+        ]);
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 10,
+            'ppr_producto' => 100,
+            'ppr_descuento' => 25,
+            'ppr_precio' => null,
+        ]);
+    }
+
+    private function createSchema(): void
+    {
+        Schema::create('stj_paises', function (Blueprint $table) {
+            $table->id('pai_id');
+            $table->string('pai_codigo');
+        });
+        Schema::create('stj_tiendas', function (Blueprint $table) {
+            $table->id('tie_id');
+            $table->unsignedBigInteger('tie_pais');
+            $table->string('tie_codigo');
+            $table->string('tie_nombre');
+        });
+        Schema::create('stj_categorias', function (Blueprint $table) {
+            $table->id('cat_id');
+            $table->string('cat_nombre');
+        });
+        Schema::create('stj_sub_categorias', function (Blueprint $table) {
+            $table->id('sca_id');
+            $table->string('sca_nombre');
+        });
+        Schema::create('stj_productos', function (Blueprint $table) {
+            $table->id('pro_id');
+            $table->string('pro_codigo');
+            $table->string('pro_nombre');
+            $table->text('pro_descripcion')->nullable();
+            $table->string('pro_marca')->nullable();
+            $table->string('pro_oc_genero')->nullable();
+            $table->string('pro_oc_categoria')->nullable();
+            $table->string('pro_oc_coleccion')->nullable();
+            $table->string('pro_personaje')->nullable();
+            $table->string('pro_tags')->nullable();
+            $table->string('pro_tallas')->nullable();
+            $table->string('pro_thumbs')->nullable();
+            $table->unsignedBigInteger('pro_categoria')->nullable();
+            $table->unsignedBigInteger('pro_sub_categoria')->nullable();
+            $table->string('pro_estatus');
+            $table->dateTime('pro_registro')->nullable();
+        });
+        Schema::create('stj_productos_fotos', function (Blueprint $table) {
+            $table->id('pfo_id');
+            $table->unsignedBigInteger('pfo_producto');
+            $table->string('pfo_url');
+            $table->integer('pfo_orden');
+            $table->boolean('pfo_portada');
+        });
+        Schema::create('stj_producto_pais', function (Blueprint $table) {
+            $table->id('ppa_id');
+            $table->unsignedBigInteger('ppa_pais');
+            $table->unsignedBigInteger('ppa_producto');
+            $table->string('ppa_estado');
+            $table->decimal('ppa_precio');
+            $table->decimal('ppa_descuento')->nullable();
+            $table->string('ppa_promo_nombre')->nullable();
+            $table->boolean('ppa_es_popular')->default(false);
+        });
+        Schema::create('stj_promociones', function (Blueprint $table) {
+            $table->id('prm_id');
+            $table->unsignedBigInteger('prm_pais');
+            $table->string('prm_origen');
+            $table->string('prm_nombre');
+            $table->string('prm_nombre_comercial')->nullable();
+            $table->string('prm_modalidad');
+            $table->string('prm_tipo');
+            $table->string('prm_estado');
+            $table->string('prm_tipo_promocion');
+            $table->string('prm_restriccion')->nullable();
+            $table->decimal('prm_porcentaje')->nullable();
+            $table->decimal('prm_precio')->nullable();
+            $table->string('prm_tipo_checkout')->nullable();
+            $table->string('prm_alcance_tienda')->nullable();
+            $table->string('prm_aplica')->nullable();
+            $table->string('prm_encabezado')->nullable();
+        });
+        Schema::create('stj_promociones_horario', function (Blueprint $table) {
+            $table->id('pho_id');
+            $table->string('pho_tipo');
+            $table->unsignedBigInteger('pho_promocion');
+            $table->dateTime('pho_inicio');
+            $table->dateTime('pho_fin');
+            $table->string('pho_estado');
+        });
+        Schema::create('stj_promociones_producto', function (Blueprint $table) {
+            $table->id('ppr_id');
+            $table->unsignedBigInteger('ppr_promocion');
+            $table->unsignedBigInteger('ppr_producto');
+            $table->decimal('ppr_descuento')->nullable();
+            $table->decimal('ppr_precio')->nullable();
+        });
+        Schema::create('stj_promociones_tienda', function (Blueprint $table) {
+            $table->id('prt_id');
+            $table->unsignedBigInteger('prt_promocion');
+            $table->unsignedBigInteger('prt_tienda');
+        });
+    }
+}

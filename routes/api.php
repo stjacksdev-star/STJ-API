@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
+use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -86,6 +87,9 @@ Route::get('/storefront/product/{country}/{slug}', [StorefrontProductController:
 Route::get('/storefront/product/{country}/{slug}/availability', [StorefrontProductAvailabilityController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationController::class);
+Route::get('/storefront/checkout/{country}/catalogs', [StorefrontCheckoutCatalogController::class, 'index'])->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/checkout/catalogs/countries/{country}/states', [StorefrontCheckoutCatalogController::class, 'states'])->whereNumber('country');
+Route::get('/storefront/checkout/catalogs/countries/{country}/states/{state}/cities', [StorefrontCheckoutCatalogController::class, 'cities'])->whereNumber(['country', 'state']);
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);

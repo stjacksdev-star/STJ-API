@@ -15,8 +15,12 @@ class StorefrontOrderService
 {
     private $checkoutValidationService;
 
-    public function __construct(StorefrontCheckoutValidationService $checkoutValidationService, private StorefrontProductPricingService $pricing, private ?StorefrontShippingService $shipping = null)
-    {
+    public function __construct(
+        StorefrontCheckoutValidationService $checkoutValidationService,
+        private StorefrontProductPricingService $pricing,
+        private ?StorefrontShippingService $shipping = null,
+        private ?StorefrontPromotionResolver $promotionResolver = null,
+    ) {
         $this->checkoutValidationService = $checkoutValidationService;
     }
 
@@ -94,16 +98,7 @@ class StorefrontOrderService
             if (! ($validation['ok'] ?? false)) {
                 throw ValidationException::withMessages(['inventory' => $validation['message'] ?? 'El inventario cambio durante checkout.']);
             }
-            $subtotalCents = 0;
-            foreach ($lines as $line) {
-                $price = $this->pricing->resolve((int) $country->pai_id, (int) $line->cad_producto_id, (string) $line->cad_ref, (string) $line->cad_talla, now());
-                if (! $price['ok']) {
-                    throw ValidationException::withMessages(['price' => $price['message']]);
-                }
-                $subtotalCents += $this->cents((string) $price['precio_final']) * (int) $line->cad_cantidad;
-            }
-            $shippingQuote = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($payload, 'delivery.city_id'), $this->decimal($subtotalCents));
-            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'shippingQuote' => $shippingQuote, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
+            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
             $result = $this->create($trustedPayload);
             if (! ($result['ok'] ?? false)) {
                 throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
@@ -112,7 +107,7 @@ class StorefrontOrderService
             $cart->forceFill(['car_pedido_id' => $orderId, 'car_estado' => 'CONVERTIDO', 'car_convertido_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
             DB::table('stj_carrito_auditoria')->insert(['cau_carrito_id' => $cart->getKey(), 'cau_visitante_id' => $visitor->getKey(), 'cau_usu_id' => $customer?->getKey(), 'cau_accion' => 'ORDER_CREATED', 'cau_origen' => 'WEB', 'cau_datos_anteriores' => json_encode(['state' => 'CHECKOUT']), 'cau_datos_nuevos' => json_encode(['state' => 'CONVERTIDO', 'orderId' => $orderId]), 'cau_ocurrido_en' => now()]);
             CustomerEvent::query()->create(['cev_event_uuid' => $payload['operation_uuid'], 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_pedido_id' => $orderId, 'cev_tipo' => 'ORDER_CREATED', 'cev_valor' => $result['order']['total'], 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
-            DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => $payload['operation_uuid'], 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_usu_id' => $customer?->getKey(), 'cao_tipo' => 'ORDER_CREATE', 'cao_payload_hash' => $hash, 'cao_respuesta' => json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'cao_creado_en' => now()]);
+            DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => $payload['operation_uuid'], 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_usu_id' => $customer?->getKey(), 'cao_tipo' => 'ORDER_CREATE', 'cao_payload_hash' => $hash, 'cao_respuesta' => json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION), 'cao_creado_en' => now()]);
 
             return $result;
         });
@@ -161,20 +156,72 @@ class StorefrontOrderService
             $storeCode = $this->resolveStoreCode(strtolower((string) $country->pai_codigo), $payload['fulfillment']);
             $paymentRef = $this->generatePaymentRef();
             $items = $this->normalizeItems($payload['items'], $products, (int) $country->pai_id);
-            $subtotalCents = collect($items)->sum(fn (array $item) => $this->cents($item['price']) * (int) $item['quantity']);
+            $store = $checkoutType === 'TIENDA'
+                ? DB::table('stj_tiendas')->where('tie_pais', $country->pai_id)->where('tie_codigo', $storeCode)->first(['tie_id', 'tie_nombre'])
+                : null;
+            $resolution = ($this->promotionResolver ?? app(StorefrontPromotionResolver::class))->resolve([
+                'countryId' => (int) $country->pai_id,
+                'checkoutType' => $checkoutType,
+                'storeId' => $store?->tie_id,
+                'storeName' => $payload['fulfillment']['storeName'] ?? $store?->tie_nombre,
+                'currencySymbol' => $this->currencySymbol(strtoupper((string) $country->pai_codigo)),
+                'at' => $now,
+                'lines' => collect($items)->map(fn (array $item) => [
+                    'key' => (string) $item['key'],
+                    'productId' => $item['productId'],
+                    'quantity' => $item['quantity'],
+                    'unitPrice' => $item['regularPrice'],
+                ])->all(),
+            ]);
+            $resolvedLines = collect($resolution['lines'])->keyBy('key');
+            $items = collect($items)->map(function (array $item) use ($resolvedLines) {
+                $resolved = $resolvedLines->get((string) $item['key']);
+                $baseTotal = (string) ($resolved['baseTotal'] ?? $this->decimal($this->cents($item['regularPrice']) * $item['quantity']));
+                $discount = (string) ($resolved['discount'] ?? '0.00');
+                $finalTotal = (string) ($resolved['finalTotal'] ?? $baseTotal);
+
+                return [
+                    ...$item,
+                    'baseTotal' => $baseTotal,
+                    'discount' => $discount,
+                    'finalTotal' => $finalTotal,
+                    'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
+                    'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
+                    'promotion' => $resolved['promotion'] ?? null,
+                ];
+            })->all();
+            $baseSubtotalCents = collect($items)->sum(fn (array $item) => $this->cents($item['baseTotal']));
+            $discountCents = collect($items)->sum(fn (array $item) => $this->cents($item['discount']));
+            $subtotalCents = collect($items)->sum(fn (array $item) => $this->cents($item['finalTotal']));
+            $baseSubtotal = $this->decimal($baseSubtotalCents);
             $subtotal = $this->decimal($subtotalCents);
-            $shipping = $payload['shippingQuote'] ?? ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, $checkoutType, data_get($payload, 'fulfillment.city_id'), $subtotal);
+            $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, $checkoutType, data_get($payload, 'fulfillment.city_id'), $subtotal);
             $shippingCents = $this->cents((string) $shipping['shipping_amount']);
             $total = $this->decimal($subtotalCents + $shippingCents);
             $articleCount = collect($items)->sum('quantity');
             $customer = $payload['customer'];
             $delivery = $payload['fulfillment'];
+            $paymentType = $payload['paymentType'] ?? 'TARJETA';
+            $orderStatus = $paymentType === 'EFECTIVO' ? 'RECIBIDO' : 'PENDIENTE_PAGO';
+            $residenceCountry = DB::table('stj_world_countries')->where('id', $customer['countryId'])->first(['id', 'name', 'phonecode']);
+            $residenceState = $residenceCountry ? DB::table('stj_world_states')
+                ->where('id', $customer['stateId'])
+                ->where('country_id', $residenceCountry->id)
+                ->first(['id', 'name']) : null;
+            $residenceCity = $residenceState ? DB::table('stj_world_cities')
+                ->where('id', $customer['cityId'])
+                ->where('state_id', $residenceState->id)
+                ->where('country_id', $residenceCountry->id)
+                ->first(['id', 'name']) : null;
+            if (! $residenceCountry || ! $residenceState || ! $residenceCity) {
+                throw ValidationException::withMessages(['customer.address' => 'La ubicación de residencia seleccionada no es válida.']);
+            }
 
             $pedidoId = DB::table('stj_pedidos')->insertGetId([
                 'ped_id_pais' => (int) $country->pai_id,
                 'ped_origen' => 'WEB',
                 'ped_fecha' => $now,
-                'ped_estatus' => 'PENDIENTE_PAGO',
+                'ped_estatus' => $orderStatus,
                 'ped_estatus_productos' => 'COMPLETO',
                 'ped_checkout' => $checkoutType,
                 'ped_tienda' => $storeCode,
@@ -184,18 +231,18 @@ class StorefrontOrderService
                 'ped_nombres' => $this->limit($customer['firstName'] ?? '', 30),
                 'ped_apellidos' => $this->limit($customer['lastName'] ?? '', 30),
                 'ped_email' => $this->limit($customer['email'] ?? '', 50),
-                'ped_tipo_identificacion' => 'DUI',
+                'ped_tipo_identificacion' => $this->limit($customer['documentType'], 50),
                 'ped_identificacion' => $this->limit($customer['document'] ?? '', 50),
                 'ped_rtu' => '',
-                'ped_pais' => strtoupper((string) $country->pai_codigo),
-                'ped_departamento' => null,
-                'ped_municipio' => $shipping['city']['id'] ?? null,
-                'ped_estado' => $shipping['city']['stateId'] ?? null,
-                'ped_ciudad' => $this->limit($shipping['city']['name'] ?? ($delivery['city'] ?? ''), 50),
-                'ped_direccion' => $this->limit($delivery['addressLine1'] ?? '', 200),
-                'ped_telefono_pais' => $this->phonePrefix(strtolower((string) $country->pai_codigo)),
+                'ped_pais' => $this->limit($residenceCountry->name, 100),
+                'ped_departamento' => $residenceState->id,
+                'ped_municipio' => $residenceCity->id,
+                'ped_estado' => $this->limit($residenceState->name, 50),
+                'ped_ciudad' => $this->limit($residenceCity->name, 50),
+                'ped_direccion' => $this->limit($customer['address'], 200),
+                'ped_telefono_pais' => ltrim((string) $residenceCountry->phonecode, '+'),
                 'ped_telefono' => $this->limit($customer['phone'] ?? '', 30),
-                'ped_whatsapp_pais' => $this->phonePrefix(strtolower((string) $country->pai_codigo)),
+                'ped_whatsapp_pais' => ltrim((string) $residenceCountry->phonecode, '+'),
                 'ped_whatsapp' => $this->limit($customer['phone'] ?? '', 30),
                 'ped_devolucion_realizada' => 'N/A',
                 'ped_rsp_servicio' => null,
@@ -270,19 +317,19 @@ class StorefrontOrderService
             }
 
             $pagoId = DB::table('stj_pedidos_pago')->insertGetId([
-                'ppa_tipo' => $payload['paymentType'] ?? 'TARJETA',
-                'ppa_estado' => ($payload['paymentType'] ?? 'TARJETA') === 'EFECTIVO' ? 'APROBADA' : 'PENDIENTE',
+                'ppa_tipo' => $paymentType,
+                'ppa_estado' => $paymentType === 'EFECTIVO' ? 'APROBADA' : 'PENDIENTE',
                 'ppa_ref' => $paymentRef,
                 'ppa_fecha' => $now,
                 'ppa_pedido' => $pedidoId,
                 'ppa_emisor' => 'OTRO',
-                'ppa_autorizacion' => ($payload['paymentType'] ?? 'TARJETA') === 'EFECTIVO' ? 'Efectivo' : null,
-                'ppa_tarjeta' => ($payload['paymentType'] ?? 'TARJETA') === 'EFECTIVO' ? null : 'XXXXXX',
-                'ppa_monto_sdesc' => $subtotal,
+                'ppa_autorizacion' => $paymentType === 'EFECTIVO' ? 'Efectivo' : null,
+                'ppa_tarjeta' => $paymentType === 'EFECTIVO' ? null : 'XXXXXX',
+                'ppa_monto_sdesc' => $baseSubtotal,
                 'ppa_monto_senv' => $subtotal,
                 'ppa_monto' => $total,
                 'ppa_articulos' => $articleCount,
-                'ppa_pagado' => ($payload['paymentType'] ?? 'TARJETA') === 'EFECTIVO' ? 'NO' : 'N/A',
+                'ppa_pagado' => $paymentType === 'EFECTIVO' ? 'NO' : 'N/A',
                 'ppa_a_usuario' => 'storefront',
                 'ppa_a_ip' => request()->ip(),
                 'ppa_a_fecha' => $now,
@@ -290,6 +337,11 @@ class StorefrontOrderService
             ]);
 
             $detailRows = collect($items)->map(function (array $item) use ($country, $checkoutType, $payload, $paymentRef, $now) {
+                $effectivePercentage = $this->cents($item['baseTotal']) > 0
+                    ? round($this->cents($item['discount']) * 100 / $this->cents($item['baseTotal']), 2)
+                    : 0;
+                $promotion = $item['promotion'];
+
                 return [
                     'car_pais' => (int) $country->pai_id,
                     'car_tipo' => $checkoutType,
@@ -298,15 +350,15 @@ class StorefrontOrderService
                     'car_usuario' => null,
                     'car_fecha' => $now,
                     'car_producto' => $item['productId'],
-                    'car_precio' => $item['price'],
+                    'car_precio' => $item['regularPrice'],
                     'car_talla' => $item['size'],
                     'car_cantidad' => $item['quantity'],
-                    'car_descuento' => 0,
-                    'car_promocion' => null,
-                    'car_promocion_id' => null,
+                    'car_descuento' => $promotion['discountPercentage'] ?? $effectivePercentage,
+                    'car_promocion' => $promotion ? $this->limit($promotion['commercialName'] ?: $promotion['name'], 250) : null,
+                    'car_promocion_id' => $promotion['id'] ?? null,
                     'car_ref' => $paymentRef,
                     'car_total_facturado' => $item['quantity'],
-                    'car_descuento_final' => 0,
+                    'car_descuento_final' => $effectivePercentage,
                     'car_estilo_final' => $item['sku'],
                     'car_talla_final' => $item['size'],
                     'car_modificar' => 'SI',
@@ -326,10 +378,13 @@ class StorefrontOrderService
                 'pedidoId' => $pedidoId,
                 'pagoId' => $pagoId,
                 'paymentRef' => $paymentRef,
-                'status' => 'PENDIENTE_PAGO',
-                'paymentStatus' => 'PENDIENTE',
+                'status' => $orderStatus,
+                'paymentStatus' => $paymentType === 'EFECTIVO' ? 'APROBADA' : 'PENDIENTE',
                 'checkoutType' => $checkoutType,
                 'storeCode' => $storeCode,
+                'baseSubtotal' => $baseSubtotal,
+                'discount' => $this->decimal($discountCents),
+                'discountPercentage' => $baseSubtotalCents > 0 ? round($discountCents * 100 / $baseSubtotalCents, 2) : 0,
                 'subtotal' => $subtotal,
                 'shipping' => $shipping['shipping_amount'],
                 'shippingSource' => $shipping['source'],
@@ -396,7 +451,7 @@ class StorefrontOrderService
                     'name' => trim((string) ($product->pro_nombre ?: ($item['name'] ?? $sku))),
                     'size' => trim((string) $item['size']),
                     'quantity' => max(1, (int) $item['quantity']),
-                    'price' => $price['precio_final'],
+                    'regularPrice' => $price['precio_regular'],
                 ];
             })
             ->values()
@@ -421,19 +476,6 @@ class StorefrontOrderService
         return $ref;
     }
 
-    private function phonePrefix(string $countryCode): string
-    {
-        return [
-            'sv' => '503',
-            'gt' => '502',
-            'cr' => '506',
-            'pa' => '507',
-            'hn' => '504',
-            'do' => '1',
-            've' => '58',
-        ][$countryCode] ?? '';
-    }
-
     private function limit(?string $value, int $length): string
     {
         return Str::limit(trim((string) $value), $length, '');
@@ -449,6 +491,19 @@ class StorefrontOrderService
     private function decimal(int $cents): string
     {
         return intdiv($cents, 100).'.'.str_pad((string) ($cents % 100), 2, '0', STR_PAD_LEFT);
+    }
+
+    private function currencySymbol(string $countryCode): string
+    {
+        return [
+            'SV' => '$',
+            'GT' => 'Q',
+            'CR' => '₡',
+            'PA' => '$',
+            'HN' => 'L',
+            'DO' => 'RD$',
+            'VE' => 'Bs.',
+        ][strtoupper($countryCode)] ?? '$';
     }
 
     private function destinationHash(array $delivery): string

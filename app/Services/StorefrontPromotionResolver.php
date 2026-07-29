@@ -28,13 +28,16 @@ class StorefrontPromotionResolver
         $promotions = $this->eligiblePromotions($normalized);
         $evaluations = $promotions
             ->map(fn (array $promotion) => $this->evaluate($promotion, $normalized))
-            ->filter(fn (array $evaluation) => $evaluation['totalBenefitCents'] > 0)
+            ->filter(fn (array $evaluation) => $evaluation['totalBenefitCents'] > 0
+                || ($normalized['includeUntriggered'] && $evaluation['eligibleLineKeys'] !== []))
             ->values();
 
         $resolvedLines = collect($normalized['lines'])
             ->map(function (array $line) use ($evaluations, $normalized) {
                 $candidates = $evaluations
-                    ->filter(fn (array $evaluation) => ($evaluation['allocations'][$line['key']] ?? 0) > 0)
+                    ->filter(fn (array $evaluation) => ($evaluation['allocations'][$line['key']] ?? 0) > 0
+                        || ($normalized['includeUntriggered']
+                            && in_array($line['key'], $evaluation['eligibleLineKeys'], true)))
                     ->map(fn (array $evaluation) => [
                         ...$evaluation,
                         'lineBenefitCents' => $evaluation['allocations'][$line['key']],
@@ -93,12 +96,22 @@ class StorefrontPromotionResolver
         $countryId = (int) ($context['countryId'] ?? 0);
         $checkoutType = strtoupper(trim((string) ($context['checkoutType'] ?? '')));
         $storeId = isset($context['storeId']) ? (int) $context['storeId'] : null;
+        $storeName = trim((string) ($context['storeName'] ?? ''));
 
         if ($countryId < 1) {
             throw ValidationException::withMessages(['countryId' => 'El país es obligatorio.']);
         }
         if (! in_array($checkoutType, ['DOMICILIO', 'TIENDA'], true)) {
             throw ValidationException::withMessages(['checkoutType' => 'La modalidad debe ser DOMICILIO o TIENDA.']);
+        }
+        if ($checkoutType === 'TIENDA' && (! $storeId || $storeId < 1)) {
+            $storeCode = trim((string) ($context['storeCode'] ?? ''));
+            $store = $storeCode === '' ? null : DB::table('stj_tiendas')
+                ->where('tie_pais', $countryId)
+                ->where('tie_codigo', $storeCode)
+                ->first(['tie_id', 'tie_nombre']);
+            $storeId = $store ? (int) $store->tie_id : null;
+            $storeName = $storeName !== '' ? $storeName : trim((string) ($store->tie_nombre ?? ''));
         }
         if ($checkoutType === 'TIENDA' && (! $storeId || $storeId < 1)) {
             throw ValidationException::withMessages(['storeId' => 'La tienda es obligatoria para retiro en tienda.']);
@@ -139,10 +152,12 @@ class StorefrontPromotionResolver
             'countryId' => $countryId,
             'checkoutType' => $checkoutType,
             'storeId' => $checkoutType === 'TIENDA' ? $storeId : null,
-            'storeName' => trim((string) ($context['storeName'] ?? '')),
+            'storeName' => $storeName,
             'currencySymbol' => (string) ($context['currencySymbol'] ?? '$'),
             'at' => $at,
             'lines' => $lines,
+            'promotionId' => isset($context['promotionId']) ? (int) $context['promotionId'] : null,
+            'includeUntriggered' => (bool) ($context['includeUntriggered'] ?? false),
         ];
     }
 
@@ -166,6 +181,7 @@ class StorefrontPromotionResolver
             ->where('h.pho_inicio', '<=', $at)
             ->where('h.pho_fin', '>', $at)
             ->whereIn('h.pho_estado', ['ACTIVO', 'PENDIENTE'])
+            ->when($context['promotionId'], fn ($query, $promotionId) => $query->where('p.prm_id', $promotionId))
             ->get([
                 'p.prm_id',
                 'p.prm_nombre',
@@ -310,6 +326,7 @@ class StorefrontPromotionResolver
         return [
             ...$promotion,
             'allocations' => $allocations,
+            'eligibleLineKeys' => $eligibleLines->pluck('key')->all(),
             'totalBenefitCents' => array_sum($allocations),
         ];
     }
