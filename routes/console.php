@@ -123,3 +123,6 @@ Schedule::command('push:send-pending')->hourly();
 Schedule::command('productos:calcular-mas-vendidos')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+Schedule::command('promotions:update')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping();
