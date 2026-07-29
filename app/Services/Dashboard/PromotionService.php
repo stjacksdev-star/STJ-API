@@ -49,6 +49,8 @@ class PromotionService
                 'p.prm_origen',
                 'p.prm_nombre',
                 'p.prm_nombre_comercial',
+                'p.prm_tipo_checkout',
+                'p.prm_alcance_tienda',
                 'p.prm_modalidad',
                 'p.prm_tipo',
                 'p.prm_estado',
@@ -73,6 +75,11 @@ class PromotionService
             ->orderByDesc('p.prm_id')
             ->limit(max(1, min($limit, 500)));
 
+        $promotions = $query->get();
+        $stores = $this->storesByPromotionIds(
+            $promotions->pluck('prm_id')->map(fn ($id) => (int) $id)->all()
+        );
+
         return [
             'filters' => [
                 'country' => $countryId,
@@ -83,9 +90,11 @@ class PromotionService
             'countries' => $this->countries(),
             'statuses' => ['PENDIENTE', 'EN-PROCESO', 'FINALIZADA', 'CANCELADO', 'SUSPENDIDO'],
             'options' => $this->options(),
-            'promotions' => $query
-                ->get()
-                ->map(fn ($promotion) => $this->normalizePromotion($promotion))
+            'promotions' => $promotions
+                ->map(fn ($promotion) => $this->normalizePromotion(
+                    $promotion,
+                    $stores[(int) $promotion->prm_id] ?? [],
+                ))
                 ->values()
                 ->all(),
         ];
@@ -101,6 +110,8 @@ class PromotionService
         $endAt = $this->dashboardDateTime($data['endAt']);
         $type = (string) $data['type'];
         $promotionType = (string) $data['promotionType'];
+        $storeScope = $this->stringOrNull($data['storeScope'] ?? null);
+        $storeIds = $data['stores'] ?? [];
         $productRows = [];
 
         if ($startAt->lessThanOrEqualTo($this->dashboardNow())) {
@@ -129,7 +140,7 @@ class PromotionService
             );
         }
 
-        $id = DB::transaction(function () use ($data, $country, $startAt, $endAt, $type, $productRows, $actor) {
+        $id = DB::transaction(function () use ($data, $country, $startAt, $endAt, $type, $productRows, $storeScope, $storeIds, $actor) {
             $promotionId = DB::table('stj_promociones')->insertGetId([
                 'prm_ticket' => '0000',
                 'prm_pais' => $country['id'],
@@ -154,6 +165,7 @@ class PromotionService
                 'prm_condicion' => null,
                 'prm_valor' => null,
                 'prm_tipo_checkout' => $data['checkoutType'] ?? 'TODO',
+                'prm_alcance_tienda' => $storeScope,
                 'prm_bines' => null,
                 'prm_tiendas' => null,
                 'prm_logo' => null,
@@ -168,6 +180,8 @@ class PromotionService
                 'prm_modal_image' => null,
                 'prm_nombre_comercial' => $this->stringOrNull($data['commercialName'] ?? null),
             ]);
+
+            $this->replacePromotionStores($promotionId, $country['id'], $storeScope, $storeIds);
 
             DB::table('stj_promociones_horario')->insert([
                 'pho_tipo' => 'NORMAL',
@@ -200,6 +214,52 @@ class PromotionService
             }
 
             return $promotionId;
+        });
+
+        return $this->find($id);
+    }
+
+    /**
+     * @param  array<int, mixed>  $storeIds
+     * @param  array<string, mixed>  $actor
+     */
+    public function updateStores(int $id, ?string $storeScope, array $storeIds, array $actor = []): array
+    {
+        DB::transaction(function () use ($id, $storeScope, $storeIds, $actor) {
+            $promotion = DB::table('stj_promociones')
+                ->where('prm_id', $id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $promotion) {
+                throw ValidationException::withMessages([
+                    'promotion' => 'La promocion seleccionada no existe.',
+                ]);
+            }
+
+            if ((string) $promotion->prm_estado !== 'PENDIENTE') {
+                throw ValidationException::withMessages([
+                    'promotion' => 'Las tiendas solo pueden modificarse en promociones PENDIENTE.',
+                ]);
+            }
+
+            if ((string) $promotion->prm_tipo_checkout === 'D' && $storeScope !== null) {
+                throw ValidationException::withMessages([
+                    'storeScope' => 'Las promociones solo domicilio no manejan alcance de tiendas.',
+                ]);
+            }
+
+            DB::table('stj_promociones')
+                ->where('prm_id', $id)
+                ->update(['prm_alcance_tienda' => $storeScope]);
+
+            $this->replacePromotionStores($id, (int) $promotion->prm_pais, $storeScope, $storeIds);
+            $this->history->record(
+                $id,
+                'INFORMACION',
+                'Alcance de tiendas actualizado a '.($storeScope ?? 'NULL').'.',
+                $actor,
+            );
         });
 
         return $this->find($id);
@@ -603,7 +663,27 @@ class PromotionService
             ]);
         }
 
-        return $this->normalizePromotion($promotion);
+        $stores = $this->storesByPromotionIds([$id]);
+
+        return $this->normalizePromotion($promotion, $stores[$id] ?? []);
+    }
+
+    public function eligibleStores(string $country): array
+    {
+        $resolved = $this->resolveCountry($country);
+
+        return DB::table('stj_tiendas')
+            ->where('tie_pais', $resolved['id'])
+            ->where('tie_productos', 1)
+            ->orderBy('tie_nombre')
+            ->get(['tie_id', 'tie_codigo', 'tie_nombre'])
+            ->map(fn ($store) => [
+                'id' => (int) $store->tie_id,
+                'code' => (string) $store->tie_codigo,
+                'name' => trim((string) $store->tie_nombre),
+            ])
+            ->values()
+            ->all();
     }
 
     /**
@@ -660,6 +740,7 @@ class PromotionService
         return [
             'origins' => ['TODO', 'WEB', 'APP'],
             'checkoutTypes' => ['TODO', 'D', 'T'],
+            'storeScopes' => ['TODAS', 'SELECCIONADAS'],
             'types' => ['TODO', 'SKU'],
             'promotionTypes' => ['DESCUENTO', 'CONDICION-SKU', 'PUNTO-PRECIO', 'DESCUENTO-SKU'],
             'restrictions' => ['21/2', '2x1', '2doPrecio', '2xPP'],
@@ -770,6 +851,8 @@ class PromotionService
                 'p.prm_origen',
                 'p.prm_nombre',
                 'p.prm_nombre_comercial',
+                'p.prm_tipo_checkout',
+                'p.prm_alcance_tienda',
                 'p.prm_modalidad',
                 'p.prm_tipo',
                 'p.prm_estado',
@@ -791,7 +874,10 @@ class PromotionService
             ]);
     }
 
-    private function normalizePromotion(object $promotion): array
+    /**
+     * @param  array<int, array<string, mixed>>  $stores
+     */
+    private function normalizePromotion(object $promotion, array $stores = []): array
     {
         return [
             'id' => (int) $promotion->prm_id,
@@ -803,6 +889,9 @@ class PromotionService
             'type' => $promotion->prm_tipo,
             'status' => $promotion->prm_estado,
             'promotionType' => $promotion->prm_tipo_promocion,
+            'checkoutType' => $promotion->prm_tipo_checkout,
+            'storeScope' => $promotion->prm_alcance_tienda,
+            'tiendas' => $stores,
             'appliesTo' => $promotion->prm_aplica,
             'price' => $promotion->prm_precio !== null ? (float) $promotion->prm_precio : null,
             'percentage' => $promotion->prm_porcentaje !== null ? (float) $promotion->prm_porcentaje : null,
@@ -822,5 +911,100 @@ class PromotionService
                 'name' => trim((string) $promotion->pai_nombre),
             ],
         ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $storeIds
+     */
+    private function replacePromotionStores(
+        int $promotionId,
+        int $countryId,
+        ?string $storeScope,
+        array $storeIds,
+    ): void {
+        DB::table('stj_promociones_tienda')
+            ->where('prt_promocion', $promotionId)
+            ->delete();
+
+        if ($storeScope !== 'SELECCIONADAS') {
+            return;
+        }
+
+        $ids = array_map(fn ($id) => (int) $id, $storeIds);
+
+        if ($ids === []) {
+            throw ValidationException::withMessages([
+                'stores' => 'Debe seleccionar al menos una tienda.',
+            ]);
+        }
+
+        if (count($ids) !== count(array_unique($ids))) {
+            throw ValidationException::withMessages([
+                'stores' => 'No se permiten tiendas duplicadas.',
+            ]);
+        }
+
+        $stores = DB::table('stj_tiendas')
+            ->whereIn('tie_id', $ids)
+            ->get(['tie_id', 'tie_pais', 'tie_productos']);
+
+        if ($stores->count() !== count($ids)) {
+            throw ValidationException::withMessages([
+                'stores' => 'Una o mas tiendas seleccionadas no existen.',
+            ]);
+        }
+
+        if ($stores->contains(fn ($store) => (int) $store->tie_pais !== $countryId)) {
+            throw ValidationException::withMessages([
+                'stores' => 'Todas las tiendas deben pertenecer al pais de la promocion.',
+            ]);
+        }
+
+        if ($stores->contains(fn ($store) => (int) $store->tie_productos !== 1)) {
+            throw ValidationException::withMessages([
+                'stores' => 'Todas las tiendas deben tener productos habilitados.',
+            ]);
+        }
+
+        DB::table('stj_promociones_tienda')->insert(
+            array_map(fn (int $storeId) => [
+                'prt_promocion' => $promotionId,
+                'prt_tienda' => $storeId,
+                'prt_fecha_creacion' => now(),
+            ], $ids),
+        );
+    }
+
+    /**
+     * @param  array<int, int>  $promotionIds
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function storesByPromotionIds(array $promotionIds): array
+    {
+        if ($promotionIds === []) {
+            return [];
+        }
+
+        return DB::table('stj_promociones_tienda as pt')
+            ->join('stj_tiendas as t', 't.tie_id', '=', 'pt.prt_tienda')
+            ->whereIn('pt.prt_promocion', $promotionIds)
+            ->orderBy('t.tie_nombre')
+            ->get([
+                'pt.prt_promocion',
+                't.tie_id',
+                't.tie_codigo',
+                't.tie_nombre',
+                't.tie_pais',
+                't.tie_productos',
+            ])
+            ->groupBy('prt_promocion')
+            ->map(fn ($stores) => $stores->map(fn ($store) => [
+                'id' => (int) $store->tie_id,
+                'code' => (string) $store->tie_codigo,
+                'name' => trim((string) $store->tie_nombre),
+                'countryId' => (int) $store->tie_pais,
+                'productsEnabled' => (int) $store->tie_productos === 1,
+            ])->values()->all())
+            ->all();
     }
 }

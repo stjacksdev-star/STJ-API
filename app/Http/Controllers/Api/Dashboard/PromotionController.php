@@ -29,6 +29,34 @@ class PromotionController extends BaseController
         );
     }
 
+    public function show(Request $request, int $promotion)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        return $this->success(
+            $this->promotions->find($promotion),
+            'Promocion del dashboard obtenida'
+        );
+    }
+
+    public function stores(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+        ]);
+
+        return $this->success(
+            $this->promotions->eligibleStores($validated['country']),
+            'Tiendas disponibles para promociones obtenidas'
+        );
+    }
+
     public function store(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {
@@ -41,6 +69,9 @@ class PromotionController extends BaseController
             'commercialName' => ['nullable', 'string', 'max:255'],
             'origin' => ['required', Rule::in(['TODO', 'WEB', 'APP'])],
             'checkoutType' => ['nullable', Rule::in(['TODO', 'D', 'T'])],
+            'storeScope' => ['nullable', 'prohibited_if:checkoutType,D', Rule::in(['TODAS', 'SELECCIONADAS'])],
+            'stores' => ['exclude_unless:storeScope,SELECCIONADAS', 'required', 'array', 'min:1'],
+            'stores.*' => ['required', 'integer', 'distinct'],
             'type' => ['required', Rule::in(['TODO', 'SKU'])],
             'promotionType' => ['required', Rule::in(['DESCUENTO', 'CONDICION-SKU', 'PUNTO-PRECIO', 'DESCUENTO-SKU'])],
             'restriction' => ['nullable', Rule::in(['21/2', '2x1', '2doPrecio', '2xPP'])],
@@ -55,6 +86,30 @@ class PromotionController extends BaseController
         return $this->success(
             $this->promotions->create($validated, $request->file('products'), $validated['actor'] ?? []),
             'Promocion creada correctamente'
+        );
+    }
+
+    public function updateStores(Request $request, int $promotion)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'storeScope' => ['present', 'nullable', Rule::in(['TODAS', 'SELECCIONADAS'])],
+            'stores' => ['exclude_unless:storeScope,SELECCIONADAS', 'required', 'array', 'min:1'],
+            'stores.*' => ['required', 'integer', 'distinct'],
+            ...$this->actorRules(),
+        ]);
+
+        return $this->success(
+            $this->promotions->updateStores(
+                $promotion,
+                $validated['storeScope'],
+                $validated['stores'] ?? [],
+                $validated['actor'] ?? [],
+            ),
+            'Alcance de tiendas actualizado correctamente'
         );
     }
 
