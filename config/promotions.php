@@ -23,4 +23,6 @@ return [
         'checkout_type' => 'TODO',
         'store_scope' => 'TODAS',
     ],
+
+    'conflict_deduplication_seconds' => 1800,
 ];
