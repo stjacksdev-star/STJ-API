@@ -269,6 +269,13 @@ class StorefrontPromotionResolver
 
         // TODO + TODAS and TODO without detailed scope retain legacy behavior.
         if ($checkout === 'TODO' || $checkout === '') {
+            if ($scope === 'SELECCIONADAS') {
+                if ($context['checkoutType'] !== 'TIENDA') {
+                    return 0;
+                }
+
+                return in_array($context['storeId'], $promotion['selectedStoreIds'], true) ? 4 : 0;
+            }
             if ($promotion['appliesTo'] === 'ENTREGA-DOMICILIO' && $context['checkoutType'] !== 'DOMICILIO') {
                 return 0;
             }
@@ -414,6 +421,10 @@ class StorefrontPromotionResolver
             'discount' => $this->decimal($discountCents),
             'discountPercentage' => $percentage !== null ? (float) $percentage : null,
             'modality' => $context['checkoutType'],
+            'checkoutType' => $selected['checkoutType'],
+            'storeScope' => $selected['storeScope'],
+            'availabilityLabel' => $this->customerScopeLabel($selected),
+            'participatingStoreCount' => count($selected['selectedStoreIds']),
             'store' => $context['checkoutType'] === 'TIENDA' ? [
                 'id' => $context['storeId'],
                 'name' => $context['storeName'] ?: null,
@@ -421,6 +432,26 @@ class StorefrontPromotionResolver
             'startsAt' => $selected['startsAt'],
             'endsAt' => $selected['endsAt'],
         ];
+    }
+
+    private function customerScopeLabel(array $promotion): string
+    {
+        $checkout = strtoupper((string) $promotion['checkoutType']);
+        $scope = strtoupper((string) $promotion['storeScope']);
+
+        if ($checkout === 'D') {
+            return 'Promoción válida para compras a domicilio';
+        }
+        if (in_array($checkout, ['', 'TODO', 'T'], true) && $scope === 'SELECCIONADAS') {
+            $count = count($promotion['selectedStoreIds']);
+
+            return 'Promoción válida en tiendas seleccionadas'.($count > 0 ? " · Válida en {$count} ".($count === 1 ? 'tienda' : 'tiendas') : '');
+        }
+        if ($checkout === 'T') {
+            return 'Promoción válida en todas nuestras tiendas';
+        }
+
+        return 'Promoción válida para compras a domicilio y en todas nuestras tiendas';
     }
 
     /**

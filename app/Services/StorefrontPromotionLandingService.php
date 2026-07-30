@@ -53,6 +53,7 @@ class StorefrontPromotionLandingService
             return null;
         }
 
+        $scope = $this->promotionScope($promotion, $filters);
         $brand = trim((string) ($filters['brand'] ?? ''));
         $gender = trim((string) ($filters['gender'] ?? ''));
         $sort = trim((string) ($filters['sort'] ?? 'discount_desc')) ?: 'discount_desc';
@@ -166,6 +167,7 @@ class StorefrontPromotionLandingService
                 'promotionType' => (string) $promotion->prm_tipo_promocion,
                 'checkoutType' => (string) $promotion->prm_tipo_checkout,
                 'storeScope' => $promotion->prm_alcance_tienda,
+                'scope' => $scope,
                 'headerImage' => StorefrontImageUrl::asset((string) $promotion->prm_encabezado),
                 'startsAt' => $promotion->pho_inicio,
                 'endsAt' => $promotion->pho_fin,
@@ -194,6 +196,64 @@ class StorefrontPromotionLandingService
                 'activeStoreCode' => $availability['activeStoreCode'] ?? null,
                 'usedSource' => $availability['usedSource'] ?? null,
             ],
+        ];
+    }
+
+    private function promotionScope(object $promotion, array $filters): array
+    {
+        $checkoutType = strtoupper(trim((string) $promotion->prm_tipo_checkout));
+        $storeScope = strtoupper(trim((string) $promotion->prm_alcance_tienda));
+        $selectedStoresOnly = $storeScope === 'SELECCIONADAS' && in_array($checkoutType, ['', 'TODO', 'T'], true);
+        $currentCheckout = $this->checkoutType($filters['checkoutType'] ?? 'DOMICILIO');
+        $currentStoreCode = trim((string) ($filters['storeCode'] ?? ''));
+        $stores = collect();
+
+        if ($selectedStoresOnly) {
+            $stores = DB::table('stj_promociones_tienda as promotion_store')
+                ->join('stj_tiendas as store', 'store.tie_id', '=', 'promotion_store.prt_tienda')
+                ->where('promotion_store.prt_promocion', $promotion->prm_id)
+                ->where('store.tie_pais', $promotion->pai_id)
+                ->orderBy('store.tie_nombre')
+                ->get(['store.tie_id', 'store.tie_codigo', 'store.tie_nombre', 'store.tie_direccion', 'store.tie_horario'])
+                ->map(fn (object $store) => [
+                    'id' => (int) $store->tie_id,
+                    'code' => trim((string) $store->tie_codigo),
+                    'name' => trim((string) $store->tie_nombre),
+                    'address' => trim((string) $store->tie_direccion),
+                    'schedule' => trim(strip_tags((string) $store->tie_horario)),
+                ])
+                ->values();
+        }
+
+        if ($checkoutType === 'D') {
+            $headline = 'Promoción válida para compras a domicilio';
+        } elseif ($selectedStoresOnly) {
+            $headline = 'Promoción válida en tiendas seleccionadas';
+        } elseif ($checkoutType === 'T') {
+            $headline = 'Promoción válida en todas nuestras tiendas';
+        } else {
+            $headline = 'Promoción válida para compras a domicilio y en todas nuestras tiendas';
+        }
+
+        $message = null;
+        $eligible = true;
+        if (($checkoutType === 'T' || $selectedStoresOnly) && $currentCheckout === 'DOMICILIO') {
+            $eligible = false;
+            $message = 'Esta promoción está disponible únicamente para compras en tiendas físicas.';
+        } elseif ($checkoutType === 'D' && $currentCheckout === 'TIENDA') {
+            $eligible = false;
+            $message = 'Esta promoción está disponible únicamente para compras a domicilio.';
+        } elseif ($selectedStoresOnly && $currentStoreCode !== '' && ! $stores->contains('code', $currentStoreCode)) {
+            $eligible = false;
+            $message = 'Esta promoción no aplica en la tienda seleccionada.';
+        }
+
+        return [
+            'headline' => $headline,
+            'storeCountLabel' => $stores->isNotEmpty() ? 'Válida en '.$stores->count().' '.($stores->count() === 1 ? 'tienda' : 'tiendas') : null,
+            'eligibleForCurrentContext' => $eligible,
+            'contextMessage' => $message,
+            'stores' => $stores->all(),
         ];
     }
 

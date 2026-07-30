@@ -41,6 +41,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
 
         $this->assertNotNull($result);
         $this->assertSame(10, $result['products'][0]['promotion']['id']);
+        $this->assertSame('Promoción válida para compras a domicilio y en todas nuestras tiendas', $result['promotion']['scope']['headline']);
         $this->assertSame(75.0, $result['products'][0]['price']);
         $this->assertSame(100.0, $result['products'][0]['previousPrice']);
         $this->assertSame(25.0, $result['products'][0]['discountPercentage']);
@@ -93,6 +94,37 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertNotNull($result);
         $this->assertSame(80.0, $result['products'][0]['price']);
         $this->assertSame(20.0, $result['products'][0]['discountPercentage']);
+    }
+
+    public function test_selected_store_landing_exposes_participants_and_context_warnings(): void
+    {
+        DB::table('stj_promociones')->where('prm_id', 10)->update([
+            'prm_tipo_checkout' => 'TODO',
+            'prm_alcance_tienda' => 'SELECCIONADAS',
+        ]);
+        DB::table('stj_tiendas')->insert([
+            ['tie_id' => 2, 'tie_pais' => 1, 'tie_codigo' => '018', 'tie_nombre' => 'Las Cascadas', 'tie_direccion' => 'Centro comercial', 'tie_horario' => 'Lunes a domingo'],
+            ['tie_id' => 3, 'tie_pais' => 1, 'tie_codigo' => '003', 'tie_nombre' => 'Otra tienda', 'tie_direccion' => null, 'tie_horario' => null],
+        ]);
+        DB::table('stj_promociones_tienda')->insert(['prt_promocion' => 10, 'prt_tienda' => 2]);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->times(3)->andReturn([
+            'availabilityBySku' => [], 'activeStoreCode' => null, 'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+        $service = app(StorefrontPromotionLandingService::class);
+
+        $home = $service->find('SV', 10, ['checkoutType' => 'DOMICILIO']);
+        $wrongStore = $service->find('SV', 10, ['checkoutType' => 'TIENDA', 'storeCode' => '003']);
+        $rightStore = $service->find('SV', 10, ['checkoutType' => 'TIENDA', 'storeCode' => '018']);
+
+        $this->assertSame('Promoción válida en tiendas seleccionadas', $home['promotion']['scope']['headline']);
+        $this->assertSame('Válida en 1 tienda', $home['promotion']['scope']['storeCountLabel']);
+        $this->assertSame('Esta promoción está disponible únicamente para compras en tiendas físicas.', $home['promotion']['scope']['contextMessage']);
+        $this->assertSame('Esta promoción no aplica en la tienda seleccionada.', $wrongStore['promotion']['scope']['contextMessage']);
+        $this->assertTrue($rightStore['promotion']['scope']['eligibleForCurrentContext']);
+        $this->assertSame('Las Cascadas', $rightStore['promotion']['scope']['stores'][0]['name']);
     }
 
     public function test_pdp_uses_resolver_and_returns_structured_promotion(): void
@@ -195,6 +227,8 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
             $table->unsignedBigInteger('tie_pais');
             $table->string('tie_codigo');
             $table->string('tie_nombre');
+            $table->string('tie_direccion')->nullable();
+            $table->text('tie_horario')->nullable();
         });
         Schema::create('stj_categorias', function (Blueprint $table) {
             $table->id('cat_id');

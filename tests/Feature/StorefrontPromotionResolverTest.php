@@ -61,7 +61,7 @@ class StorefrontPromotionResolverTest extends TestCase
     public function test_selected_store_promotion_only_applies_to_related_store(): void
     {
         $this->promotion(11, [
-            'prm_tipo_checkout' => 'T',
+            'prm_tipo_checkout' => 'TODO',
             'prm_alcance_tienda' => 'SELECCIONADAS',
             'prm_tipo_promocion' => 'DESCUENTO-SKU',
         ]);
@@ -73,10 +73,12 @@ class StorefrontPromotionResolverTest extends TestCase
 
         $applicable = $this->resolve('TIENDA', 2, 'Multiplaza');
         $notApplicable = $this->resolve('TIENDA', 3);
+        $homeDelivery = $this->resolve('DOMICILIO');
 
         $this->assertSame(11, $applicable['lines'][0]['promotion']['id']);
-        $this->assertSame('Oferta exclusiva en Multiplaza', $applicable['lines'][0]['promotion']['scopeLabel']);
+        $this->assertSame('Promoción válida en tiendas seleccionadas · Válida en 2 tiendas', $applicable['lines'][0]['promotion']['availabilityLabel']);
         $this->assertNull($notApplicable['lines'][0]['promotion']);
+        $this->assertNull($homeDelivery['lines'][0]['promotion']);
     }
 
     public function test_all_store_and_home_delivery_scopes_are_isolated(): void
