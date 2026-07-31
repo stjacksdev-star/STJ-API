@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\StorefrontCustomer;
+use App\Support\StorefrontImageUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -130,6 +131,83 @@ class StorefrontAccountController extends BaseController
             'orders' => $orders,
             'addresses' => $this->addresses($customer),
             'coupons' => $this->coupons($customer),
+        ]);
+    }
+
+    public function order(Request $request, string $reference)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer) return $this->error('No autorizado.', 403);
+
+        $reference = trim($reference);
+        if ($reference === '' || strlen($reference) > 100) {
+            return $this->error('La referencia del pedido no es valida.', 422);
+        }
+
+        $order = DB::table('stj_pedidos as orders')
+            ->join('stj_pedidos_pago as payments', function ($join) use ($reference) {
+                $join->on('payments.ppa_pedido', '=', 'orders.ped_id')
+                    ->where('payments.ppa_ref', '=', $reference)
+                    ->where('payments.ppa_estado', '=', 'APROBADA');
+            })
+            ->leftJoin('stj_tiendas as stores', function ($join) {
+                $join->on('orders.ped_tienda', '=', 'stores.tie_codigo')
+                    ->on('stores.tie_pais', '=', 'orders.ped_id_pais');
+            })
+            ->where(function ($query) use ($customer) {
+                $query->where('orders.ped_user', $customer->getKey())
+                    ->orWhere('orders.ped_email', $customer->usu_correo ?: $customer->usu_usuario);
+            })
+            ->orderByDesc('payments.ppa_id')
+            ->first([
+                'orders.ped_id', 'orders.ped_id_pais', 'orders.ped_fecha', 'orders.ped_estatus',
+                'orders.ped_checkout', 'orders.ped_tienda', 'payments.ppa_ref', 'payments.ppa_fecha',
+                'payments.ppa_tipo', 'payments.ppa_estado', 'payments.ppa_monto', 'stores.tie_nombre',
+            ]);
+
+        if (! $order) return $this->error('Pedido no encontrado.', 404);
+
+        $items = DB::table('stj_pedidos_detalle as detail')
+            ->leftJoin('stj_productos as products', 'products.pro_id', '=', 'detail.car_producto')
+            ->where('detail.car_ref', $reference)
+            ->where('detail.car_pais', $order->ped_id_pais)
+            ->where('detail.car_accion', 'AGREGADO')
+            ->orderBy('detail.car_id')
+            ->get([
+                'detail.car_id', 'detail.car_producto', 'detail.car_estilo_final', 'detail.car_talla_final',
+                'detail.car_talla', 'detail.car_cantidad', 'detail.car_precio', 'detail.car_descuento_final',
+                'detail.car_descuento', 'products.pro_codigo', 'products.pro_nombre', 'products.pro_thumbs',
+            ])
+            ->map(function ($item) {
+                $price = (float) ($item->car_precio ?? 0);
+                $discount = (float) ($item->car_descuento_final ?? $item->car_descuento ?? 0);
+                $quantity = max(1, (int) ($item->car_cantidad ?? 1));
+
+                return [
+                    'id' => (int) $item->car_id,
+                    'name' => $item->pro_nombre ?: 'Producto',
+                    'code' => $item->car_estilo_final ?: $item->pro_codigo,
+                    'size' => $item->car_talla_final ?: $item->car_talla,
+                    'quantity' => $quantity,
+                    'price' => $price,
+                    'discount' => $discount,
+                    'unitPrice' => round($price * (1 - min(100, max(0, $discount)) / 100), 2),
+                    'imageUrl' => StorefrontImageUrl::image($item->pro_thumbs, 'p100'),
+                ];
+            })
+            ->values();
+
+        return $this->success([
+            'reference' => $order->ppa_ref,
+            'date' => $order->ppa_fecha ?: $order->ped_fecha,
+            'status' => $order->ped_estatus,
+            'paymentStatus' => $order->ppa_estado,
+            'paymentType' => $order->ppa_tipo,
+            'checkout' => $order->ped_checkout,
+            'store' => $order->tie_nombre,
+            'storeCode' => $order->ped_tienda,
+            'amount' => $order->ppa_monto !== null ? (float) $order->ppa_monto : null,
+            'items' => $items,
         ]);
     }
 

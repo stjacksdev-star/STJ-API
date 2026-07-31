@@ -51,6 +51,7 @@ Route::post('/storefront/account/register/{country}', [StorefrontAccountControll
     ->where('country', '[A-Za-z]{2}');
 Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function () {
     Route::get('/', [StorefrontAccountController::class, 'show']);
+    Route::get('/orders/{reference}', [StorefrontAccountController::class, 'order']);
     Route::put('/profile', [StorefrontAccountController::class, 'update']);
     Route::get('/locations/countries', [StorefrontAccountController::class, 'countries']);
     Route::get('/locations/states/{country}', [StorefrontAccountController::class, 'states'])->whereNumber('country');
