@@ -28,7 +28,7 @@ class StorefrontCartController extends BaseController
 
     public function updateItem(Request $request, string $country, int $item): JsonResponse
     {
-        $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'quantity' => ['sometimes', 'integer', 'min:1', 'max:99'], 'selected' => ['sometimes', 'boolean']]);
+        $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'quantity' => ['sometimes', 'integer', 'min:1', 'max:99'], 'selected' => ['sometimes', 'boolean'], 'inventory_scope' => ['sometimes', 'in:cart,checkout']]);
         if (! array_key_exists('quantity', $data) && ! array_key_exists('selected', $data)) {
             return $this->error('Debe indicar quantity o selected.', 422);
         }
@@ -48,6 +48,14 @@ class StorefrontCartController extends BaseController
         $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'items' => ['array', 'max:100'], 'items.*.product_id' => ['required', 'integer'], 'items.*.sku' => ['required', 'string', 'max:50'], 'items.*.size' => ['required', 'string', 'max:10'], 'items.*.quantity' => ['required', 'integer', 'min:1', 'max:99']]);
 
         return $this->mutation(fn () => $this->carts->sync($country, $this->visitor($request), $this->customer(), $data), 'Carrito sincronizado.');
+    }
+
+    public function validateForCheckout(Request $request, string $country): JsonResponse
+    {
+        return $this->success(
+            $this->carts->validateForCheckout($country, $this->visitor($request), $this->customer()),
+            'Carrito validado con las reglas de checkout.',
+        );
     }
 
     public function merge(Request $request, string $country): JsonResponse

@@ -88,15 +88,20 @@ class StorefrontOrderService
                     }
                 }
             }
-            $lines = $cart->items()->where('cad_seleccionado', 1)->where('cad_estado', 'DISPONIBLE')->lockForUpdate()->get();
+            // Revalidate the complete cart again immediately before persisting the
+            // order. A stale unavailable flag must never make a line disappear.
+            $lines = $cart->items()->lockForUpdate()->get();
             if ($lines->isEmpty()) {
-                throw ValidationException::withMessages(['cart' => 'No hay lineas autorizadas para crear el pedido.']);
+                throw ValidationException::withMessages(['cart' => 'No hay lineas para crear el pedido.']);
             }
             $trustedItems = $lines->map(fn ($line) => ['key' => (string) $line->getKey(), 'sku' => (string) $line->cad_ref, 'name' => (string) $line->cad_ref, 'size' => (string) $line->cad_talla, 'quantity' => (int) $line->cad_cantidad])->all();
             $method = $cart->car_tipo === 'TIENDA' ? 'store_pickup' : 'home_delivery';
             $validation = $this->checkoutValidationService->validate($countryCode, ['method' => $method, 'storeCode' => $storeCode], $trustedItems);
             if (! ($validation['ok'] ?? false)) {
-                throw ValidationException::withMessages(['inventory' => $validation['message'] ?? 'El inventario cambio durante checkout.']);
+                $failures = collect($validation['lines'] ?? [])->filter(fn (array $line) => ! ($line['ok'] ?? false))
+                    ->map(fn (array $line) => sprintf('%s, talla %s: solicitadas %d, disponibles %d', (string) ($line['name'] ?? $line['sku'] ?? 'Producto'), (string) ($line['size'] ?? ''), (int) ($line['requestedQuantity'] ?? 0), (int) ($line['availableQuantity'] ?? 0)));
+                $message = (string) ($validation['message'] ?? 'El inventario cambio durante checkout.');
+                throw ValidationException::withMessages(['inventory' => $failures->isEmpty() ? $message : $message.' '.$failures->implode('; ').'.']);
             }
             $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
             $result = $this->create($trustedPayload);

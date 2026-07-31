@@ -111,6 +111,7 @@ Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])
     Route::patch('/items/{item}', [StorefrontCartController::class, 'updateItem'])->whereNumber('item');
     Route::delete('/items/{item}', [StorefrontCartController::class, 'destroyItem'])->whereNumber('item');
     Route::post('/sync', [StorefrontCartController::class, 'sync']);
+    Route::post('/validate', [StorefrontCartController::class, 'validateForCheckout']);
     Route::post('/merge', [StorefrontCartController::class, 'merge']);
     Route::post('/checkout/start', [StorefrontCartController::class, 'startCheckout']);
     Route::post('/orders', [StorefrontOrderController::class, 'store']);

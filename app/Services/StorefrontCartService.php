@@ -41,15 +41,26 @@ class StorefrontCartService
                 if (! $cart->car_tienda_id || ! $cart->car_tienda_codigo_snapshot || ! $cart->car_inventory_source) {
                     throw ValidationException::withMessages(['fulfillment' => 'El carrito no tiene un contexto de entrega completo.']);
                 }
-                $lines = $cart->items()->where('cad_seleccionado', 1)->where('cad_estado', 'DISPONIBLE')->lockForUpdate()->get();
+                // Every line still present in the cart is part of the purchase intent.
+                // Do not silently omit a line previously marked unavailable/unselected:
+                // checkout must revalidate it with the required `checkout` inventory scope.
+                $lines = $cart->items()->lockForUpdate()->get();
                 if ($lines->isEmpty()) {
-                    throw ValidationException::withMessages(['cart' => 'El carrito no tiene lineas seleccionadas y disponibles.']);
+                    throw ValidationException::withMessages(['cart' => 'El carrito no tiene lineas para validar.']);
                 }
                 $fulfillment = ['method' => $cart->car_tipo === 'TIENDA' ? 'store_pickup' : 'home_delivery', 'storeCode' => (string) $cart->car_tienda_codigo_snapshot];
                 $items = $lines->map(fn ($line) => ['key' => $line->getKey(), 'sku' => (string) $line->cad_ref, 'name' => (string) $line->cad_ref, 'size' => (string) $line->cad_talla, 'quantity' => (int) $line->cad_cantidad])->all();
                 $validation = $this->checkoutValidation->validate($countryCode, $fulfillment, $items);
                 if (! ($validation['ok'] ?? false)) {
-                    throw ValidationException::withMessages(['inventory' => $validation['message'] ?? 'No se pudo validar el inventario de checkout.']);
+                    throw ValidationException::withMessages(['inventory' => $this->checkoutInventoryError($validation)]);
+                }
+                foreach ($lines as $line) {
+                    $line->forceFill([
+                        'cad_estado' => 'DISPONIBLE',
+                        'cad_motivo_no_disponible' => null,
+                        'cad_seleccionado' => true,
+                        'cad_actualizado_en' => now(),
+                    ])->save();
                 }
                 $baseLines = $lines->map(function ($line) use ($cart) {
                     $price = $this->pricing->resolve((int) $cart->car_pais_id, (int) $line->cad_producto_id, (string) $line->cad_ref, (string) $line->cad_talla, now());
@@ -172,6 +183,44 @@ class StorefrontCartService
         });
     }
 
+    public function validateForCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
+    {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer) {
+            $cart = $this->resolveCart($countryCode, $visitor, $customer, true);
+            $lines = $cart->items()->lockForUpdate()->get();
+            $validation = $this->checkoutValidation->validate($countryCode, [
+                'method' => $cart->car_tipo === 'TIENDA' ? 'store_pickup' : 'home_delivery',
+                'storeCode' => (string) $cart->car_tienda_codigo_snapshot,
+            ], $lines->map(fn ($line) => [
+                'key' => (string) $line->getKey(), 'sku' => (string) $line->cad_ref,
+                'name' => (string) $line->cad_ref, 'size' => (string) $line->cad_talla,
+                'quantity' => (int) $line->cad_cantidad,
+            ])->all());
+            $validatedById = collect($validation['lines'] ?? [])->keyBy(fn (array $line) => (string) ($line['key'] ?? ''));
+            $changed = false;
+
+            foreach ($lines as $line) {
+                $result = $validatedById->get((string) $line->getKey());
+                $available = $result && ($result['ok'] ?? false);
+                $message = (string) ($result['message'] ?? ($validation['message'] ?? 'No se pudo validar la existencia.'));
+                $status = $available ? 'DISPONIBLE' : 'SIN_EXISTENCIA';
+                $reason = $available ? null : $message;
+                if (($line->cad_estado ?? 'DISPONIBLE') === $status
+                    && (string) ($line->cad_motivo_no_disponible ?? '') === (string) ($reason ?? '')
+                    && (bool) $line->cad_seleccionado) {
+                    continue;
+                }
+                $old = $this->auditLine($line);
+                $line->forceFill(['cad_estado' => $status, 'cad_motivo_no_disponible' => $reason, 'cad_seleccionado' => true, 'cad_actualizado_en' => now()])->save();
+                $this->audit($cart, $line, $visitor, $customer, 'CHECKOUT_SCOPE_VALIDATED', $old, $this->auditLine($line));
+                $changed = true;
+            }
+            if ($changed) $this->touch($cart);
+
+            return ['ok' => (bool) ($validation['ok'] ?? false), 'message' => $validation['message'] ?? 'Carrito validado.', 'validation' => $validation, ...$this->payload($cart)];
+        });
+    }
+
     public function add(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
     {
         return $this->write('ADD_ITEM', $input['operation_uuid'], $input, $countryCode, $visitor, $customer,
@@ -217,7 +266,7 @@ class StorefrontCartService
                     $commercial = $this->commercial($cart, [
                         'product_id' => $line->cad_producto_id, 'sku' => $line->cad_ref,
                         'size' => $line->cad_talla, 'quantity' => $input['quantity'],
-                    ]);
+                    ], $input['inventory_scope'] ?? 'cart');
                     $quantity = min((int) $input['quantity'], $commercial['available'], 99);
                     if ($quantity < 1) {
                         $this->stockError($commercial['available']);
@@ -522,6 +571,24 @@ class StorefrontCartService
     private function lineValues(array $c, int $q): array
     {
         return ['cad_producto_id' => $c['productId'], 'cad_ref' => $c['sku'], 'cad_talla' => $c['size'], 'cad_cantidad' => $q, 'cad_precio_unitario' => $c['regular'], 'cad_descuento_unitario' => $c['discount'], 'cad_precio_final_unitario' => $c['final'], 'cad_promocion' => $c['promotion'], 'cad_estado' => 'DISPONIBLE', 'cad_motivo_no_disponible' => null];
+    }
+
+    private function checkoutInventoryError(array $validation): string
+    {
+        $failures = collect($validation['lines'] ?? [])
+            ->filter(fn (array $line) => ! ($line['ok'] ?? false))
+            ->map(fn (array $line) => sprintf(
+                '%s, talla %s: solicitadas %d, disponibles %d',
+                (string) ($line['name'] ?? $line['sku'] ?? 'Producto'),
+                (string) ($line['size'] ?? ''),
+                (int) ($line['requestedQuantity'] ?? 0),
+                (int) ($line['availableQuantity'] ?? 0),
+            ))
+            ->values();
+
+        $message = (string) ($validation['message'] ?? 'No se pudo validar el inventario de checkout.');
+
+        return $failures->isEmpty() ? $message : $message.' '.$failures->implode('; ').'.';
     }
 
     private function ownedLine(StorefrontCart $cart, int $id): StorefrontCartItem

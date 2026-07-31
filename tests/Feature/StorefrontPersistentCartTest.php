@@ -30,6 +30,8 @@ class StorefrontPersistentCartTest extends TestCase
 
     private StorefrontCartService $service;
 
+    private $checkout;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -115,7 +117,8 @@ class StorefrontPersistentCartTest extends TestCase
         $availability = Mockery::mock(ProductDetailAvailabilityService::class);
         $availability->shouldReceive('forCountryAndSlug')->andReturnUsing(fn () => ['sizes' => [['size' => 'S', 'quantityInActiveStore' => 5], ['size' => 'M', 'quantityInActiveStore' => 2]]]);
         $checkout = Mockery::mock(StorefrontCheckoutValidationService::class);
-        $checkout->shouldReceive('validate')->andReturn(['ok' => true, 'message' => 'ok']);
+        $checkout->shouldReceive('validate')->byDefault()->andReturn(['ok' => true, 'message' => 'ok']);
+        $this->checkout = $checkout;
         $shipping = Mockery::mock(StorefrontShippingService::class);
         $shipping->shouldReceive('quote')->andReturnUsing(fn ($country, $type) => ['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => $country->pai_codigo === 'GT' ? 'GTQ' : 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => null]);
         $this->service = new StorefrontCartService($availability, new StorefrontProductPricingService, new StorefrontFulfillmentService(new InventorySourceResolver), $checkout, $shipping, app(StorefrontPromotionResolver::class));
@@ -372,6 +375,64 @@ class StorefrontPersistentCartTest extends TestCase
         $this->service->add('sv', $this->visitor, null, $this->item('M', 1));
         $this->assertDatabaseHas('stj_carritos', ['car_estado' => 'ACTIVO', 'car_checkout_en' => null]);
         $this->assertDatabaseHas('stj_carrito_auditoria', ['cau_accion' => 'CHECKOUT_INVALIDATED']);
+    }
+
+    public function test_checkout_does_not_silently_omit_an_unavailable_unselected_line(): void
+    {
+        $result = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        DB::table('stj_carrito_detalles')->where('cad_carrito_id', $result['cart']['id'])->update([
+            'cad_estado' => 'SIN_EXISTENCIA',
+            'cad_seleccionado' => 0,
+        ]);
+        $this->checkout->shouldReceive('validate')->once()
+            ->withArgs(fn ($country, $fulfillment, $items) => $country === 'sv'
+                && count($items) === 1
+                && $items[0]['sku'] === 'SKU10'
+                && $items[0]['size'] === 'S')
+            ->andReturn([
+                'ok' => false,
+                'message' => 'Hay productos sin stock suficiente para el metodo de entrega elegido.',
+                'lines' => [[
+                    'sku' => 'SKU10', 'name' => 'SKU10', 'size' => 'S',
+                    'requestedQuantity' => 1, 'availableQuantity' => 0, 'ok' => false,
+                ]],
+            ]);
+
+        try {
+            $this->service->startCheckout('sv', $this->visitor, null, ['operation_uuid' => (string) Str::uuid()]);
+            $this->fail('Checkout debio bloquear la linea sin existencia.');
+        } catch (ValidationException $exception) {
+            $message = collect($exception->errors())->flatten()->first();
+            $this->assertStringContainsString('SKU10, talla S', $message);
+            $this->assertStringContainsString('solicitadas 1, disponibles 0', $message);
+        }
+
+        $this->assertDatabaseHas('stj_carritos', ['car_id' => $result['cart']['id'], 'car_estado' => 'ACTIVO']);
+    }
+
+    public function test_cart_checkout_scope_validation_keeps_unavailable_line_visible_and_blocks_it(): void
+    {
+        $result = $this->service->add('sv', $this->visitor, null, $this->item('M', 2));
+        $itemId = $result['cart']['items'][0]['id'];
+        $this->checkout->shouldReceive('validate')->once()->andReturn([
+            'ok' => false,
+            'message' => 'Hay productos sin stock suficiente para el metodo de entrega elegido.',
+            'inventorySource' => ['configuredSource' => 'external_api', 'usedSource' => 'external_api'],
+            'lines' => [[
+                'key' => (string) $itemId, 'sku' => 'SKU10', 'name' => 'SKU10', 'size' => 'M',
+                'requestedQuantity' => 2, 'availableQuantity' => 1, 'ok' => false,
+                'message' => 'Solo hay 1 unidad(es) disponibles.',
+            ]],
+        ]);
+
+        $validation = $this->service->validateForCheckout('sv', $this->visitor, null);
+
+        $this->assertFalse($validation['ok']);
+        $this->assertCount(1, $validation['cart']['items']);
+        $this->assertSame('SIN_EXISTENCIA', $validation['cart']['items'][0]['status']);
+        $this->assertTrue($validation['cart']['items'][0]['selected']);
+        $this->assertSame('Solo hay 1 unidad(es) disponibles.', $validation['cart']['items'][0]['unavailableReason']);
+        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $itemId, 'cad_estado' => 'SIN_EXISTENCIA', 'cad_seleccionado' => 1]);
     }
 
     public function test_checkout_start_uses_the_same_central_promotion_resolution_as_the_cart(): void
