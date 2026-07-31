@@ -7,11 +7,14 @@ use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class StorefrontRecommendationService
 {
+    private const PURCHASE_HISTORY_CACHE_MINUTES = 20;
+
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailability,
     ) {}
@@ -29,22 +32,15 @@ class StorefrontRecommendationService
             return $this->recentlyViewed((int) $country->pai_id, $visitor, $customer, $cart, $limit);
         }
 
-        $seedIds = $productId ? [$productId] : $cart?->items()->orderByDesc('cad_creado_en')->limit(3)->pluck('cad_producto_id')->map(fn ($id) => (int) $id)->all();
-        if (! $seedIds) {
-            return [];
-        }
+        $seedIds = $productId ? [$productId] : ($cart?->items->sortByDesc('cad_creado_en')->take(3)->pluck('cad_producto_id')->map(fn ($id) => (int) $id)->all() ?? []);
         $excluded = collect($cart?->items()->pluck('cad_producto_id') ?? [])->map(fn ($id) => (int) $id)->push($productId)->filter()->unique()->all();
         $seeds = $this->baseProducts((int) $country->pai_id)->whereIn('p.pro_id', $seedIds)->get();
-        if ($seeds->isEmpty()) {
-            return [];
-        }
-
         $candidates = $this->baseProducts((int) $country->pai_id)
             ->whereNotIn('p.pro_id', $excluded ?: [0])
             ->limit(180)->get();
         $popular = $this->recentPopularity((int) $country->pai_id, $candidates->pluck('pro_id')->all());
 
-        $ranked = $candidates->map(function ($candidate) use ($seeds, $popular) {
+        $cartRanked = $seeds->isEmpty() ? collect() : $candidates->map(function ($candidate) use ($seeds, $popular) {
             $best = ['score' => -1, 'reason' => 'POPULAR'];
             foreach ($seeds as $seed) {
                 $score = 0;
@@ -78,13 +74,121 @@ class StorefrontRecommendationService
                     $best = compact('score', 'reason');
                 }
             }
-            $candidate->recommendation_score = $best['score'];
+            $candidate->recommendation_score = 500 + $best['score'];
             $candidate->recommendation_reason = $best['reason'];
+            $candidate->recommendation_source = 'cart';
 
             return $candidate;
-        })->sort(fn ($a, $b) => [$b->recommendation_score, $b->ppa_es_popular, -$b->pro_id] <=> [$a->recommendation_score, $a->ppa_es_popular, -$a->pro_id]);
+        })->filter(fn ($candidate) => $candidate->recommendation_score >= 525)
+            ->sort(fn ($a, $b) => [$b->recommendation_score, $b->ppa_es_popular, -$b->pro_id] <=> [$a->recommendation_score, $a->ppa_es_popular, -$a->pro_id]);
+
+        $historyRanked = $placement === 'CART_RECOMMENDATIONS' && $customer
+            ? $this->purchaseHistoryRanked((int) $country->pai_id, $customer, $candidates, $excluded)
+            : collect();
+        $fallback = $candidates->map(function ($candidate) use ($popular) {
+            $candidate = clone $candidate;
+            $candidate->recommendation_score = min(20, (int) ($popular[$candidate->pro_id] ?? 0)) + ((int) $candidate->ppa_es_popular * 20);
+            $candidate->recommendation_reason = 'POPULAR';
+            $candidate->recommendation_source = 'fallback';
+
+            return $candidate;
+        })->sortByDesc('recommendation_score');
+        $ranked = $cartRanked
+            ->concat($historyRanked)
+            ->concat($fallback)
+            ->unique('pro_id')
+            ->values();
 
         return $this->available($ranked, $cart, (int) $country->pai_id, strtolower((string) $country->pai_codigo))->take($limit)->values()->map(fn ($row, $i) => $this->normalize($row, $i + 1, (string) $country->pai_codigo))->all();
+    }
+
+    public static function forgetPurchaseHistory(int $customerId, int $countryId): void
+    {
+        Cache::forget(self::purchaseHistoryCacheKey($customerId, $countryId));
+    }
+
+    private function purchaseHistoryRanked(int $countryId, StorefrontCustomer $customer, Collection $candidates, array $excluded): Collection
+    {
+        $history = Cache::remember(
+            self::purchaseHistoryCacheKey((int) $customer->getKey(), $countryId),
+            now()->addMinutes(self::PURCHASE_HISTORY_CACHE_MINUTES),
+            fn () => $this->purchaseHistory($countryId, (int) $customer->getKey()),
+        );
+        $seeds = collect($history['products'] ?? []);
+        if ($seeds->isEmpty()) {
+            return collect();
+        }
+        $purchasedIds = collect($history['product_ids'] ?? [])->map(fn ($id) => (int) $id)->all();
+
+        return $candidates
+            ->reject(fn ($candidate) => in_array((int) $candidate->pro_id, $purchasedIds, true) || in_array((int) $candidate->pro_id, $excluded, true))
+            ->map(function ($candidate) use ($seeds) {
+                $best = ['score' => 0, 'reason' => 'PURCHASE_HISTORY'];
+                foreach ($seeds as $seed) {
+                    $character = $this->same($candidate->pro_personaje, $seed->pro_personaje)
+                        || $this->same($candidate->pro_oc_personaje, $seed->pro_oc_personaje)
+                        || $this->same($candidate->pro_oc_licencia, $seed->pro_oc_licencia);
+                    $categoryGender = (int) $candidate->pro_categoria === (int) $seed->pro_categoria
+                        && $this->same($candidate->pro_oc_genero, $seed->pro_oc_genero);
+                    $brandCollection = $this->same($candidate->pro_marca, $seed->pro_marca)
+                        || $this->same($candidate->pro_coleccion, $seed->pro_coleccion);
+                    $score = ($character ? 300 : 0) + ($categoryGender ? 200 : 0) + ($brandCollection ? 100 : 0);
+                    $reason = $character ? 'PURCHASE_CHARACTER' : ($categoryGender ? 'PURCHASE_CATEGORY_GENDER' : ($brandCollection ? 'PURCHASE_BRAND_COLLECTION' : 'PURCHASE_HISTORY'));
+                    if ($score > $best['score']) {
+                        $best = compact('score', 'reason');
+                    }
+                }
+                $candidate = clone $candidate;
+                $candidate->recommendation_score = $best['score'];
+                $candidate->recommendation_reason = $best['reason'];
+                $candidate->recommendation_source = 'purchase_history';
+
+                return $candidate;
+            })
+            ->filter(fn ($candidate) => $candidate->recommendation_score > 0)
+            ->sortByDesc('recommendation_score')
+            ->values();
+    }
+
+    private function purchaseHistory(int $countryId, int $customerId): array
+    {
+        $payments = DB::table('stj_pedidos_pago as pay')
+            ->join('stj_pedidos as orders', 'orders.ped_id', '=', 'pay.ppa_pedido')
+            ->leftJoin('stj_carritos as carts', 'carts.car_pedido_id', '=', 'orders.ped_id')
+            ->where('pay.ppa_estado', 'APROBADA')
+            ->where('orders.ped_id_pais', $countryId)
+            ->where(function ($query) use ($customerId) {
+                $query->where('orders.ped_user', $customerId)
+                    ->orWhere('carts.car_usu_id', $customerId);
+            })
+            ->orderByDesc('pay.ppa_fecha')
+            ->limit(5)
+            ->get(['orders.ped_id', 'pay.ppa_ref']);
+        if ($payments->isEmpty()) {
+            return ['product_ids' => [], 'products' => []];
+        }
+        $productIds = DB::table('stj_pedidos_detalle')
+            ->where('car_pais', $countryId)
+            ->where('car_accion', 'AGREGADO')
+            ->whereIn('car_ref', $payments->pluck('ppa_ref')->all())
+            ->whereNotNull('car_producto')
+            ->pluck('car_producto')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        return [
+            'product_ids' => $productIds->all(),
+            'products' => DB::table('stj_productos as p')
+                ->whereIn('p.pro_id', $productIds->all())
+                ->get(['p.pro_id', 'p.pro_categoria', 'p.pro_coleccion', 'p.pro_marca', 'p.pro_personaje', 'p.pro_oc_personaje', 'p.pro_oc_licencia', 'p.pro_oc_genero'])
+                ->all(),
+        ];
+    }
+
+    private static function purchaseHistoryCacheKey(int $customerId, int $countryId): string
+    {
+        return "storefront:recommendations:purchase_history:{$customerId}:{$countryId}";
     }
 
     private function recentlyViewed(int $countryId, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, ?StorefrontCart $cart, int $limit): array
@@ -111,7 +215,7 @@ class StorefrontRecommendationService
         return DB::table('stj_productos as p')->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
             ->leftJoin('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
             ->where('pp.ppa_pais', $countryId)->where('pp.ppa_estado', 'ACTIVO')->where('p.pro_estatus', 'ACTIVO')->where('pp.ppa_precio', '>', 0)
-            ->select(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_categoria', 'p.pro_coleccion', 'p.pro_marca', 'p.pro_oc_genero', 'p.pro_tallas', 'p.pro_thumbs', 'p.pro_registro', 'pp.ppa_precio', 'pp.ppa_precio_talla', 'pp.ppa_descuento', 'pp.ppa_es_popular', 'c.cat_nombre'])
+            ->select(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_categoria', 'p.pro_coleccion', 'p.pro_marca', 'p.pro_personaje', 'p.pro_oc_personaje', 'p.pro_oc_licencia', 'p.pro_oc_genero', 'p.pro_tallas', 'p.pro_thumbs', 'p.pro_registro', 'pp.ppa_precio', 'pp.ppa_precio_talla', 'pp.ppa_descuento', 'pp.ppa_es_popular', 'c.cat_nombre'])
             ->selectRaw("CASE WHEN pp.ppa_precio_talla = 'SI' THEN COALESCE((SELECT MIN(pta.pta_precio) FROM stj_producto_talla pta WHERE pta.pta_pais = pp.ppa_pais AND pta.pta_producto = p.pro_id AND pta.pta_precio > 0), pp.ppa_precio) ELSE pp.ppa_precio END AS display_price");
     }
 
@@ -162,7 +266,9 @@ class StorefrontRecommendationService
         $currency = ['GT' => 'GTQ', 'CR' => 'CRC', 'DO' => 'DOP', 'HN' => 'HNL'][strtoupper($countryCode)] ?? 'USD';
         $image = StorefrontImageUrl::image((string) $row->pro_thumbs, 'p400');
 
-        return ['product_id' => (int) $row->pro_id, 'id' => (int) $row->pro_id, 'slug' => Str::slug($row->pro_nombre).'-'.$row->pro_id, 'sku' => $row->pro_codigo, 'nombre' => $row->pro_nombre, 'name' => $row->pro_nombre, 'marca' => $row->pro_marca, 'brand' => $row->pro_marca, 'coleccion' => $row->pro_coleccion, 'category' => $row->cat_nombre, 'image' => $image, 'imageUrl' => $image, 'price' => round($regular * (1 - $discount / 100), 2), 'previousPrice' => $discount > 0 ? $regular : null, 'priceFrom' => strtoupper((string) $row->ppa_precio_talla) === 'SI', 'currency' => $currency, 'available' => true, 'hasStock' => true, 'stockTotal' => (int) ($row->stock_total ?? 0), 'recommendation_reason' => $row->recommendation_reason ?? 'POPULAR', 'position' => $position, 'badge' => $discount > 0 ? 'Oferta' : 'Disponible', 'availableSizes' => $row->available_sizes ?? []];
+        $source = $row->recommendation_source ?? 'fallback';
+
+        return ['product_id' => (int) $row->pro_id, 'id' => (int) $row->pro_id, 'slug' => Str::slug($row->pro_nombre).'-'.$row->pro_id, 'sku' => $row->pro_codigo, 'nombre' => $row->pro_nombre, 'name' => $row->pro_nombre, 'marca' => $row->pro_marca, 'brand' => $row->pro_marca, 'coleccion' => $row->pro_coleccion, 'category' => $row->cat_nombre, 'image' => $image, 'imageUrl' => $image, 'price' => round($regular * (1 - $discount / 100), 2), 'previousPrice' => $discount > 0 ? $regular : null, 'priceFrom' => strtoupper((string) $row->ppa_precio_talla) === 'SI', 'currency' => $currency, 'available' => true, 'hasStock' => true, 'stockTotal' => (int) ($row->stock_total ?? 0), 'recommendation_reason' => $row->recommendation_reason ?? 'POPULAR', 'recommendation_source' => $source, 'position' => $position, 'badge' => $source === 'purchase_history' ? 'Recomendado para ti' : ($discount > 0 ? 'Oferta' : 'Disponible')];
     }
 
     private function same(mixed $a, mixed $b): bool

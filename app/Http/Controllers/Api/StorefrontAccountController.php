@@ -110,6 +110,7 @@ class StorefrontAccountController extends BaseController
                 $query->where('orders.ped_user', $customer->getKey())
                     ->orWhere('orders.ped_email', $customer->usu_correo ?: $customer->usu_usuario);
             })
+            ->where('payments.ppa_estado', 'APROBADA')
             ->orderByDesc('payments.ppa_fecha')
             ->limit(10)
             ->get([

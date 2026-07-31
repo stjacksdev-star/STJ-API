@@ -98,7 +98,7 @@ class StorefrontOrderService
             if (! ($validation['ok'] ?? false)) {
                 throw ValidationException::withMessages(['inventory' => $validation['message'] ?? 'El inventario cambio durante checkout.']);
             }
-            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
+            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
             $result = $this->create($trustedPayload);
             if (! ($result['ok'] ?? false)) {
                 throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
@@ -108,6 +108,9 @@ class StorefrontOrderService
             DB::table('stj_carrito_auditoria')->insert(['cau_carrito_id' => $cart->getKey(), 'cau_visitante_id' => $visitor->getKey(), 'cau_usu_id' => $customer?->getKey(), 'cau_accion' => 'ORDER_CREATED', 'cau_origen' => 'WEB', 'cau_datos_anteriores' => json_encode(['state' => 'CHECKOUT']), 'cau_datos_nuevos' => json_encode(['state' => 'CONVERTIDO', 'orderId' => $orderId]), 'cau_ocurrido_en' => now()]);
             CustomerEvent::query()->create(['cev_event_uuid' => $payload['operation_uuid'], 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_pedido_id' => $orderId, 'cev_tipo' => 'ORDER_CREATED', 'cev_valor' => $result['order']['total'], 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
             DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => $payload['operation_uuid'], 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_usu_id' => $customer?->getKey(), 'cao_tipo' => 'ORDER_CREATE', 'cao_payload_hash' => $hash, 'cao_respuesta' => json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION), 'cao_creado_en' => now()]);
+            if ($customer && data_get($result, 'order.paymentStatus') === 'APROBADA') {
+                StorefrontRecommendationService::forgetPurchaseHistory((int) $customer->getKey(), (int) $cart->car_pais_id);
+            }
 
             return $result;
         });
@@ -225,8 +228,8 @@ class StorefrontOrderService
                 'ped_estatus_productos' => 'COMPLETO',
                 'ped_checkout' => $checkoutType,
                 'ped_tienda' => $storeCode,
-                'ped_login' => 'INVITADO',
-                'ped_user' => null,
+                'ped_login' => ! empty($payload['customerId']) ? 'CLIENTE' : 'INVITADO',
+                'ped_user' => $payload['customerId'] ?? null,
                 'ped_sesion' => $payload['guestCartId'],
                 'ped_nombres' => $this->limit($customer['firstName'] ?? '', 30),
                 'ped_apellidos' => $this->limit($customer['lastName'] ?? '', 30),
@@ -347,7 +350,7 @@ class StorefrontOrderService
                     'car_tipo' => $checkoutType,
                     'car_accion' => 'AGREGADO',
                     'car_sesion' => null,
-                    'car_usuario' => null,
+                    'car_usuario' => $payload['customerId'] ?? null,
                     'car_fecha' => $now,
                     'car_producto' => $item['productId'],
                     'car_precio' => $item['regularPrice'],
