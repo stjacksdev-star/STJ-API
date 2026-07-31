@@ -71,7 +71,9 @@ class ProductDetailAvailabilityService
             ];
         }
 
-        $rule = $this->resolver->resolve($countryCode, $scope);
+        $rule = $scope === 'cart_store_change'
+            ? $this->resolver->resolveStoreChange($countryCode)
+            : $this->resolver->resolve($countryCode, $scope);
         $providerResult = $this->fetchAvailability(
             (int) $country->pai_id,
             $countryCode,

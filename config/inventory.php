@@ -12,8 +12,11 @@ return [
         'product_list',
         'product_detail',
         'cart',
+        'cart_store_change',
         'checkout',
     ],
+
+    'global_fallback_source' => env('INVENTORY_GLOBAL_FALLBACK_SOURCE'),
 
     'external' => [
         'token' => env('INVENTORY_API_TOKEN', env('STJ_API_TOKEN', '')),

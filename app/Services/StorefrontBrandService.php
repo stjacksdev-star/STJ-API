@@ -231,7 +231,9 @@ class StorefrontBrandService
                     'sku' => $sku,
                     'price' => (float) $product->ppa_precio,
                     'currency' => $this->currencyForCountry(strtolower((string) $country->pai_codigo)),
-                    'badge' => trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible'))),
+                    'badge' => isset($product->pme_ranking_ventas)
+                        ? '#'.(int) $product->pme_ranking_ventas
+                        : trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible'))),
                     'category' => $category,
                     'subcategory' => $subcategory,
                     'brand' => StorefrontBrandMap::canonical($brandSlug),
@@ -249,14 +251,28 @@ class StorefrontBrandService
 
     private function featuredProducts(int $countryId, object $country, string $brandSlug): array
     {
-        $query = $this->baseProductQuery($countryId);
+        $period = app(ProductBestSellerCalculator::class)->period(30);
+        $query = DB::table('stj_producto_metricas as metrics')
+            ->join('stj_productos as p', 'p.pro_id', '=', 'metrics.pme_producto')
+            ->join('stj_producto_pais as pp', function ($join) {
+                $join->on('pp.ppa_producto', '=', 'p.pro_id')
+                    ->on('pp.ppa_pais', '=', 'metrics.pme_pais');
+            })
+            ->leftJoin('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
+            ->leftJoin('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
+            ->where('metrics.pme_pais', $countryId)
+            ->where('metrics.pme_periodo', $period)
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO');
         StorefrontBrandMap::applyProductBrandFilter($query, $brandSlug);
 
         $rawProducts = $query
-            ->where('pp.ppa_es_popular', 1)
-            ->orderByDesc('pp.ppa_es_popular')
-            ->orderByDesc('p.pro_registro')
-            ->select($this->productSelects())
+            ->orderBy('metrics.pme_ranking_ventas')
+            ->orderByDesc('metrics.pme_ventas_unidades')
+            ->select([
+                ...$this->productSelects(),
+                'metrics.pme_ranking_ventas',
+            ])
             ->limit(10)
             ->get();
 

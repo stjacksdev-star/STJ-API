@@ -380,21 +380,21 @@ class StorefrontCartService
         return $cart;
     }
 
-    private function commercial(StorefrontCart $cart, array $input): array
+    private function commercial(StorefrontCart $cart, array $input, string $inventoryScope = 'cart'): array
     {
         $price = $this->pricing->resolve((int) $cart->car_pais_id, (int) $input['product_id'], trim($input['sku']), trim($input['size']), now());
         if (! $price['ok']) {
             throw ValidationException::withMessages(['price' => $price['message']]);
         } $country = DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo');
         $slug = Str::slug($price['name']).'-'.$price['productId'];
-        $availability = $this->availability->forCountryAndSlug(strtolower($country), $slug, (string) $cart->car_tienda_codigo_snapshot, 'cart');
+        $availability = $this->availability->forCountryAndSlug(strtolower($country), $slug, (string) $cart->car_tienda_codigo_snapshot, $inventoryScope);
         $sizeData = collect($availability['sizes'] ?? [])->firstWhere('size', $price['size']);
         $available = (int) ($sizeData['quantityInActiveStore'] ?? 0);
         if ($available < 1) {
             $this->stockError($available);
         }
 
-        return ['productId' => $price['productId'], 'sku' => $price['sku'], 'name' => $price['name'], 'size' => $price['size'], 'available' => $available, 'regular' => $price['precio_regular'], 'discount' => $price['descuento'], 'final' => $price['precio_final'], 'promotion' => $price['promocion']];
+        return ['productId' => $price['productId'], 'sku' => $price['sku'], 'name' => $price['name'], 'size' => $price['size'], 'available' => $available, 'regular' => $price['precio_regular'], 'discount' => $price['descuento'], 'final' => $price['precio_final'], 'promotion' => $price['promocion'], 'inventorySource' => $availability['inventorySource'] ?? null];
     }
 
     private function refreshPrices(StorefrontCart $cart, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
@@ -446,6 +446,11 @@ class StorefrontCartService
 
     private function evaluateContext(StorefrontCart $cart, array $context): array
     {
+        $current = $this->context($cart);
+        if ($current['type'] === $context['type'] && (string) $current['storeCode'] === (string) $context['storeCode']) {
+            return ['affectedCount' => 0, 'items' => [], 'alerts' => [], 'inventorySource' => null];
+        }
+
         $virtual = clone $cart;
         $virtual->car_tipo = $context['type'];
         $virtual->car_tienda_id = $context['storeId'];
@@ -456,22 +461,62 @@ class StorefrontCartService
         $affected = 0;
         foreach ($cart->items()->get() as $line) {
             try {
-                $commercial = $this->commercial($virtual, ['product_id' => $line->cad_producto_id, 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'quantity' => $line->cad_cantidad]);
+                $commercial = $this->commercial($virtual, ['product_id' => $line->cad_producto_id, 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'quantity' => $line->cad_cantidad], 'cart_store_change');
                 $quantity = min((int) $line->cad_cantidad, $commercial['available'], 99);
-                $changed = $quantity !== (int) $line->cad_cantidad || $this->money($line->cad_precio_final_unitario) !== $commercial['final'];
-                if ($changed) {
-                    $affected++;
-                }$items[] = ['id' => $line->getKey(), 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'status' => 'DISPONIBLE', 'quantity' => $quantity, 'previousQuantity' => (int) $line->cad_cantidad, 'priceChanged' => $this->money($line->cad_precio_final_unitario) !== $commercial['final'], 'commercial' => $commercial, 'message' => $changed ? 'Cantidad o precio sera actualizado.' : 'Sin cambios.'];
+                $priceChanged = $this->money($line->cad_precio_final_unitario) !== $commercial['final'];
+                $changed = $quantity !== (int) $line->cad_cantidad || $priceChanged;
+                $items[] = ['id' => $line->getKey(), 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'status' => 'DISPONIBLE', 'availability' => true, 'requestedQuantity' => (int) $line->cad_cantidad, 'availableQuantity' => $commercial['available'], 'quantity' => $quantity, 'previousQuantity' => (int) $line->cad_cantidad, 'priceChanged' => $priceChanged, 'promotionChanged' => false, 'commercial' => $commercial, 'message' => $changed ? 'Cantidad o precio sera actualizado.' : 'Sin cambios.'];
             } catch (ValidationException $e) {
+                if (isset($e->errors()['inventory_rule'])) {
+                    throw $e;
+                }
                 $affected++;
                 $message = (string) collect($e->errors())->flatten()->first();
                 $status = str_contains(strtolower($message), 'precio') ? 'PRECIO_NO_DISPONIBLE' : (str_contains(strtolower($message), 'talla') ? 'TALLA_NO_DISPONIBLE' : 'SIN_EXISTENCIA');
-                $items[] = ['id' => $line->getKey(), 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'status' => $status, 'quantity' => (int) $line->cad_cantidad, 'previousQuantity' => (int) $line->cad_cantidad, 'priceChanged' => false, 'commercial' => null, 'message' => $message];
+                $items[] = ['id' => $line->getKey(), 'sku' => $line->cad_ref, 'size' => $line->cad_talla, 'status' => $status, 'availability' => false, 'requestedQuantity' => (int) $line->cad_cantidad, 'availableQuantity' => 0, 'quantity' => (int) $line->cad_cantidad, 'previousQuantity' => (int) $line->cad_cantidad, 'priceChanged' => false, 'promotionChanged' => false, 'commercial' => null, 'message' => $message];
                 $alerts[] = ['type' => $status, 'itemId' => $line->getKey(), 'message' => $message];
             }
         }
 
-        return ['affectedCount' => $affected, 'items' => $items, 'alerts' => $alerts];
+        $availableItems = collect($items)->where('availability', true);
+        if ($availableItems->isNotEmpty()) {
+            $resolver = $this->promotionResolver ?? app(StorefrontPromotionResolver::class);
+            $promotionLines = fn (bool $proposed) => $availableItems->map(fn (array $item) => [
+                'key' => (string) $item['id'],
+                'productId' => (int) $item['commercial']['productId'],
+                'quantity' => $proposed ? (int) $item['quantity'] : (int) $item['requestedQuantity'],
+                'unitPrice' => $proposed ? (float) $item['commercial']['regular'] : (float) $cart->items->firstWhere('cad_id', $item['id'])->cad_precio_unitario,
+            ])->values()->all();
+            $resolvePromotions = fn (array $fulfillment, bool $proposed) => collect($resolver->resolve([
+                'countryId' => (int) $cart->car_pais_id,
+                'checkoutType' => (string) $fulfillment['type'],
+                'storeId' => $fulfillment['type'] === 'TIENDA' ? (int) $fulfillment['storeId'] : null,
+                'storeName' => $fulfillment['storeName'] ?? null,
+                'currencySymbol' => $this->currencySymbol((string) $cart->car_moneda),
+                'lines' => $promotionLines($proposed),
+            ])['lines'])->keyBy('key');
+            $currentPromotions = $resolvePromotions($current, false);
+            $proposedPromotions = $resolvePromotions($context, true);
+            foreach ($items as &$item) {
+                if (! $item['availability']) {
+                    continue;
+                }
+                $before = $currentPromotions->get((string) $item['id']);
+                $after = $proposedPromotions->get((string) $item['id']);
+                $item['promotionChanged'] = json_encode($before['promotion'] ?? null) !== json_encode($after['promotion'] ?? null)
+                    || $this->money($before['discount'] ?? 0) !== $this->money($after['discount'] ?? 0);
+                if ($item['promotionChanged']) {
+                    $item['message'] = 'Cantidad, precio o promocion sera actualizado.';
+                }
+            }
+            unset($item);
+        }
+        $affected = collect($items)->filter(fn (array $item) => ! $item['availability']
+            || $item['quantity'] !== $item['requestedQuantity']
+            || $item['priceChanged']
+            || $item['promotionChanged'])->count();
+
+        return ['affectedCount' => $affected, 'items' => $items, 'alerts' => $alerts, 'inventorySource' => data_get($items, '0.commercial.inventorySource')];
     }
 
     private function lineValues(array $c, int $q): array

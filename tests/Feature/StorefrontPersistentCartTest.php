@@ -329,6 +329,11 @@ class StorefrontPersistentCartTest extends TestCase
         $preview = $this->service->previewFulfillment('sv', $this->visitor, null, ['fulfillment_type' => 'TIENDA', 'store_code' => '002']);
         $this->assertSame('DOMICILIO', $preview['current']['type']);
         $this->assertSame('TIENDA', $preview['proposed']['type']);
+        $this->assertSame(1, $preview['impact']['items'][0]['requestedQuantity']);
+        $this->assertSame(5, $preview['impact']['items'][0]['availableQuantity']);
+        $this->assertTrue($preview['impact']['items'][0]['availability']);
+        $this->assertArrayHasKey('priceChanged', $preview['impact']['items'][0]);
+        $this->assertArrayHasKey('promotionChanged', $preview['impact']['items'][0]);
         $this->assertDatabaseHas('stj_carritos', ['car_tipo' => 'DOMICILIO', 'car_tienda_codigo_snapshot' => '57']);
 
         $input = ['operation_uuid' => (string) Str::uuid(), 'fulfillment_type' => 'TIENDA', 'store_code' => '002', 'confirm_affected' => true];

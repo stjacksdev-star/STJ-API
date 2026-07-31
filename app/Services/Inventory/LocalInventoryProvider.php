@@ -10,7 +10,13 @@ class LocalInventoryProvider
     {
         try {
             $rows = DB::table('stj_inventario as i')
+                ->join('stj_tiendas as t', function ($join) {
+                    $join->on('t.tie_codigo', '=', 'i.inv_tienda')
+                        ->on('t.tie_pais', '=', 'i.inv_pais');
+                })
                 ->where('i.inv_pais', $countryId)
+                ->where('t.tie_pais', $countryId)
+                ->where('t.tie_codigo', $storeCode)
                 ->where('i.inv_tienda', $storeCode)
                 ->whereIn('i.inv_codigo', $productCodes)
                 ->where('i.inv_cantidad', '>', 0)
