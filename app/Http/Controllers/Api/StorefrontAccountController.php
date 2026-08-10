@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\StorefrontCustomer;
 use App\Support\StorefrontImageUrl;
+use App\Services\StorefrontFavoriteService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -28,7 +29,11 @@ class StorefrontAccountController extends BaseController
             return $this->error('El correo o la contrasena no son correctos.', 401);
         }
 
-        return $this->success($this->sessionPayload($customer), 'Sesion iniciada');
+        $visitor = $request->attributes->get('storefrontVisitor');
+        $favoriteService = app(StorefrontFavoriteService::class);
+        if ($visitor) $favoriteService->merge($visitor, $customer);
+
+        return $this->success($this->sessionPayload($customer) + ['favorites' => $favoriteService->consolidated($customer)], 'Sesion iniciada');
     }
 
     public function registrationCountries()
@@ -84,7 +89,11 @@ class StorefrontAccountController extends BaseController
 
         $customer = StorefrontCustomer::query()->findOrFail($customerId);
 
-        return $this->success($this->sessionPayload($customer), 'Cuenta creada correctamente');
+        $favoriteService = app(StorefrontFavoriteService::class);
+        $visitor = $request->attributes->get('storefrontVisitor');
+        if ($visitor) $favoriteService->merge($visitor, $customer);
+
+        return $this->success($this->sessionPayload($customer) + ['favorites' => $favoriteService->consolidated($customer)], 'Cuenta creada correctamente');
     }
 
     public function show(Request $request)

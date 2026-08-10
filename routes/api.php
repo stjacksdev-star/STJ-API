@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontEventController;
+use App\Http\Controllers\Api\StorefrontFavoriteController;
 use App\Http\Controllers\Api\StorefrontHomeController;
 use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
@@ -94,6 +95,11 @@ Route::get('/storefront/checkout/catalogs/countries/{country}/states/{state}/cit
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
+Route::prefix('/storefront/favorites/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
+    Route::get('/', [StorefrontFavoriteController::class, 'index']);
+    Route::post('/', [StorefrontFavoriteController::class, 'store']);
+    Route::delete('/{product}', [StorefrontFavoriteController::class, 'destroy'])->whereNumber('product');
+});
 Route::prefix('/storefront/recommendations/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
     Route::get('/recently-viewed', [StorefrontRecommendationController::class, 'recentlyViewed']);
     Route::get('/product/{product}', [StorefrontRecommendationController::class, 'product'])->whereNumber('product');
