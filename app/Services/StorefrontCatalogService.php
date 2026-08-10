@@ -216,7 +216,35 @@ class StorefrontCatalogService
             return;
         }
 
-        $query->whereIn('c.cat_nombre', $categories);
+        $additionalSubcategoryIds = $this->additionalSubcategoryIds($categories);
+
+        $query->where(function ($scope) use ($categories, $additionalSubcategoryIds) {
+            $scope->whereIn('c.cat_nombre', $categories);
+
+            if ($additionalSubcategoryIds !== []) {
+                $scope->orWhereIn('p.pro_sub_categoria', $additionalSubcategoryIds);
+            }
+        });
+    }
+
+    /**
+     * Categories may explicitly absorb products from subcategories that belong
+     * to other categories. The database remains the authority for this scope.
+     */
+    private function additionalSubcategoryIds(array $categoryNames): array
+    {
+        return DB::table('stj_categorias')
+            ->whereIn('cat_nombre', $categoryNames)
+            ->where('cat_si_sub_otras', 1)
+            ->pluck('cat_sub_otras')
+            ->flatMap(function ($value) {
+                return preg_split('/\s*,\s*/', trim((string) $value), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            })
+            ->filter(fn ($id) => ctype_digit((string) $id) && (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function applyCategoryFilter($query, string $category): void
