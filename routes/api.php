@@ -28,8 +28,8 @@ use App\Http\Controllers\Api\StorefrontBestSellerController;
 use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
-use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
+use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontFavoriteController;
@@ -43,6 +43,8 @@ use App\Http\Controllers\Api\StorefrontRecommendationController;
 use App\Http\Controllers\Api\StorefrontShippingController;
 use App\Http\Controllers\Api\StorefrontStoreController;
 use App\Http\Controllers\Api\StorefrontSubscriberController;
+use App\Http\Controllers\Api\StorefrontWebPushSubscriptionController;
+use App\Http\Controllers\Api\WebPushClickController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -94,6 +96,14 @@ Route::get('/storefront/checkout/catalogs/countries/{country}/states', [Storefro
 Route::get('/storefront/checkout/catalogs/countries/{country}/states/{state}/cities', [StorefrontCheckoutCatalogController::class, 'cities'])->whereNumber(['country', 'state']);
 Route::post('/storefront/subscribers/{country}', [StorefrontSubscriberController::class, 'store'])
     ->where('country', '[A-Za-z]{2}');
+Route::prefix('/storefront/push-subscriptions/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
+    Route::post('/', [StorefrontWebPushSubscriptionController::class, 'store'])->middleware('throttle:20,1');
+    Route::delete('/', [StorefrontWebPushSubscriptionController::class, 'destroy'])->middleware('throttle:20,1');
+});
+Route::get('/storefront/push/deliveries/{delivery}/click', WebPushClickController::class)
+    ->whereNumber('delivery')
+    ->middleware(['signed:relative', 'throttle:60,1'])
+    ->name('storefront.push.click');
 Route::post('/storefront/events', [StorefrontEventController::class, 'store']);
 Route::prefix('/storefront/favorites/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
     Route::get('/', [StorefrontFavoriteController::class, 'index']);

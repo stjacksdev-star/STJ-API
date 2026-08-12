@@ -47,6 +47,7 @@ return [
         'token_chunk_size' => env('FCM_TOKEN_CHUNK_SIZE', 50),
         'image_base_url' => env('FCM_IMAGE_BASE_URL', 'https://stjacks.com'),
         'icon_url' => env('FCM_ICON_URL', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/logos/notificaciones_push/logostj.png'),
+        'web_home_url' => env('FCM_WEB_HOME_URL', 'https://stjacks.com'),
     ],
 
     'slack' => [

@@ -11,6 +11,15 @@ use Throwable;
 
 class FirebasePushService
 {
+    public function isInvalidTokenResult(string $result): bool
+    {
+        $normalized = strtoupper($result);
+
+        return str_contains($normalized, 'UNREGISTERED')
+            || str_contains($normalized, 'REGISTRATION-TOKEN-NOT-REGISTERED')
+            || str_contains($normalized, 'REQUESTED ENTITY WAS NOT FOUND');
+    }
+
     /**
      * @param  array<string, mixed>  $data
      */

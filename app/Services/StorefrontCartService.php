@@ -24,6 +24,7 @@ class StorefrontCartService
         private StorefrontCheckoutValidationService $checkoutValidation,
         private ?StorefrontShippingService $shipping = null,
         private ?StorefrontPromotionResolver $promotionResolver = null,
+        private ?WebPushDeliveryCancellationService $pushDeliveryCancellation = null,
     ) {}
 
     public function startCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
@@ -125,6 +126,7 @@ class StorefrontCartService
                 $destinationHash = $this->destinationHash($cart->car_tipo === 'TIENDA' ? [] : ($input['delivery'] ?? []));
                 $previousState = (string) $cart->car_estado;
                 $cart->forceFill(['car_estado' => 'CHECKOUT', 'car_checkout_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
+                $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito inicio checkout.');
                 $summary = ['service' => $cart->car_tipo, 'store' => $store, 'operationalStoreCode' => (string) $cart->car_tienda_codigo_snapshot, 'lines' => $authorized->all(), 'baseSubtotal' => $baseSubtotal, 'discount' => $discount, 'discountPercentage' => $discountPercentage, 'subtotal' => $subtotal, 'shipping' => $shippingAmount, 'taxes' => $taxes, 'total' => $total, 'currency' => $cart->car_moneda, 'shipping_source' => $shipping['source'], 'shipping_quote' => $shipping, 'destinationHash' => $destinationHash, 'alerts' => [], 'cartVersion' => (int) $cart->car_version];
                 $this->audit($cart, null, $visitor, $customer, 'CHECKOUT_STARTED', ['state' => $previousState], ['state' => 'CHECKOUT', 'version' => $cart->car_version, 'destinationHash' => $destinationHash]);
                 CustomerEvent::query()->create(['cev_event_uuid' => $input['operation_uuid'] ?? (string) Str::uuid(), 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_tipo' => 'BEGIN_CHECKOUT', 'cev_valor' => $total, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => ['cartVersion' => $cart->car_version, 'shippingSource' => $shipping['source']]]);
@@ -215,7 +217,9 @@ class StorefrontCartService
                 $this->audit($cart, $line, $visitor, $customer, 'CHECKOUT_SCOPE_VALIDATED', $old, $this->auditLine($line));
                 $changed = true;
             }
-            if ($changed) $this->touch($cart);
+            if ($changed) {
+                $this->touch($cart);
+            }
 
             return ['ok' => (bool) ($validation['ok'] ?? false), 'message' => $validation['message'] ?? 'Carrito validado.', 'validation' => $validation, ...$this->payload($cart)];
         });
@@ -362,6 +366,7 @@ class StorefrontCartService
                     }
                 }
                 $source->forceFill(['car_estado' => 'MERGED', 'car_actualizado_en' => now()])->save();
+                $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $source->getKey(), 'El carrito fue fusionado con otro carrito.');
                 $this->audit($destination, null, $visitor, $customer, 'CART_MERGED', ['sourceCartId' => $source->getKey()], ['destinationCartId' => $destination->getKey()]);
                 $this->touch($destination);
 
@@ -604,6 +609,7 @@ class StorefrontCartService
     private function touch(StorefrontCart $cart): void
     {
         $cart->forceFill(['car_version' => $cart->car_version + 1, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addDays(30), 'car_actualizado_en' => now()])->save();
+        $this->pushCancellation()->cancelStaleCartDeliveries((int) $cart->getKey(), (int) $cart->car_version, 'El carrito cambio despues de crear la entrega.');
     }
 
     private function invalidateCheckout(StorefrontCart $cart, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): void
@@ -612,7 +618,13 @@ class StorefrontCartService
             return;
         }
         $cart->forceFill(['car_estado' => 'ACTIVO', 'car_checkout_en' => null, 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
+        $this->pushCancellation()->cancelStaleCartDeliveries((int) $cart->getKey(), (int) $cart->car_version, 'El checkout fue invalidado y el carrito cambio.');
         $this->audit($cart, null, $visitor, $customer, 'CHECKOUT_INVALIDATED', ['state' => 'CHECKOUT'], ['state' => 'ACTIVO']);
+    }
+
+    private function pushCancellation(): WebPushDeliveryCancellationService
+    {
+        return $this->pushDeliveryCancellation ??= app(WebPushDeliveryCancellationService::class);
     }
 
     private function audit(StorefrontCart $cart, ?StorefrontCartItem $line, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $action, ?array $old, ?array $new): void

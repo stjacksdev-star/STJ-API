@@ -14,7 +14,9 @@ class ResolveStorefrontVisitor
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (! $request->is('api/storefront/*') || $request->is('api/storefront/payments/powertranz/return/*')) {
+        if (! $request->is('api/storefront/*')
+            || $request->is('api/storefront/payments/powertranz/return/*')
+            || $request->is('api/storefront/push/deliveries/*/click')) {
             return $next($request);
         }
 

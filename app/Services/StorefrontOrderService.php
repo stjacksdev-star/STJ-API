@@ -20,6 +20,8 @@ class StorefrontOrderService
         private StorefrontProductPricingService $pricing,
         private ?StorefrontShippingService $shipping = null,
         private ?StorefrontPromotionResolver $promotionResolver = null,
+        private ?WebPushDeliveryCancellationService $pushDeliveryCancellation = null,
+        private ?WebPushMeasurementService $pushMeasurements = null,
     ) {
         $this->checkoutValidationService = $checkoutValidationService;
     }
@@ -110,6 +112,8 @@ class StorefrontOrderService
             }
             $orderId = (int) $result['order']['pedidoId'];
             $cart->forceFill(['car_pedido_id' => $orderId, 'car_estado' => 'CONVERTIDO', 'car_convertido_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
+            $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito fue convertido en pedido.');
+            $this->pushMeasurements()->recordCartConverted((int) $cart->getKey(), $orderId);
             DB::table('stj_carrito_auditoria')->insert(['cau_carrito_id' => $cart->getKey(), 'cau_visitante_id' => $visitor->getKey(), 'cau_usu_id' => $customer?->getKey(), 'cau_accion' => 'ORDER_CREATED', 'cau_origen' => 'WEB', 'cau_datos_anteriores' => json_encode(['state' => 'CHECKOUT']), 'cau_datos_nuevos' => json_encode(['state' => 'CONVERTIDO', 'orderId' => $orderId]), 'cau_ocurrido_en' => now()]);
             CustomerEvent::query()->create(['cev_event_uuid' => $payload['operation_uuid'], 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_pedido_id' => $orderId, 'cev_tipo' => 'ORDER_CREATED', 'cev_valor' => $result['order']['total'], 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
             DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => $payload['operation_uuid'], 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_usu_id' => $customer?->getKey(), 'cao_tipo' => 'ORDER_CREATE', 'cao_payload_hash' => $hash, 'cao_respuesta' => json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION), 'cao_creado_en' => now()]);
@@ -119,6 +123,16 @@ class StorefrontOrderService
 
             return $result;
         });
+    }
+
+    private function pushCancellation(): WebPushDeliveryCancellationService
+    {
+        return $this->pushDeliveryCancellation ??= app(WebPushDeliveryCancellationService::class);
+    }
+
+    private function pushMeasurements(): WebPushMeasurementService
+    {
+        return $this->pushMeasurements ??= app(WebPushMeasurementService::class);
     }
 
     public function create(array $payload): array

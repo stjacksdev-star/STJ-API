@@ -126,3 +126,12 @@ Schedule::command('productos:calcular-metricas')
 Schedule::command('promotions:update')
     ->everyThirtyMinutes()
     ->withoutOverlapping();
+
+if (config('push_web.automation_enabled')) {
+    Schedule::command('push:web-evaluate --limit='.(int) config('push_web.evaluate_limit', 500))
+        ->everyFifteenMinutes()
+        ->withoutOverlapping(20);
+    Schedule::command('push:web-send-pending --limit='.(int) config('push_web.send_limit', 100))
+        ->everyFiveMinutes()
+        ->withoutOverlapping(10);
+}
