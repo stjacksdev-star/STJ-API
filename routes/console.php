@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Services\Dashboard\AssetPublicationService;
 use App\Services\PushNotificationService;
+use App\Services\CouponAudienceEmailService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -118,6 +119,12 @@ Artisan::command('assets:put', function (AssetPublicationService $assets) {
     return self::SUCCESS;
 })->purpose('Activa/finaliza assets y publica storage/app/storefront/assets.json');
 
+Artisan::command('coupons:send-pending-emails {--limit=25 : Máximo de correos por ejecución (límite duro: 25)}', function (CouponAudienceEmailService $emails) {
+    $summary = $emails->sendPending((int) $this->option('limit'));
+    $this->info("Pendientes: {$summary['pending']} | Enviados: {$summary['sent']} | Fallidos: {$summary['failed']} | Omitidos: {$summary['skipped']}");
+    return $summary['failed'] > 0 ? self::FAILURE : self::SUCCESS;
+})->purpose('Envía correos pendientes de cupones personales VIP y cargados por archivo');
+
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 Schedule::command('push:send-pending')->hourly();
 Schedule::command('productos:calcular-metricas')
@@ -126,6 +133,9 @@ Schedule::command('productos:calcular-metricas')
 Schedule::command('promotions:update')
     ->everyThirtyMinutes()
     ->withoutOverlapping();
+Schedule::command('coupons:send-pending-emails --limit=25')
+    ->everyTenMinutes()
+    ->withoutOverlapping(15);
 
 if (config('push_web.automation_enabled')) {
     Schedule::command('push:web-evaluate --limit='.(int) config('push_web.evaluate_limit', 500))

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\CartOperationConflict;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
+use App\Services\StorefrontCartCouponService;
 use App\Services\StorefrontCartService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,7 +13,28 @@ use Illuminate\Support\Facades\Auth;
 
 class StorefrontCartController extends BaseController
 {
-    public function __construct(private StorefrontCartService $carts) {}
+    public function __construct(private StorefrontCartService $carts, private StorefrontCartCouponService $coupons) {}
+
+    public function storeCoupon(Request $request, string $country): JsonResponse
+    {
+        $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'code' => ['required', 'string', 'max:100'], 'email' => ['nullable', 'email:rfc', 'max:255']]);
+
+        return $this->mutation(fn () => $this->coupons->add($country, $this->visitor($request), $this->customer(), $data), 'Cupón agregado.');
+    }
+
+    public function availableCoupons(Request $request, string $country): JsonResponse
+    {
+        $data = $request->validate(['email' => ['nullable', 'email:rfc', 'max:255']]);
+
+        return $this->success($this->coupons->available($country, $this->customer(), $data['email'] ?? null), 'Cupones disponibles.');
+    }
+
+    public function destroyCoupon(Request $request, string $country, int $application): JsonResponse
+    {
+        $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'email' => ['nullable', 'email:rfc', 'max:255']]);
+
+        return $this->mutation(fn () => $this->coupons->remove($country, $application, $this->visitor($request), $this->customer(), $data), 'Cupón eliminado.');
+    }
 
     public function show(Request $request, string $country): JsonResponse
     {

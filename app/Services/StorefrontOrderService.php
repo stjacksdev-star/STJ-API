@@ -8,6 +8,7 @@ use App\Models\StorefrontCart;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -22,6 +23,8 @@ class StorefrontOrderService
         private ?StorefrontPromotionResolver $promotionResolver = null,
         private ?WebPushDeliveryCancellationService $pushDeliveryCancellation = null,
         private ?WebPushMeasurementService $pushMeasurements = null,
+        private ?StorefrontCartCouponService $cartCoupons = null,
+        private ?StorefrontCouponOrderLifecycleService $couponLifecycle = null,
     ) {
         $this->checkoutValidationService = $checkoutValidationService;
     }
@@ -105,12 +108,16 @@ class StorefrontOrderService
                 $message = (string) ($validation['message'] ?? 'El inventario cambio durante checkout.');
                 throw ValidationException::withMessages(['inventory' => $failures->isEmpty() ? $message : $message.' '.$failures->implode('; ').'.']);
             }
-            $trustedPayload = ['country' => $countryCode, 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
+            $trustedPayload = ['country' => $countryCode, 'cartId' => (int) $cart->getKey(), 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
             $result = $this->create($trustedPayload);
             if (! ($result['ok'] ?? false)) {
                 throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
             }
             $orderId = (int) $result['order']['pedidoId'];
+            ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->snapshot((int) $cart->getKey(), $orderId);
+            if (data_get($result, 'order.paymentStatus') === 'APROBADA') {
+                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder($orderId);
+            }
             $cart->forceFill(['car_pedido_id' => $orderId, 'car_estado' => 'CONVERTIDO', 'car_convertido_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
             $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito fue convertido en pedido.');
             $this->pushMeasurements()->recordCartConverted((int) $cart->getKey(), $orderId);
@@ -219,6 +226,43 @@ class StorefrontOrderService
             $subtotal = $this->decimal($subtotalCents);
             $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, $checkoutType, data_get($payload, 'fulfillment.city_id'), $subtotal);
             $shippingCents = $this->cents((string) $shipping['shipping_amount']);
+            $couponResolution = null;
+            if (! empty($payload['cartId']) && Schema::hasTable('stj_carrito_cupones')) {
+                $couponCart = StorefrontCart::query()->whereKey($payload['cartId'])->first();
+                if ($couponCart) {
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate(
+                        $couponCart,
+                        (string) data_get($payload, 'customer.email', ''),
+                        (float) $shipping['shipping_amount'],
+                    );
+                    $couponLines = collect($couponResolution['lines'] ?? [])->keyBy('key');
+                    $items = collect($items)->map(function (array $item) use ($couponLines) {
+                        $couponLine = $couponLines->get((string) $item['key']);
+                        if (! $couponLine) {
+                            return $item;
+                        }
+                        $promotionDiscount = $this->cents($item['discount']);
+                        $couponDiscount = $this->cents((string) $couponLine['couponDiscount']);
+                        $finalTotal = (string) $couponLine['finalTotal'];
+
+                        return [
+                            ...$item,
+                            'discount' => $this->decimal($promotionDiscount + $couponDiscount),
+                            'couponDiscount' => (string) $couponLine['couponDiscount'],
+                            'finalTotal' => $finalTotal,
+                            'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
+                            'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
+                            'coupons' => $couponLine['coupons'],
+                        ];
+                    })->all();
+                    $discountCents = collect($items)->sum(fn (array $item) => $this->cents($item['discount']));
+                    $subtotalCents = collect($items)->sum(fn (array $item) => $this->cents($item['finalTotal']));
+                    $subtotal = $this->decimal($subtotalCents);
+                    $shippingCents = $this->cents((string) data_get($couponResolution, 'totals.shipping', $shipping['shipping_amount']));
+                    $shipping['shipping_amount'] = $this->decimal($shippingCents);
+                    $shipping['display_amount'] = $shippingCents === 0 ? 'GRATIS' : $shipping['display_amount'];
+                }
+            }
             $total = $this->decimal($subtotalCents + $shippingCents);
             $articleCount = collect($items)->sum('quantity');
             $customer = $payload['customer'];

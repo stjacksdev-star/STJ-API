@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Dashboard\AssetPublicationController as DashboardAs
 use App\Http\Controllers\Api\Dashboard\ClaimController as DashboardClaimController;
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
+use App\Http\Controllers\Api\Dashboard\CouponController as DashboardCouponController;
 use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
 use App\Http\Controllers\Api\Dashboard\ProductCategoryController as DashboardProductCategoryController;
 use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProductCountryController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\Api\StorefrontAssetController;
 use App\Http\Controllers\Api\StorefrontBestSellerController;
 use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
+use App\Http\Controllers\Api\StorefrontCouponLandingController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
@@ -83,6 +85,7 @@ Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class,
 Route::get('/storefront/collections/{country}/{collection}', [StorefrontCollectionController::class, 'show'])
     ->where('country', '[A-Za-z]{2}')
     ->whereNumber('collection');
+Route::get('/storefront/coupons/{country}/{header}', [StorefrontCouponLandingController::class, 'show'])->where(['country' => '[A-Za-z]{2}', 'header' => '[0-9]+']);
 Route::get('/storefront/brands/{country}/{brand}', [StorefrontBrandController::class, 'show'])
     ->where('country', '[A-Za-z]{2}')
     ->where('brand', '[A-Za-z0-9-]+');
@@ -127,6 +130,9 @@ Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])
     Route::patch('/items/{item}', [StorefrontCartController::class, 'updateItem'])->whereNumber('item');
     Route::delete('/items/{item}', [StorefrontCartController::class, 'destroyItem'])->whereNumber('item');
     Route::post('/sync', [StorefrontCartController::class, 'sync']);
+    Route::post('/coupons', [StorefrontCartController::class, 'storeCoupon']);
+    Route::get('/coupons/available', [StorefrontCartController::class, 'availableCoupons']);
+    Route::delete('/coupons/{application}', [StorefrontCartController::class, 'destroyCoupon'])->whereNumber('application');
     Route::post('/validate', [StorefrontCartController::class, 'validateForCheckout']);
     Route::post('/merge', [StorefrontCartController::class, 'merge']);
     Route::post('/checkout/start', [StorefrontCartController::class, 'startCheckout']);
@@ -145,6 +151,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::prefix('dashboard')->group(function () {
         Route::get('/collections', [DashboardCollectionController::class, 'index']);
+        Route::get('/coupons', [DashboardCouponController::class, 'index']);
+        Route::get('/coupons/catalogs', [DashboardCouponController::class, 'catalogs']);
+        Route::post('/coupons', [DashboardCouponController::class, 'store']);
+        Route::put('/coupons/{coupon}', [DashboardCouponController::class, 'update'])->whereNumber('coupon');
+        Route::post('/coupons/{coupon}', [DashboardCouponController::class, 'update'])->whereNumber('coupon');
         Route::post('/collections', [DashboardCollectionController::class, 'store']);
         Route::post('/collections/{collection}', [DashboardCollectionController::class, 'update']);
         Route::get('/collections/{collection}/assets', [DashboardCollectionAssetController::class, 'index']);

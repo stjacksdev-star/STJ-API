@@ -12,6 +12,7 @@ use App\Models\StorefrontVisitor;
 use App\Support\StorefrontImageUrl;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -25,6 +26,7 @@ class StorefrontCartService
         private ?StorefrontShippingService $shipping = null,
         private ?StorefrontPromotionResolver $promotionResolver = null,
         private ?WebPushDeliveryCancellationService $pushDeliveryCancellation = null,
+        private ?StorefrontCartCouponService $cartCoupons = null,
     ) {}
 
     public function startCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
@@ -121,13 +123,41 @@ class StorefrontCartService
                 $country = $this->country($countryCode);
                 $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($input, 'delivery.city_id'), number_format($subtotal, 2, '.', ''));
                 $shippingAmount = (float) $shipping['shipping_amount'];
+                $couponResolution = ['applications' => [], 'totals' => ['shipping' => $shippingAmount, 'couponDiscount' => '0.00']];
+                if (Schema::hasTable('stj_carrito_cupones')) {
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, '', $shippingAmount);
+                    $couponLines = collect($couponResolution['lines'] ?? [])->keyBy('key');
+                    $authorized = $authorized->map(function (array $line) use ($couponLines) {
+                        $couponLine = $couponLines->get((string) $line['itemId']);
+                        if (! $couponLine) {
+                            return [...$line, 'couponDiscount' => 0.0, 'coupons' => []];
+                        }
+                        $couponDiscount = (float) $couponLine['couponDiscount'];
+                        $lineTotal = (float) $couponLine['finalTotal'];
+
+                        return [
+                            ...$line,
+                            'discount' => round(($line['promotionDiscount'] + $couponDiscount) / $line['quantity'], 4),
+                            'couponDiscount' => round($couponDiscount, 2),
+                            'finalPrice' => round($lineTotal / $line['quantity'], 4),
+                            'lineTotal' => round($lineTotal, 2),
+                            'coupons' => $couponLine['coupons'],
+                        ];
+                    })->values();
+                    $discount = round($authorized->sum('promotionDiscount') + $authorized->sum('couponDiscount'), 2);
+                    $subtotal = round($authorized->sum('lineTotal'), 2);
+                    $discountPercentage = $baseSubtotal > 0 ? round($discount * 100 / $baseSubtotal, 2) : 0.0;
+                    $shippingAmount = (float) data_get($couponResolution, 'totals.shipping', $shippingAmount);
+                    $shipping['shipping_amount'] = number_format($shippingAmount, 2, '.', '');
+                    $shipping['display_amount'] = $shippingAmount == 0.0 ? 'GRATIS' : $shipping['display_amount'];
+                }
                 $total = round($subtotal + $shippingAmount, 2);
                 $taxes = strtoupper((string) $country->pai_codigo) === 'HN' ? round($total * 15 / 115, 2) : 0.0;
                 $destinationHash = $this->destinationHash($cart->car_tipo === 'TIENDA' ? [] : ($input['delivery'] ?? []));
                 $previousState = (string) $cart->car_estado;
                 $cart->forceFill(['car_estado' => 'CHECKOUT', 'car_checkout_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
                 $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito inicio checkout.');
-                $summary = ['service' => $cart->car_tipo, 'store' => $store, 'operationalStoreCode' => (string) $cart->car_tienda_codigo_snapshot, 'lines' => $authorized->all(), 'baseSubtotal' => $baseSubtotal, 'discount' => $discount, 'discountPercentage' => $discountPercentage, 'subtotal' => $subtotal, 'shipping' => $shippingAmount, 'taxes' => $taxes, 'total' => $total, 'currency' => $cart->car_moneda, 'shipping_source' => $shipping['source'], 'shipping_quote' => $shipping, 'destinationHash' => $destinationHash, 'alerts' => [], 'cartVersion' => (int) $cart->car_version];
+                $summary = ['service' => $cart->car_tipo, 'store' => $store, 'operationalStoreCode' => (string) $cart->car_tienda_codigo_snapshot, 'lines' => $authorized->all(), 'coupons' => $couponResolution['applications'] ?? [], 'baseSubtotal' => $baseSubtotal, 'discount' => $discount, 'discountPercentage' => $discountPercentage, 'subtotal' => $subtotal, 'shipping' => $shippingAmount, 'shippingDiscount' => (float) data_get($couponResolution, 'totals.shippingDiscount', 0), 'taxes' => $taxes, 'total' => $total, 'currency' => $cart->car_moneda, 'shipping_source' => $shipping['source'], 'shipping_quote' => $shipping, 'destinationHash' => $destinationHash, 'alerts' => [], 'cartVersion' => (int) $cart->car_version];
                 $this->audit($cart, null, $visitor, $customer, 'CHECKOUT_STARTED', ['state' => $previousState], ['state' => 'CHECKOUT', 'version' => $cart->car_version, 'destinationHash' => $destinationHash]);
                 CustomerEvent::query()->create(['cev_event_uuid' => $input['operation_uuid'] ?? (string) Str::uuid(), 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_tipo' => 'BEGIN_CHECKOUT', 'cev_valor' => $total, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => ['cartVersion' => $cart->car_version, 'shippingSource' => $shipping['source']]]);
 
@@ -651,6 +681,8 @@ class StorefrontCartService
         $eligibleItems = $cart->items
             ->filter(fn ($item) => ($item->cad_estado ?? 'DISPONIBLE') === 'DISPONIBLE' && (bool) $item->cad_seleccionado);
         $resolvedLines = collect();
+        $couponLines = collect();
+        $couponResolution = ['applications' => [], 'totals' => ['couponDiscount' => '0.00', 'shippingDiscount' => '0.00']];
 
         if ($eligibleItems->isNotEmpty()) {
             $resolution = ($this->promotionResolver ?? app(StorefrontPromotionResolver::class))->resolve([
@@ -667,18 +699,24 @@ class StorefrontCartService
                 ])->values()->all(),
             ]);
             $resolvedLines = collect($resolution['lines'])->keyBy('key');
+            if (Schema::hasTable('stj_carrito_cupones')) {
+                $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart);
+                $couponLines = collect($couponResolution['lines'] ?? [])->keyBy('key');
+            }
         }
 
-        $items = $cart->items->map(function ($item) use ($countryCode, $products, $resolvedLines, $cart) {
+        $items = $cart->items->map(function ($item) use ($countryCode, $products, $resolvedLines, $couponLines, $cart) {
             $quantity = (int) $item->cad_cantidad;
             $selectedAndAvailable = ($item->cad_estado ?? 'DISPONIBLE') === 'DISPONIBLE' && (bool) $item->cad_seleccionado;
             $resolved = $resolvedLines->get((string) $item->getKey());
             $regularPrice = (float) $item->cad_precio_unitario;
             $baseTotal = (float) ($resolved['baseTotal'] ?? ($regularPrice * $quantity));
             $promotionDiscount = $selectedAndAvailable ? (float) ($resolved['discount'] ?? 0) : 0.0;
-            $lineSubtotal = (float) ($resolved['finalTotal'] ?? $baseTotal);
+            $couponLine = $couponLines->get((string) $item->getKey());
+            $couponDiscount = $selectedAndAvailable ? (float) ($couponLine['couponDiscount'] ?? 0) : 0.0;
+            $lineSubtotal = (float) ($couponLine['finalTotal'] ?? $resolved['finalTotal'] ?? $baseTotal);
             $effectiveUnitPrice = $quantity > 0 ? round($lineSubtotal / $quantity, 4) : $regularPrice;
-            $effectiveUnitDiscount = $quantity > 0 ? round($promotionDiscount / $quantity, 4) : 0.0;
+            $effectiveUnitDiscount = $quantity > 0 ? round(($promotionDiscount + $couponDiscount) / $quantity, 4) : 0.0;
 
             return [
                 'id' => $item->getKey(),
@@ -698,19 +736,22 @@ class StorefrontCartService
                 'regularPrice' => $regularPrice,
                 'discount' => $effectiveUnitDiscount,
                 'promotionDiscount' => round($promotionDiscount, 2),
+                'couponDiscount' => round($couponDiscount, 2),
                 'finalPrice' => $effectiveUnitPrice,
                 'baseSubtotal' => round($baseTotal, 2),
                 'lineSubtotal' => round($lineSubtotal, 2),
                 'promotion' => $resolved['promotion'] ?? null,
+                'coupons' => $couponLine['coupons'] ?? [],
                 'currency' => $cart->car_moneda,
             ];
         })->values();
         $includedItems = $items->where('includedInTotals', true);
         $baseSubtotal = round($includedItems->sum('baseSubtotal'), 2);
         $discount = round($includedItems->sum('promotionDiscount'), 2);
+        $couponDiscount = round($includedItems->sum('couponDiscount'), 2);
         $total = round($includedItems->sum('lineSubtotal'), 2);
 
-        return ['cart' => ['id' => $cart->getKey(), 'uuid' => $cart->car_uuid, 'state' => $cart->car_estado, 'type' => $cart->car_tipo, 'fulfillment' => $fulfillment, 'version' => (int) $cart->car_version, 'currency' => $cart->car_moneda, 'items' => $items->all(), 'totals' => ['baseSubtotal' => $baseSubtotal, 'subtotal' => $total, 'discount' => $discount, 'total' => $total, 'currency' => $cart->car_moneda], 'alerts' => $alerts, 'updatedAt' => $cart->car_actualizado_en]];
+        return ['cart' => ['id' => $cart->getKey(), 'uuid' => $cart->car_uuid, 'state' => $cart->car_estado, 'type' => $cart->car_tipo, 'fulfillment' => $fulfillment, 'version' => (int) $cart->car_version, 'currency' => $cart->car_moneda, 'items' => $items->all(), 'coupons' => $couponResolution['applications'] ?? [], 'totals' => ['baseSubtotal' => $baseSubtotal, 'subtotal' => $total, 'promotionDiscount' => $discount, 'couponDiscount' => $couponDiscount, 'discount' => round($discount + $couponDiscount, 2), 'total' => $total, 'currency' => $cart->car_moneda], 'alerts' => $alerts, 'updatedAt' => $cart->car_actualizado_en]];
     }
 
     private function currencySymbol(string $currency): string

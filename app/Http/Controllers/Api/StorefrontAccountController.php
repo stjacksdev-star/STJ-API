@@ -5,14 +5,18 @@ namespace App\Http\Controllers\Api;
 use App\Models\StorefrontCustomer;
 use App\Support\StorefrontImageUrl;
 use App\Services\StorefrontFavoriteService;
+use App\Services\StorefrontWelcomeCouponService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class StorefrontAccountController extends BaseController
 {
+    public function __construct(private readonly StorefrontWelcomeCouponService $welcomeCoupons) {}
+
     public function login(Request $request)
     {
         $credentials = $request->validate([
@@ -69,23 +73,36 @@ class StorefrontAccountController extends BaseController
         }
 
         $phoneCountry = DB::table('stj_world_countries')->where('id', $data['phone_country_id'])->first(['phonecode']);
-        $customerId = DB::table('stj_usuarios')->insertGetId([
-            'usu_usuario' => $email,
-            'usu_password' => Hash::make($data['password']),
-            'usu_nombre' => trim($data['first_name']),
-            'usu_apellido' => trim($data['last_name']),
-            'usu_telefono_pais' => '+'.ltrim((string) $phoneCountry->phonecode, '+'),
-            'usu_telefono' => trim($data['phone']),
-            'usu_correo' => $email,
-            'usu_fecha_nacimiento' => $data['birth_date'] ?: null,
-            'usu_tipo_login' => 'WEB',
-            'usu_perfil' => (string) round(microtime(true) * 1000),
-            'usu_fecha_registro' => now(),
-            'usu_foto_perfil' => '',
-            'usu_suscrito_mailing' => 0,
-            'usu_pais_registro' => $storefrontCountry->pai_id,
-            'usu_activo' => 1,
-        ]);
+        [$customerId, $welcomeCoupon] = DB::transaction(function () use ($data, $email, $phoneCountry, $storefrontCountry) {
+            $customerId = DB::table('stj_usuarios')->insertGetId([
+                'usu_usuario' => $email,
+                'usu_password' => Hash::make($data['password']),
+                'usu_nombre' => trim($data['first_name']),
+                'usu_apellido' => trim($data['last_name']),
+                'usu_telefono_pais' => '+'.ltrim((string) $phoneCountry->phonecode, '+'),
+                'usu_telefono' => trim($data['phone']),
+                'usu_correo' => $email,
+                'usu_fecha_nacimiento' => $data['birth_date'] ?: null,
+                'usu_tipo_login' => 'WEB',
+                'usu_perfil' => (string) round(microtime(true) * 1000),
+                'usu_fecha_registro' => now(),
+                'usu_foto_perfil' => '',
+                'usu_suscrito_mailing' => 0,
+                'usu_pais_registro' => $storefrontCountry->pai_id,
+                'usu_activo' => 1,
+            ]);
+
+            $coupon = $this->welcomeCoupons->issue(
+                (int) $storefrontCountry->pai_id,
+                (string) $storefrontCountry->pai_codigo,
+                $email,
+                trim($data['first_name'].' '.$data['last_name']),
+            );
+
+            return [$customerId, $coupon];
+        });
+
+        $this->welcomeCoupons->sendWelcomeEmail($welcomeCoupon);
 
         $customer = StorefrontCustomer::query()->findOrFail($customerId);
 
@@ -458,11 +475,11 @@ class StorefrontAccountController extends BaseController
         if (! $country) return [];
 
         $columns = [
-            'c.cup_id', 'c.cup_codigo', 'c.cup_estado', 'c.cup_monto', 'c.cup_disponible',
+            'c.cup_id', 'c.cup_codigo', 'c.cup_estado', 'c.cup_monto', 'c.cup_disponible', 'c.cup_fecha',
             'h.che_id', 'h.che_tipo', 'h.che_descuento', 'h.che_checkout', 'h.che_monto',
             'h.che_nombre', 'h.che_nombre_comercial', 'h.che_solo_primera_compra',
-            'h.che_aplica_promo', 'h.che_coleccion', 'h.che_inicio', 'h.che_final',
-            'categories.cat_nombre as genero_nombre',
+            'h.che_aplica_promo', 'h.che_coleccion', 'h.che_inicio', 'h.che_final', 'h.che_tipo_productos',
+            'categories.cat_nombre as genero_nombre', 'collections.col_nombre as coleccion_nombre',
         ];
         $email = strtolower(trim((string) ($customer->usu_correo ?: $customer->usu_usuario)));
         $now = now();
@@ -470,6 +487,7 @@ class StorefrontAccountController extends BaseController
         $personal = DB::table('stj_cupones as c')
             ->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
             ->leftJoin('stj_categorias as categories', 'categories.cat_id', '=', 'h.che_genero')
+            ->leftJoin('stj_coleccion as collections', 'collections.col_id', '=', 'h.che_coleccion')
             ->whereRaw('LOWER(c.cup_correo) = ?', [$email])
             ->where('h.che_pais', $country->pai_id)
             ->select($columns)
@@ -479,6 +497,7 @@ class StorefrontAccountController extends BaseController
         $generic = DB::table('stj_cupones as c')
             ->join('stj_cupones_header as h', 'c.cup_header', '=', 'h.che_id')
             ->leftJoin('stj_categorias as categories', 'categories.cat_id', '=', 'h.che_genero')
+            ->leftJoin('stj_coleccion as collections', 'collections.col_id', '=', 'h.che_coleccion')
             ->where('h.che_generico', 'SI')
             ->where('h.che_inicio', '<=', $now)
             ->where('h.che_final', '>=', $now)
@@ -490,7 +509,7 @@ class StorefrontAccountController extends BaseController
 
         return $personal->concat($generic)
             ->unique(fn ($coupon) => $coupon['id'].'|'.$coupon['code'])
-            ->sortByDesc(fn ($coupon) => $coupon['available'])
+            ->sortByDesc(fn ($coupon) => sprintf('%s|%012d', $coupon['created_at'] ?? '', $coupon['id']))
             ->values()
             ->all();
     }
@@ -502,6 +521,14 @@ class StorefrontAccountController extends BaseController
         $available = $coupon->cup_estado === 'ACTIVO'
             && (! $startsAt || $startsAt->lte($now))
             && (! $endsAt || $endsAt->gte($now));
+        $countryCode = strtolower((string) $country->pai_codigo);
+        $name = (string) ($coupon->che_nombre_comercial ?: $coupon->che_nombre ?: 'cupon');
+        $productsLink = match ((string) ($coupon->che_tipo_productos ?? 'NA')) {
+            'PLA' => "/{$countryCode}/cupones/{$coupon->che_id}/".Str::slug($name),
+            'GEN' => $coupon->genero_nombre ? "/{$countryCode}/catalogo?".http_build_query(['category' => $coupon->genero_nombre]) : null,
+            'COL' => $coupon->che_coleccion ? "/{$countryCode}/colecciones/{$coupon->che_coleccion}/".Str::slug((string) ($coupon->coleccion_nombre ?: $name)) : null,
+            default => null,
+        };
 
         return [
             'id' => (int) $coupon->cup_id, 'header_id' => (int) $coupon->che_id,
@@ -514,6 +541,8 @@ class StorefrontAccountController extends BaseController
             'first_purchase_only' => $coupon->che_solo_primera_compra === 'SI',
             'gender' => $coupon->genero_nombre, 'collection' => $coupon->che_coleccion,
             'starts_at' => $coupon->che_inicio, 'ends_at' => $coupon->che_final,
+            'created_at' => $coupon->cup_fecha, 'product_scope' => $coupon->che_tipo_productos,
+            'products_link' => $productsLink, 'products_link_label' => $productsLink ? 'Ver productos que aplican' : null,
             'country' => ['id' => (int) $country->pai_id, 'code' => strtolower($country->pai_codigo), 'name' => $country->pai_nombre],
         ];
     }

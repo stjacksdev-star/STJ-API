@@ -8,6 +8,8 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontPaymentEventService
 {
+    public function __construct(private ?StorefrontCouponOrderLifecycleService $couponLifecycle = null) {}
+
     public function record(int $paymentId, string $status, string $eventUuid, array $metadata = []): array
     {
         return DB::transaction(function () use ($paymentId, $status, $eventUuid, $metadata) {
@@ -37,6 +39,9 @@ class StorefrontPaymentEventService
                     CustomerEvent::query()->create(['cev_event_uuid' => $eventUuid, 'cev_visitante_id' => $cart->car_visitante_id, 'cev_usu_id' => $cart->car_usu_id, 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->car_id, 'cev_pedido_id' => $payment->ppa_pedido, 'cev_tipo' => 'PURCHASE', 'cev_valor' => $payment->ppa_monto, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => $metadata + ['paymentId' => $paymentId]]);
                     $purchaseCreated = true;
                 }
+                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder((int) $payment->ppa_pedido);
+            } elseif (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR', 'ANULADO', 'REVERSION', 'DEVOLUCION'], true)) {
+                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->closeUnapprovedOrder((int) $payment->ppa_pedido, $status);
             }
 
             return ['paymentId' => $paymentId, 'orderId' => (int) $payment->ppa_pedido, 'status' => $status, 'purchaseCreated' => $purchaseCreated];
