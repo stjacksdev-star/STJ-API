@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Services\Mail\Smtp2GoMailer;
+use App\Support\CouponProductScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -19,13 +20,15 @@ class CouponAudienceEmailService
         $rows = DB::table('stj_cupones as c')
             ->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
             ->leftJoin('stj_paises as p', 'p.pai_id', '=', 'h.che_pais')
+            ->leftJoin('stj_categorias as category', 'category.cat_id', '=', 'h.che_genero')
+            ->leftJoin('stj_coleccion as collection', 'collection.col_id', '=', 'h.che_coleccion')
             ->whereIn('h.che_para', ['VIP', 'PLA'])
             ->where('h.che_estado', 'ACTIVO')->where('c.cup_estado', 'ACTIVO')
             ->where('c.cup_correo_enviado', 0)->whereNotNull('c.cup_correo')->where('c.cup_correo', '<>', '')
             ->where(fn ($q) => $q->whereNull('h.che_inicio')->orWhere('h.che_inicio', '<=', now()))
             ->where(fn ($q) => $q->whereNull('h.che_final')->orWhere('h.che_final', '>=', now()))
             ->orderBy('c.cup_id')->limit(max(1, min($limit, 25)))
-            ->get(['c.cup_id', 'c.cup_codigo', 'c.cup_correo', 'c.cup_descuento', 'c.cup_monto', 'h.che_id as headerId', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_descuento', 'h.che_monto', 'h.che_final', 'h.che_aplica as channel', 'h.che_checkout as checkout', 'h.che_aplica_promo as promotionRule', 'h.che_aplica_monto_minimo as minimumEnabled', 'h.che_monto_minimo as minimumAmount', 'h.che_solo_primera_compra as firstPurchaseOnly', 'h.che_tipo_productos as productScope', 'h.che_multiple as multiple', 'p.pai_codigo']);
+            ->get(['c.cup_id', 'c.cup_codigo', 'c.cup_correo', 'c.cup_descuento', 'c.cup_monto', 'h.che_id as headerId', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_descuento', 'h.che_monto', 'h.che_final', 'h.che_aplica as channel', 'h.che_checkout as checkout', 'h.che_aplica_promo as promotionRule', 'h.che_aplica_monto_minimo as minimumEnabled', 'h.che_monto_minimo as minimumAmount', 'h.che_solo_primera_compra as firstPurchaseOnly', 'h.che_tipo_productos as productScope', 'h.che_multiple as multiple', 'h.che_coleccion as collectionId', 'category.cat_nombre as categoryName', 'collection.col_nombre as collectionName', 'p.pai_codigo']);
 
         $summary['pending'] = $rows->count();
         foreach ($rows as $coupon) {
@@ -64,9 +67,9 @@ class CouponAudienceEmailService
         $country = match (strtoupper((string) $coupon->pai_codigo)) { 'GT' => 'Guatemala', 'CR' => 'CostaRica', 'HN' => 'Honduras', 'PA' => 'Panama', default => 'ElSalvador' };
         $countryCode = strtolower((string) $coupon->pai_codigo);
         $validity = $coupon->che_final ? 'Válido hasta '.date('d/m/Y', strtotime((string) $coupon->che_final)) : 'Consulta sus condiciones en nuestro sitio web';
-        $productsLink = $coupon->productScope === 'PLA'
-            ? $this->localizedStorefrontUrl($countryCode).'/cupones/'.$coupon->headerId.'/'.str($coupon->che_nombre_comercial ?: $coupon->che_nombre)->slug()
-            : null;
+        $scope = CouponProductScope::details($coupon, $countryCode, (string) config('services.fcm.web_home_url', 'https://stjacks.com'));
+        $productsLink = $scope['url'];
+        $coupon->productScopeLabel = $scope['label'];
 
         return '<div style="max-width:600px;margin:auto;padding:24px;border:1px solid #eee;border-radius:8px;font-family:Arial,sans-serif;background:#f9f9f9;color:#333">'
             .'<h2 style="text-align:center;color:#0070c9">Tienes un cupón disponible</h2><p style="font-size:17px;text-align:center"><strong>'.$name.'</strong></p>'

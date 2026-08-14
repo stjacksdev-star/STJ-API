@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\CartOperationConflict;
+use App\Support\CouponProductScope;
 use App\Models\StorefrontCart;
 use App\Models\StorefrontCartCoupon;
 use App\Models\StorefrontCustomer;
@@ -111,7 +112,7 @@ class StorefrontCartCouponService
     /** @return array<int, array<string, mixed>> */
     public function available(string $countryCode, ?StorefrontCustomer $customer, ?string $email = null): array
     {
-        $country = DB::table('stj_paises')->whereRaw('LOWER(pai_codigo) = ?', [strtolower($countryCode)])->first(['pai_id']);
+        $country = DB::table('stj_paises')->whereRaw('LOWER(pai_codigo) = ?', [strtolower($countryCode)])->first(['pai_id', 'pai_codigo']);
         if (! $country) {
             throw ValidationException::withMessages(['country' => 'El país no existe.']);
         }
@@ -121,6 +122,8 @@ class StorefrontCartCouponService
         $now = now();
         $rows = DB::table('stj_cupones as c')
             ->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
+            ->leftJoin('stj_categorias as category', 'category.cat_id', '=', 'h.che_genero')
+            ->leftJoin('stj_coleccion as collection', 'collection.col_id', '=', 'h.che_coleccion')
             ->where('h.che_pais', $country->pai_id)
             ->where('h.che_estado', 'ACTIVO')
             ->where('c.cup_estado', 'ACTIVO')
@@ -141,9 +144,14 @@ class StorefrontCartCouponService
                 'c.cup_id', 'c.cup_codigo', 'c.cup_monto', 'c.cup_descuento', 'h.che_id', 'h.che_nombre',
                 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_generico', 'h.che_checkout', 'h.che_final',
                 'h.che_monto', 'h.che_descuento', 'h.che_aplica_promo', 'h.che_solo_primera_compra',
+                'h.che_tipo_productos', 'h.che_coleccion', 'category.cat_nombre as genero_nombre',
+                'collection.col_nombre as coleccion_nombre',
             ]);
 
-        return $rows->map(fn ($row) => [
+        return $rows->map(function ($row) use ($country) {
+            $scope = CouponProductScope::details($row, (string) $country->pai_codigo, (string) config('services.fcm.web_home_url', 'https://stjacks.com'));
+
+            return [
             'id' => (int) $row->cup_id,
             'headerId' => (int) $row->che_id,
             'code' => (string) $row->cup_codigo,
@@ -157,7 +165,10 @@ class StorefrontCartCouponService
             'promotionRule' => $row->che_aplica_promo,
             'firstPurchaseOnly' => $row->che_solo_primera_compra === 'SI',
             'endsAt' => $row->che_final,
-        ])->unique('id')->values()->all();
+            'productScope' => $scope['scope'], 'productScopeLabel' => $scope['label'],
+            'productsLink' => $scope['url'], 'productsLinkLabel' => $scope['url'] ? 'Ver productos que aplican' : null,
+            ];
+        })->unique('id')->values()->all();
     }
 
     /** @return array<string, mixed> */
@@ -268,11 +279,24 @@ class StorefrontCartCouponService
     /** @return array<string, mixed> */
     private function applicationPayload(StorefrontCartCoupon $row): array
     {
+        $coupon = DB::table('stj_cupones as c')
+            ->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
+            ->join('stj_paises as country', 'country.pai_id', '=', 'h.che_pais')
+            ->leftJoin('stj_categorias as category', 'category.cat_id', '=', 'h.che_genero')
+            ->leftJoin('stj_coleccion as collection', 'collection.col_id', '=', 'h.che_coleccion')
+            ->where('c.cup_id', $row->ccu_cupon_id)
+            ->first(['h.che_id', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo_productos', 'h.che_aplica_promo', 'h.che_coleccion', 'category.cat_nombre as genero_nombre', 'collection.col_nombre as coleccion_nombre', 'country.pai_codigo']);
+        $scope = $coupon
+            ? CouponProductScope::details($coupon, (string) $coupon->pai_codigo, (string) config('services.fcm.web_home_url', 'https://stjacks.com'))
+            : ['scope' => 'NA', 'label' => null, 'url' => null];
+
         return [
             'id' => (int) $row->getKey(), 'couponId' => (int) $row->ccu_cupon_id, 'code' => $row->ccu_codigo,
             'status' => $row->ccu_estado, 'reasonCode' => $row->ccu_razon_codigo, 'reason' => $row->ccu_razon_mensaje,
             'productDiscount' => number_format((float) $row->ccu_descuento_productos, 2, '.', ''),
             'shippingDiscount' => number_format((float) $row->ccu_descuento_envio, 2, '.', ''),
+            'productScope' => $scope['scope'], 'productScopeLabel' => $scope['label'],
+            'productsLink' => $scope['url'], 'productsLinkLabel' => $scope['url'] ? 'Ver productos que aplican' : null,
         ];
     }
 

@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
+use App\Support\CouponProductScope;
 use Illuminate\Validation\Rule;
 
 class StorefrontAccountController extends BaseController
@@ -521,14 +521,11 @@ class StorefrontAccountController extends BaseController
         $available = $coupon->cup_estado === 'ACTIVO'
             && (! $startsAt || $startsAt->lte($now))
             && (! $endsAt || $endsAt->gte($now));
-        $countryCode = strtolower((string) $country->pai_codigo);
-        $name = (string) ($coupon->che_nombre_comercial ?: $coupon->che_nombre ?: 'cupon');
-        $productsLink = match ((string) ($coupon->che_tipo_productos ?? 'NA')) {
-            'PLA' => "/{$countryCode}/cupones/{$coupon->che_id}/".Str::slug($name),
-            'GEN' => $coupon->genero_nombre ? "/{$countryCode}/catalogo?".http_build_query(['category' => $coupon->genero_nombre]) : null,
-            'COL' => $coupon->che_coleccion ? "/{$countryCode}/colecciones/{$coupon->che_coleccion}/".Str::slug((string) ($coupon->coleccion_nombre ?: $name)) : null,
-            default => null,
-        };
+        $scope = CouponProductScope::details(
+            $coupon,
+            (string) $country->pai_codigo,
+            (string) config('services.fcm.web_home_url', 'https://stjacks.com'),
+        );
 
         return [
             'id' => (int) $coupon->cup_id, 'header_id' => (int) $coupon->che_id,
@@ -542,7 +539,8 @@ class StorefrontAccountController extends BaseController
             'gender' => $coupon->genero_nombre, 'collection' => $coupon->che_coleccion,
             'starts_at' => $coupon->che_inicio, 'ends_at' => $coupon->che_final,
             'created_at' => $coupon->cup_fecha, 'product_scope' => $coupon->che_tipo_productos,
-            'products_link' => $productsLink, 'products_link_label' => $productsLink ? 'Ver productos que aplican' : null,
+            'products_scope_label' => $scope['label'],
+            'products_link' => $scope['url'], 'products_link_label' => $scope['url'] ? 'Ver productos que aplican' : null,
             'country' => ['id' => (int) $country->pai_id, 'code' => strtolower($country->pai_codigo), 'name' => $country->pai_nombre],
         ];
     }

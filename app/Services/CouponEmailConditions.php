@@ -26,7 +26,7 @@ class CouponEmailConditions
         };
         if ((string) $value('minimumEnabled', 'NO') === 'SI') $conditions[] = 'Compra mínima requerida: USD '.$this->number($value('minimumAmount', 0)).'.';
         if ((string) $value('firstPurchaseOnly', 'NO') === 'SI') $conditions[] = 'Válido únicamente para la primera compra del cliente.';
-        if (in_array((string) $value('productScope', 'NA'), ['PLA', 'GEN', 'COL'], true)) $conditions[] = 'Aplica únicamente a los productos seleccionados para este cupón.';
+        if ($value('productScopeLabel')) $conditions[] = rtrim((string) $value('productScopeLabel'), '.').'.';
         if ((string) $value('multiple', 'NO') !== 'SI') $conditions[] = 'Cupón de un solo uso.';
         $conditions[] = 'El cupón es personal y está asociado al correo que recibió este mensaje.';
 

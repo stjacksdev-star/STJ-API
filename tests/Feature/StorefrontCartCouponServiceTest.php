@@ -131,6 +131,7 @@ class StorefrontCartCouponServiceTest extends TestCase
         Schema::create('stj_cupones_header', function (Blueprint $t) {
             $t->id('che_id');
             $t->string('che_nombre');
+            $t->string('che_nombre_comercial')->nullable();
             $t->string('che_tipo');
             $t->string('che_aplica');
             $t->string('che_checkout');
@@ -147,7 +148,11 @@ class StorefrontCartCouponServiceTest extends TestCase
             $t->string('che_solo_primera_compra')->nullable();
             $t->string('che_estado');
             $t->string('che_tipo_productos')->nullable();
+            $t->unsignedBigInteger('che_genero')->nullable();
+            $t->unsignedBigInteger('che_coleccion')->nullable();
         });
+        Schema::create('stj_categorias', fn (Blueprint $t) => [$t->id('cat_id'), $t->string('cat_nombre')]);
+        Schema::create('stj_coleccion', fn (Blueprint $t) => [$t->id('col_id'), $t->string('col_nombre')]);
         Schema::create('stj_cupones', function (Blueprint $t) {
             $t->id('cup_id');
             $t->unsignedBigInteger('cup_header');
