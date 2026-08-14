@@ -29,6 +29,16 @@ class StorefrontCartController extends BaseController
         return $this->success($this->coupons->available($country, $this->customer(), $data['email'] ?? null), 'Cupones disponibles.');
     }
 
+    public function revalidateCoupons(Request $request, string $country): JsonResponse
+    {
+        $data = $request->validate(['email' => ['nullable', 'email:rfc', 'max:255']]);
+
+        return $this->success(
+            $this->coupons->revalidateForIdentity($country, $this->visitor($request), $this->customer(), (string) ($data['email'] ?? '')),
+            'Cupones recalculados.',
+        );
+    }
+
     public function destroyCoupon(Request $request, string $country, int $application): JsonResponse
     {
         $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'email' => ['nullable', 'email:rfc', 'max:255']]);
@@ -100,6 +110,7 @@ class StorefrontCartController extends BaseController
             'delivery.state_id' => ['nullable', 'integer'],
             'delivery.addressLine1' => ['nullable', 'string', 'max:200'],
             'delivery.reference' => ['nullable', 'string', 'max:200'],
+            'email' => ['required', 'email:rfc', 'max:255'],
         ]);
 
         return $this->mutation(fn () => $this->carts->startCheckout($country, $this->visitor($request), $this->customer(), $data), 'Checkout iniciado.');

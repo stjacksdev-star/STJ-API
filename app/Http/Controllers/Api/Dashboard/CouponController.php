@@ -27,6 +27,20 @@ class CouponController extends BaseController
     public function store(Request $request) { return $this->persist($request); }
     public function update(Request $request, int $coupon) { return $this->persist($request, $coupon); }
 
+    public function status(Request $request, int $coupon)
+    {
+        abort_unless($request->user()?->tokenCan('dashboard'), 403);
+        $data = $request->validate([
+            'status' => ['required', Rule::in(['ACTIVO', 'INACTIVO'])],
+            'country' => ['required', 'string', 'max:3'],
+        ]);
+
+        return $this->success(
+            $this->coupons->changeStatus($coupon, $data['status'], $data['country']),
+            $data['status'] === 'INACTIVO' ? 'Cupón inactivado.' : 'Cupón activado.',
+        );
+    }
+
     private function persist(Request $request, ?int $coupon = null)
     {
         abort_unless($request->user()?->tokenCan('dashboard'), 403);

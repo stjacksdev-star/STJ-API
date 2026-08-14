@@ -132,6 +132,7 @@ Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])
     Route::post('/sync', [StorefrontCartController::class, 'sync']);
     Route::post('/coupons', [StorefrontCartController::class, 'storeCoupon']);
     Route::get('/coupons/available', [StorefrontCartController::class, 'availableCoupons']);
+    Route::post('/coupons/revalidate', [StorefrontCartController::class, 'revalidateCoupons']);
     Route::delete('/coupons/{application}', [StorefrontCartController::class, 'destroyCoupon'])->whereNumber('application');
     Route::post('/validate', [StorefrontCartController::class, 'validateForCheckout']);
     Route::post('/merge', [StorefrontCartController::class, 'merge']);
@@ -156,6 +157,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/coupons', [DashboardCouponController::class, 'store']);
         Route::put('/coupons/{coupon}', [DashboardCouponController::class, 'update'])->whereNumber('coupon');
         Route::post('/coupons/{coupon}', [DashboardCouponController::class, 'update'])->whereNumber('coupon');
+        Route::patch('/coupons/{coupon}/status', [DashboardCouponController::class, 'status'])->whereNumber('coupon');
         Route::post('/collections', [DashboardCollectionController::class, 'store']);
         Route::post('/collections/{collection}', [DashboardCollectionController::class, 'update']);
         Route::get('/collections/{collection}/assets', [DashboardCollectionAssetController::class, 'index']);

@@ -25,7 +25,8 @@ class StorefrontCouponResolver
         foreach ($coupons as $coupon) {
             $validation = $this->validateCoupon($coupon, $data, $lines);
             if (! $validation['valid']) {
-                $results[] = $this->couponResult($coupon, 'NO_APLICABLE', $validation['code'], $validation['message']);
+                $status = $validation['code'] === 'CORREO_PENDIENTE' ? 'PENDIENTE_CORREO' : 'NO_APLICABLE';
+                $results[] = $this->couponResult($coupon, $status, $validation['code'], $validation['message']);
 
                 continue;
             }
@@ -253,7 +254,10 @@ class StorefrontCouponResolver
         if ($coupon['endsAt'] && $context['at']->gt(Carbon::parse($coupon['endsAt']))) {
             return $invalid('CUPON_VENCIDO', 'El cupón ha vencido.');
         }
-        if ($coupon['generic'] !== 'SI' && ($context['email'] === '' || $coupon['email'] !== $context['email'])) {
+        if ($coupon['generic'] !== 'SI' && $context['email'] === '') {
+            return $invalid('CORREO_PENDIENTE', 'Ingresa en el checkout el correo al que fue enviado este cupón para validarlo.');
+        }
+        if ($coupon['generic'] !== 'SI' && $coupon['email'] !== $context['email']) {
             return $invalid('CORREO_NO_COINCIDE', 'El cupón no pertenece al correo del checkout.');
         }
         if ($coupon['firstPurchaseOnly'] === 'SI' && $context['hasApprovedOrder']) {

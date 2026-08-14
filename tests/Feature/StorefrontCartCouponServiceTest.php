@@ -57,6 +57,22 @@ class StorefrontCartCouponServiceTest extends TestCase
         $this->assertSame('0.00', $result['totals']['couponDiscount']);
     }
 
+    public function test_guest_coupon_waits_for_email_and_is_applied_after_revalidation(): void
+    {
+        $pending = $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10',
+        ]);
+
+        $this->assertSame('PENDIENTE_CORREO', $pending['applications'][0]['status']);
+        $this->assertSame('CORREO_PENDIENTE', $pending['applications'][0]['reasonCode']);
+        $this->assertSame('0.00', $pending['totals']['couponDiscount']);
+
+        $applied = $this->service->revalidateForIdentity('sv', $this->visitor, null, 'CLIENT@example.com');
+
+        $this->assertSame('APLICADO', $applied['applications'][0]['status']);
+        $this->assertSame('10.00', $applied['totals']['couponDiscount']);
+    }
+
     public function test_remove_closes_application_without_deleting_history(): void
     {
         $added = $this->service->add('sv', $this->visitor, null, [
@@ -79,6 +95,31 @@ class StorefrontCartCouponServiceTest extends TestCase
         $this->service->add('sv', $this->visitor, null, [
             'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'client@example.com',
         ]);
+    }
+
+    public function test_inactive_coupon_cannot_be_added_by_code(): void
+    {
+        DB::table('stj_cupones_header')->where('che_id', 1)->update(['che_estado' => 'INACTIVO']);
+
+        $this->expectException(ValidationException::class);
+        $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'client@example.com',
+        ]);
+    }
+
+    public function test_applied_coupon_becomes_not_applicable_after_header_is_inactivated(): void
+    {
+        $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'client@example.com',
+        ]);
+        DB::table('stj_cupones_header')->where('che_id', 1)->update(['che_estado' => 'INACTIVO']);
+
+        $cart = \App\Models\StorefrontCart::query()->findOrFail(1);
+        $result = $this->service->revalidate($cart, 'client@example.com');
+
+        $this->assertSame([], $result['applications']);
+        $this->assertSame('0.00', $result['totals']['couponDiscount']);
+        $this->assertDatabaseHas('stj_carrito_cupones', ['ccu_estado' => 'NO_APLICABLE', 'ccu_razon_codigo' => 'CUPON_INACTIVO']);
     }
 
     private function seedData(): void

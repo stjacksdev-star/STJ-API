@@ -29,6 +29,8 @@ class StorefrontCartCouponService
                 ->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
                 ->whereRaw('UPPER(TRIM(c.cup_codigo)) = ?', [$code])
                 ->where('h.che_pais', $cart->car_pais_id)
+                ->where('h.che_estado', 'ACTIVO')
+                ->where('c.cup_estado', 'ACTIVO')
                 ->whereIn('h.che_aplica', ['TODO', 'WEB'])
                 ->orderByDesc('c.cup_id')
                 ->first(['c.cup_id', 'c.cup_codigo', 'h.che_multiple', 'h.che_generico']);
@@ -106,6 +108,14 @@ class StorefrontCartCouponService
             }
 
             return $this->revalidate($cart, (string) ($input['email'] ?? ''));
+        });
+    }
+
+    /** @return array<string, mixed> */
+    public function revalidateForIdentity(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $email = ''): array
+    {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $email) {
+            return $this->revalidate($this->cart($countryCode, $visitor, $customer), $email);
         });
     }
 
@@ -238,7 +248,11 @@ class StorefrontCartCouponService
 
         return [
             ...$resolved,
-            'applications' => $applications->map(fn ($row) => $this->applicationPayload($row->fresh()))->all(),
+            'applications' => $applications
+                ->map(fn ($row) => $this->applicationPayload($row->fresh()))
+                ->reject(fn (array $application) => $application['reasonCode'] === 'CUPON_INACTIVO')
+                ->values()
+                ->all(),
         ];
     }
 
@@ -262,7 +276,11 @@ class StorefrontCartCouponService
     private function updateApplication(StorefrontCartCoupon $application, ?array $result, StorefrontCart $cart, string $email, string $status, ?string $reasonCode, ?string $reason): void
     {
         $application->forceFill([
-            'ccu_estado' => $status === 'APLICADO' ? 'APLICADO' : 'NO_APLICABLE',
+            'ccu_estado' => match ($status) {
+                'APLICADO' => 'APLICADO',
+                'PENDIENTE_CORREO' => 'AGREGADO',
+                default => 'NO_APLICABLE',
+            },
             'ccu_razon_codigo' => $reasonCode,
             'ccu_razon_mensaje' => $reason,
             'ccu_carrito_version' => $cart->car_version,
@@ -290,9 +308,13 @@ class StorefrontCartCouponService
             ? CouponProductScope::details($coupon, (string) $coupon->pai_codigo, (string) config('services.fcm.web_home_url', 'https://stjacks.com'))
             : ['scope' => 'NA', 'label' => null, 'url' => null];
 
+        $displayStatus = $row->ccu_estado === 'AGREGADO' && $row->ccu_razon_codigo === 'CORREO_PENDIENTE'
+            ? 'PENDIENTE_CORREO'
+            : $row->ccu_estado;
+
         return [
             'id' => (int) $row->getKey(), 'couponId' => (int) $row->ccu_cupon_id, 'code' => $row->ccu_codigo,
-            'status' => $row->ccu_estado, 'reasonCode' => $row->ccu_razon_codigo, 'reason' => $row->ccu_razon_mensaje,
+            'status' => $displayStatus, 'reasonCode' => $row->ccu_razon_codigo, 'reason' => $row->ccu_razon_mensaje,
             'productDiscount' => number_format((float) $row->ccu_descuento_productos, 2, '.', ''),
             'shippingDiscount' => number_format((float) $row->ccu_descuento_envio, 2, '.', ''),
             'productScope' => $scope['scope'], 'productScopeLabel' => $scope['label'],

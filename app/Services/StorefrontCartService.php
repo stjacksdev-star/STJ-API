@@ -125,7 +125,10 @@ class StorefrontCartService
                 $shippingAmount = (float) $shipping['shipping_amount'];
                 $couponResolution = ['applications' => [], 'totals' => ['shipping' => $shippingAmount, 'couponDiscount' => '0.00']];
                 if (Schema::hasTable('stj_carrito_cupones')) {
-                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, '', $shippingAmount);
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, (string) ($input['email'] ?? ''), $shippingAmount);
+                    if (collect($couponResolution['applications'] ?? [])->contains(fn (array $application) => $application['status'] === 'PENDIENTE_CORREO')) {
+                        throw ValidationException::withMessages(['coupons' => 'Hay cupones pendientes de validar con el correo del checkout.']);
+                    }
                     $couponLines = collect($couponResolution['lines'] ?? [])->keyBy('key');
                     $authorized = $authorized->map(function (array $line) use ($couponLines) {
                         $couponLine = $couponLines->get((string) $line['itemId']);

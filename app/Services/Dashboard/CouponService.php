@@ -156,6 +156,36 @@ class CouponService
         });
     }
 
+    public function changeStatus(int $id, string $status, string $countryCode): array
+    {
+        return DB::transaction(function () use ($id, $status, $countryCode) {
+            $row = DB::table('stj_cupones_header as h')
+                ->join('stj_paises as p', 'p.pai_id', '=', 'h.che_pais')
+                ->where('h.che_id', $id)
+                ->whereRaw('UPPER(p.pai_codigo) = ?', [strtoupper($countryCode)])
+                ->lockForUpdate()
+                ->first(['h.che_id']);
+
+            if (! $row) {
+                throw ValidationException::withMessages(['coupon' => 'El cupón no existe en el país indicado.']);
+            }
+
+            DB::table('stj_cupones_header')->where('che_id', $id)->update(['che_estado' => strtoupper($status)]);
+
+            $updated = DB::table('stj_cupones_header as h')
+                ->leftJoin('stj_paises as p', 'p.pai_id', '=', 'h.che_pais')
+                ->where('h.che_id', $id)
+                ->first(['h.*', 'p.pai_codigo', 'p.pai_nombre']);
+            $details = DB::table('stj_cupones')->where('cup_header', $id)
+                ->selectRaw('MIN(cup_codigo) as generic_code, COUNT(*) as codes_count')
+                ->first();
+            $updated->generic_code = $details?->generic_code;
+            $updated->codes_count = (int) ($details?->codes_count ?? 0);
+
+            return $this->payload($updated);
+        });
+    }
+
     private function createPersonalCoupons(int $headerId, array $emails, array $header, array $data): void
     {
         foreach (collect($emails)->map(fn ($e) => strtolower(trim((string) $e)))->filter(fn ($e) => filter_var($e, FILTER_VALIDATE_EMAIL))->unique() as $email) {

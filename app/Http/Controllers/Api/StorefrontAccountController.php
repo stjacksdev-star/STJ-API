@@ -476,7 +476,7 @@ class StorefrontAccountController extends BaseController
 
         $columns = [
             'c.cup_id', 'c.cup_codigo', 'c.cup_estado', 'c.cup_monto', 'c.cup_disponible', 'c.cup_fecha',
-            'h.che_id', 'h.che_tipo', 'h.che_descuento', 'h.che_checkout', 'h.che_monto',
+            'h.che_id', 'h.che_tipo', 'h.che_descuento', 'h.che_checkout', 'h.che_monto', 'h.che_estado as header_estado',
             'h.che_nombre', 'h.che_nombre_comercial', 'h.che_solo_primera_compra',
             'h.che_aplica_promo', 'h.che_coleccion', 'h.che_inicio', 'h.che_final', 'h.che_tipo_productos',
             'categories.cat_nombre as genero_nombre', 'collections.col_nombre as coleccion_nombre',
@@ -518,9 +518,11 @@ class StorefrontAccountController extends BaseController
     {
         $startsAt = $coupon->che_inicio ? Carbon::parse($coupon->che_inicio) : null;
         $endsAt = $coupon->che_final ? Carbon::parse($coupon->che_final) : null;
-        $available = $coupon->cup_estado === 'ACTIVO'
+        $available = $coupon->header_estado === 'ACTIVO'
+            && $coupon->cup_estado === 'ACTIVO'
             && (! $startsAt || $startsAt->lte($now))
             && (! $endsAt || $endsAt->gte($now));
+        $effectiveStatus = $coupon->header_estado !== 'ACTIVO' ? 'INACTIVO' : $coupon->cup_estado;
         $scope = CouponProductScope::details(
             $coupon,
             (string) $country->pai_codigo,
@@ -530,7 +532,7 @@ class StorefrontAccountController extends BaseController
         return [
             'id' => (int) $coupon->cup_id, 'header_id' => (int) $coupon->che_id,
             'code' => $coupon->cup_codigo, 'source' => $source, 'available' => $available,
-            'status' => $coupon->cup_estado, 'type' => $coupon->che_tipo,
+            'status' => $effectiveStatus, 'type' => $coupon->che_tipo,
             'discount' => (float) $coupon->che_descuento, 'amount' => (float) $coupon->cup_monto,
             'available_amount' => (float) $coupon->cup_disponible, 'minimum_amount' => (float) $coupon->che_monto,
             'name' => $coupon->che_nombre, 'commercial_name' => $coupon->che_nombre_comercial,
