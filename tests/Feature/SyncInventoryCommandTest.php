@@ -130,6 +130,33 @@ class SyncInventoryCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    public function test_it_includes_the_configured_home_delivery_store_even_when_products_flag_is_disabled(): void
+    {
+        config()->set('inventory.domicilio_store_by_country.sv', '57');
+        DB::table('stj_tiendas')->insert([
+            'tie_id' => 57,
+            'tie_codigo' => '57',
+            'tie_nombre' => 'Domicilio',
+            'tie_pais' => 1,
+            'tie_productos' => 0,
+        ]);
+
+        $client = Mockery::mock(InventorySyncClient::class);
+        $client->shouldReceive('fetch')->once()->with(1, 'sv_categories', '001', ['P001'])->andReturn(['ok' => true, 'rows' => []]);
+        $client->shouldReceive('fetch')->once()->with(1, 'sv_categories', '002', ['P001'])->andReturn(['ok' => true, 'rows' => []]);
+        $client->shouldReceive('fetch')->once()->with(1, 'sv_categories', '57', ['P001'])->andReturn(['ok' => true, 'rows' => []]);
+        $this->app->instance(InventorySyncClient::class, $client);
+
+        $this->artisan('inventory:sync', ['--country' => 'SV', '--batch-size' => 1])
+            ->expectsOutputToContain('Productos: 1 | Tiendas: 3')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('stj_inventory_sync_countries', [
+            'isc_country_id' => 1,
+            'isc_last_batch_stores' => 3,
+        ]);
+    }
+
     private function createSchema(): void
     {
         Schema::create('stj_paises', function (Blueprint $table) {

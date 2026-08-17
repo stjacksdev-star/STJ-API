@@ -388,7 +388,6 @@ class StorefrontPromotionLandingService
         $exists = DB::table('stj_tiendas')
             ->where('tie_pais', $countryId)
             ->where('tie_codigo', $requested)
-            ->where('tie_productos', 1)
             ->exists();
 
         return $exists ? $requested : '';

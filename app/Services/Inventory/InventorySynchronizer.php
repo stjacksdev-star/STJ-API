@@ -30,7 +30,7 @@ class InventorySynchronizer
         $products = $this->products((int) $control->pai_id, $cursor, $limit + 1);
         $hasMore = $products->count() > $limit;
         $products = $products->take($limit)->values();
-        $stores = $this->stores((int) $control->pai_id);
+        $stores = $this->stores((int) $control->pai_id, (string) $control->pai_codigo);
 
         $summary = [
             'ok' => true,
@@ -179,11 +179,22 @@ class InventorySynchronizer
             ->get(['product.pro_id', 'product.pro_codigo']);
     }
 
-    private function stores(int $countryId)
+    private function stores(int $countryId, string $countryCode)
     {
+        $homeDeliveryStore = trim((string) config(
+            'inventory.domicilio_store_by_country.'.strtolower($countryCode),
+            '',
+        ));
+
         return DB::table('stj_tiendas')
             ->where('tie_pais', $countryId)
-            ->where('tie_productos', 1)
+            ->where(function (Builder $query) use ($homeDeliveryStore) {
+                $query->where('tie_productos', 1);
+
+                if ($homeDeliveryStore !== '') {
+                    $query->orWhere('tie_codigo', $homeDeliveryStore);
+                }
+            })
             ->whereNotNull('tie_codigo')
             ->where('tie_codigo', '<>', '')
             ->orderBy('tie_id')

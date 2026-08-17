@@ -103,7 +103,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
             'tie_pais' => 1,
             'tie_codigo' => '57',
             'tie_nombre' => 'Domicilio',
-            'tie_productos' => 1,
+            'tie_productos' => 0,
         ]);
         DB::table('stj_productos')->insert([
             'pro_id' => 101,
