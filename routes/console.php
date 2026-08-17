@@ -142,7 +142,7 @@ Schedule::command('inventory:sync')
     ->between('08:00', '21:00')
     ->timezone('America/El_Salvador')
     ->withoutOverlapping(15)
-    ->onOneServer();
+    ->appendOutputTo(storage_path('logs/inventory-scheduler.log'));
 
 if (config('push_web.automation_enabled')) {
     Schedule::command('push:web-evaluate --limit='.(int) config('push_web.evaluate_limit', 500))
