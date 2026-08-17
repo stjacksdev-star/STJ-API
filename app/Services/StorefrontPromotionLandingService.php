@@ -56,7 +56,7 @@ class StorefrontPromotionLandingService
         $scope = $this->promotionScope($promotion, $filters);
         $brand = trim((string) ($filters['brand'] ?? ''));
         $gender = trim((string) ($filters['gender'] ?? ''));
-        $sort = trim((string) ($filters['sort'] ?? 'discount_desc')) ?: 'discount_desc';
+        $sort = trim((string) ($filters['sort'] ?? 'featured')) ?: 'featured';
         $perPage = (int) ($filters['perPage'] ?? 24);
         $page = (int) ($filters['page'] ?? 1);
         $baseQuery = $this->productsQuery($promotion);
@@ -71,6 +71,15 @@ class StorefrontPromotionLandingService
         }
         if ($gender !== '') {
             $baseQuery->where('product.pro_oc_genero', $gender);
+        }
+
+        if ($sort === 'featured') {
+            $this->applyLocalAvailabilitySort(
+                $baseQuery,
+                (int) $promotion->pai_id,
+                (string) $promotion->pai_codigo,
+                $filters,
+            );
         }
 
         $this->applySort($baseQuery, $sort, $promotion);
@@ -95,6 +104,11 @@ class StorefrontPromotionLandingService
         $availability = $this->availabilityService->summarize(
             strtolower((string) $promotion->pai_codigo),
             $paginator->getCollection()->all(),
+            $this->activeStoreCode(
+                (int) $promotion->pai_id,
+                (string) $promotion->pai_codigo,
+                $filters,
+            ),
         );
         $availabilityBySku = $availability['availabilityBySku'] ?? [];
         $currency = $this->currency((string) $promotion->pai_codigo);
@@ -176,6 +190,7 @@ class StorefrontPromotionLandingService
             'filters' => [
                 ...$filterOptions,
                 'sorts' => [
+                    ['value' => 'featured', 'label' => 'Recomendados'],
                     ['value' => 'discount_desc', 'label' => 'Mayor descuento'],
                     ['value' => 'discount_asc', 'label' => 'Menor descuento'],
                     ['value' => 'newest', 'label' => 'Mas recientes'],
@@ -323,6 +338,60 @@ class StorefrontPromotionLandingService
         };
 
         $query->orderBy('product.pro_id');
+    }
+
+    private function applyLocalAvailabilitySort(
+        Builder $query,
+        int $countryId,
+        string $countryCode,
+        array $filters,
+    ): void {
+        $storeCode = $this->activeStoreCode($countryId, $countryCode, $filters);
+        if ($storeCode === '') {
+            return;
+        }
+
+        $inventory = DB::table('stj_inventario')
+            ->where('inv_pais', $countryId)
+            ->where('inv_tienda', $storeCode)
+            ->select([
+                'inv_codigo',
+                DB::raw('SUM(CASE WHEN inv_cantidad > 0 THEN inv_cantidad ELSE 0 END) as stock_total'),
+            ])
+            ->groupBy('inv_codigo');
+
+        $query
+            ->leftJoinSub($inventory, 'inventory_stock', function ($join) {
+                $join->on('inventory_stock.inv_codigo', '=', 'product.pro_codigo');
+            })
+            ->orderByRaw('CASE WHEN COALESCE(inventory_stock.stock_total, 0) > 0 THEN 0 ELSE 1 END');
+    }
+
+    private function activeStoreCode(int $countryId, string $countryCode, array $filters): string
+    {
+        $requested = trim((string) ($filters['storeCode'] ?? ''));
+        if ($requested === '') {
+            $country = strtolower($countryCode);
+            $checkoutType = $this->checkoutType($filters['checkoutType'] ?? 'DOMICILIO');
+            $requested = trim((string) config(
+                $checkoutType === 'DOMICILIO'
+                    ? "inventory.domicilio_store_by_country.{$country}"
+                    : "inventory.default_store_by_country.{$country}",
+                '',
+            ));
+        }
+
+        if ($requested === '') {
+            return '';
+        }
+
+        $exists = DB::table('stj_tiendas')
+            ->where('tie_pais', $countryId)
+            ->where('tie_codigo', $requested)
+            ->where('tie_productos', 1)
+            ->exists();
+
+        return $exists ? $requested : '';
     }
 
     private function checkoutType(mixed $value): string

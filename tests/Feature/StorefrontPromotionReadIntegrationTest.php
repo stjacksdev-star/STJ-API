@@ -96,6 +96,70 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertSame(20.0, $result['products'][0]['discountPercentage']);
     }
 
+    public function test_default_sort_prioritizes_local_stock_for_the_selected_store_before_pagination(): void
+    {
+        DB::table('stj_tiendas')->insert([
+            'tie_id' => 57,
+            'tie_pais' => 1,
+            'tie_codigo' => '57',
+            'tie_nombre' => 'Domicilio',
+            'tie_productos' => 1,
+        ]);
+        DB::table('stj_productos')->insert([
+            'pro_id' => 101,
+            'pro_codigo' => 'SKU101',
+            'pro_nombre' => 'Producto disponible',
+            'pro_marca' => 'ST JACKS',
+            'pro_oc_genero' => 'NIÑA',
+            'pro_estatus' => 'ACTIVO',
+            'pro_registro' => '2026-01-01 10:00:00',
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            'ppa_id' => 2,
+            'ppa_pais' => 1,
+            'ppa_producto' => 101,
+            'ppa_estado' => 'ACTIVO',
+            'ppa_precio' => 100,
+        ]);
+        DB::table('stj_promociones_producto')->insert([
+            'ppr_promocion' => 10,
+            'ppr_producto' => 101,
+            'ppr_descuento' => 10,
+        ]);
+        DB::table('stj_inventario')->insert([
+            'inv_pais' => 1,
+            'inv_tienda' => '57',
+            'inv_codigo' => 'SKU101',
+            'inv_talla' => '4',
+            'inv_cantidad' => 2,
+        ]);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')
+            ->once()
+            ->with('sv', Mockery::on(fn (array $products) => $products[0]->pro_codigo === 'SKU101'), '57')
+            ->andReturn([
+                'availabilityBySku' => [
+                    'SKU101' => ['availableSizes' => ['4'], 'hasStock' => true, 'totalQuantity' => 2],
+                ],
+                'activeStoreCode' => '57',
+                'usedSource' => 'local_inventory',
+            ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $result = app(StorefrontPromotionLandingService::class)->find('SV', 10, [
+            'page' => 1,
+            'perPage' => 1,
+            'checkoutType' => 'DOMICILIO',
+            'storeCode' => '57',
+        ]);
+
+        $this->assertSame('SKU101', $result['products'][0]['sku']);
+        $this->assertTrue($result['products'][0]['hasStock']);
+        $this->assertSame('featured', $result['filters']['active']['sort']);
+        $this->assertSame(2, $result['pagination']['total']);
+    }
+
     public function test_selected_store_landing_exposes_participants_and_context_warnings(): void
     {
         DB::table('stj_promociones')->where('prm_id', 10)->update([
@@ -229,6 +293,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
             $table->string('tie_nombre');
             $table->string('tie_direccion')->nullable();
             $table->text('tie_horario')->nullable();
+            $table->boolean('tie_productos')->default(true);
         });
         Schema::create('stj_categorias', function (Blueprint $table) {
             $table->id('cat_id');
@@ -310,6 +375,14 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
             $table->id('prt_id');
             $table->unsignedBigInteger('prt_promocion');
             $table->unsignedBigInteger('prt_tienda');
+        });
+        Schema::create('stj_inventario', function (Blueprint $table) {
+            $table->id('inv_id');
+            $table->unsignedBigInteger('inv_pais');
+            $table->string('inv_tienda');
+            $table->string('inv_codigo');
+            $table->string('inv_talla');
+            $table->integer('inv_cantidad')->nullable();
         });
     }
 }
