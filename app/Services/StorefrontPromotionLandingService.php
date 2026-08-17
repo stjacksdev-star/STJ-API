@@ -364,7 +364,7 @@ class StorefrontPromotionLandingService
             ->leftJoinSub($inventory, 'inventory_stock', function ($join) {
                 $join->on('inventory_stock.inv_codigo', '=', 'product.pro_codigo');
             })
-            ->orderByRaw('CASE WHEN COALESCE(inventory_stock.stock_total, 0) > 0 THEN 0 ELSE 1 END');
+            ->orderByRaw('COALESCE(inventory_stock.stock_total, 0) DESC');
     }
 
     private function activeStoreCode(int $countryId, string $countryCode, array $filters): string

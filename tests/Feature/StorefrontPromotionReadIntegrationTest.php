@@ -127,11 +127,20 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
             'ppr_descuento' => 10,
         ]);
         DB::table('stj_inventario')->insert([
-            'inv_pais' => 1,
-            'inv_tienda' => '57',
-            'inv_codigo' => 'SKU101',
-            'inv_talla' => '4',
-            'inv_cantidad' => 2,
+            [
+                'inv_pais' => 1,
+                'inv_tienda' => '57',
+                'inv_codigo' => 'SKU100',
+                'inv_talla' => '4',
+                'inv_cantidad' => 1,
+            ],
+            [
+                'inv_pais' => 1,
+                'inv_tienda' => '57',
+                'inv_codigo' => 'SKU101',
+                'inv_talla' => '4',
+                'inv_cantidad' => 2,
+            ],
         ]);
 
         $availability = Mockery::mock(ProductListAvailabilityService::class);
