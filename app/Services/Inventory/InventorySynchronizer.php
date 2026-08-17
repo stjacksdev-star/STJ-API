@@ -150,10 +150,16 @@ class InventorySynchronizer
 
     private function eligibleCountries(?string $countryCode): Builder
     {
+        $configuredProfiles = collect((array) config('inventory.sync.endpoints', []))
+            ->filter(fn (mixed $url) => trim((string) $url) !== '')
+            ->keys()
+            ->all();
+
         return DB::table('stj_inventory_sync_countries as sync')
             ->join('stj_paises as country', 'country.pai_id', '=', 'sync.isc_country_id')
             ->where('country.pai_estado', 'ACTIVO')
             ->where('sync.isc_enabled', 1)
+            ->whereIn('sync.isc_endpoint_profile', $configuredProfiles)
             ->when(
                 $countryCode !== null && trim($countryCode) !== '',
                 fn (Builder $query) => $query->whereRaw('UPPER(country.pai_codigo) = ?', [strtoupper(trim($countryCode))]),

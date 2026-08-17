@@ -17,6 +17,10 @@ class SyncInventoryCommandTest extends TestCase
 
         $this->createSchema();
         $this->seedBaseData();
+        config()->set('inventory.sync.endpoints', [
+            'sv_categories' => 'https://inventory.test/sv',
+            'gt_categories' => '',
+        ]);
     }
 
     public function test_it_syncs_one_deterministic_batch_for_all_active_stores(): void
@@ -154,6 +158,39 @@ class SyncInventoryCommandTest extends TestCase
         $this->assertDatabaseHas('stj_inventory_sync_countries', [
             'isc_country_id' => 1,
             'isc_last_batch_stores' => 3,
+        ]);
+    }
+
+    public function test_automatic_selection_skips_an_active_country_without_a_configured_endpoint(): void
+    {
+        DB::table('stj_paises')->insert([
+            'pai_id' => 2,
+            'pai_codigo' => 'GT',
+            'pai_nombre' => 'Guatemala',
+            'pai_estado' => 'ACTIVO',
+        ]);
+        DB::table('stj_inventory_sync_countries')->insert([
+            'isc_country_id' => 2,
+            'isc_enabled' => 1,
+            'isc_endpoint_profile' => 'gt_categories',
+            'isc_batch_size' => 100,
+            'isc_created_at' => now(),
+            'isc_updated_at' => now(),
+        ]);
+
+        $client = Mockery::mock(InventorySyncClient::class);
+        $client->shouldReceive('fetch')->once()->with(1, 'sv_categories', '001', ['P001'])->andReturn(['ok' => true, 'rows' => []]);
+        $client->shouldReceive('fetch')->once()->with(1, 'sv_categories', '002', ['P001'])->andReturn(['ok' => true, 'rows' => []]);
+        $this->app->instance(InventorySyncClient::class, $client);
+
+        $this->artisan('inventory:sync', ['--batch-size' => 1])
+            ->expectsOutputToContain('Pais: SV - El Salvador')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('stj_inventory_sync_countries', [
+            'isc_country_id' => 2,
+            'isc_next_product_id' => 0,
+            'isc_consecutive_failures' => 0,
         ]);
     }
 

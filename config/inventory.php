@@ -31,7 +31,13 @@ return [
         'token' => env('INVENTORY_API_TOKEN', env('STJ_API_TOKEN', '')),
         'endpoints' => [
             'sv_categories' => env('INVENTORY_SYNC_SV_CATEGORIES_URL', env('INVENTORY_SV_CATEGORIES_URL', '')),
+            'gt_categories' => env('INVENTORY_SYNC_GT_CATEGORIES_URL', ''),
+            'cr_categories' => env('INVENTORY_SYNC_CR_CATEGORIES_URL', ''),
+            'ni_categories' => env('INVENTORY_SYNC_NI_CATEGORIES_URL', ''),
+            'pa_categories' => env('INVENTORY_SYNC_PA_CATEGORIES_URL', ''),
+            'do_categories' => env('INVENTORY_SYNC_DO_CATEGORIES_URL', ''),
             'hn_categories' => env('INVENTORY_SYNC_HN_CATEGORIES_URL', ''),
+            've_categories' => env('INVENTORY_SYNC_VE_CATEGORIES_URL', ''),
             'generic_categories' => env('INVENTORY_SYNC_GENERIC_CATEGORIES_URL', env('INVENTORY_GENERIC_CATEGORIES_URL', '')),
         ],
         'timeout_seconds' => (int) env('INVENTORY_SYNC_TIMEOUT_SECONDS', 20),
