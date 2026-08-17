@@ -69,7 +69,7 @@ class PromotionController extends BaseController
             'commercialName' => ['nullable', 'string', 'max:255'],
             'origin' => ['required', Rule::in(['TODO', 'WEB', 'APP'])],
             'checkoutType' => ['nullable', Rule::in(['TODO', 'D', 'T'])],
-            'storeScope' => ['nullable', 'prohibited_if:checkoutType,D', Rule::in(['TODAS', 'SELECCIONADAS'])],
+            'storeScope' => ['nullable', 'required_unless:checkoutType,D', 'prohibited_if:checkoutType,D', Rule::in(['TODAS', 'SELECCIONADAS'])],
             'stores' => ['exclude_unless:storeScope,SELECCIONADAS', 'required', 'array', 'min:1'],
             'stores.*' => ['required', 'integer', 'distinct'],
             'type' => ['required', Rule::in(['TODO', 'SKU'])],
@@ -81,6 +81,9 @@ class PromotionController extends BaseController
             'endAt' => ['required', 'date', 'after:startAt'],
             'products' => ['nullable', 'file', 'max:5120'],
             ...$this->actorRules(),
+        ], [
+            'storeScope.required_unless' => 'Seleccione el alcance en tiendas para la modalidad TODO o SOLO TIENDA.',
+            'storeScope.prohibited_if' => 'El alcance en tiendas no aplica para la modalidad SOLO DOMICILIO.',
         ]);
 
         return $this->success(
