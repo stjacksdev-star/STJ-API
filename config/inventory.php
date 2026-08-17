@@ -27,6 +27,19 @@ return [
         'timeout_seconds' => (int) env('INVENTORY_API_TIMEOUT_SECONDS', 8),
     ],
 
+    'sync' => [
+        'token' => env('INVENTORY_API_TOKEN', env('STJ_API_TOKEN', '')),
+        'endpoints' => [
+            'sv_categories' => env('INVENTORY_SYNC_SV_CATEGORIES_URL', env('INVENTORY_SV_CATEGORIES_URL', '')),
+            'hn_categories' => env('INVENTORY_SYNC_HN_CATEGORIES_URL', ''),
+            'generic_categories' => env('INVENTORY_SYNC_GENERIC_CATEGORIES_URL', env('INVENTORY_GENERIC_CATEGORIES_URL', '')),
+        ],
+        'timeout_seconds' => (int) env('INVENTORY_SYNC_TIMEOUT_SECONDS', 20),
+        'connect_timeout_seconds' => (int) env('INVENTORY_SYNC_CONNECT_TIMEOUT_SECONDS', 5),
+        'retry_times' => (int) env('INVENTORY_SYNC_RETRY_TIMES', 2),
+        'retry_delay_ms' => (int) env('INVENTORY_SYNC_RETRY_DELAY_MS', 500),
+    ],
+
     'defaults' => [
         'product_list' => [
             'source' => 'local_inventory',
