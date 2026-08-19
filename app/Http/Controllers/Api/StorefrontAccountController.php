@@ -6,16 +6,22 @@ use App\Models\StorefrontCustomer;
 use App\Support\StorefrontImageUrl;
 use App\Services\StorefrontFavoriteService;
 use App\Services\StorefrontWelcomeCouponService;
+use App\Services\StorefrontPasswordResetService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use App\Support\CouponProductScope;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
+use Illuminate\Support\Facades\RateLimiter;
 
 class StorefrontAccountController extends BaseController
 {
-    public function __construct(private readonly StorefrontWelcomeCouponService $welcomeCoupons) {}
+    public function __construct(
+        private readonly StorefrontWelcomeCouponService $welcomeCoupons,
+        private readonly StorefrontPasswordResetService $passwordResets,
+    ) {}
 
     public function login(Request $request)
     {
@@ -38,6 +44,40 @@ class StorefrontAccountController extends BaseController
         if ($visitor) $favoriteService->merge($visitor, $customer);
 
         return $this->success($this->sessionPayload($customer) + ['favorites' => $favoriteService->consolidated($customer)], 'Sesion iniciada');
+    }
+
+    public function forgotPassword(Request $request, string $country)
+    {
+        $data = $request->validate(['email' => ['required', 'email', 'max:150']]);
+        $country = strtoupper($country);
+
+        if (! DB::table('stj_paises')->where('pai_codigo', $country)->exists()) {
+            return $this->error('El pais del storefront no es valido.', 422);
+        }
+
+        $email = strtolower(trim($data['email']));
+        $key = 'storefront-password-reset:'.hash('sha256', ($request->ip() ?? '').'|'.$email);
+
+        if (! RateLimiter::tooManyAttempts($key, 3)) {
+            RateLimiter::hit($key, 900);
+            $this->passwordResets->request($email, $country, $request->ip());
+        }
+
+        return $this->success([], 'Si existe una cuenta con ese correo, enviaremos un enlace para restablecer la contrasena.');
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $data = $request->validate([
+            'token' => ['required', 'string', 'size:64', 'regex:/^[a-f0-9]+$/i'],
+            'password' => ['required', 'string', 'max:255', 'confirmed', Password::min(10)->letters()->mixedCase()->numbers()],
+        ]);
+
+        if (! $this->passwordResets->reset(strtolower($data['token']), $data['password'])) {
+            return $this->error('El enlace no es valido, ya fue utilizado o ha vencido.', 422);
+        }
+
+        return $this->success([], 'Tu contrasena fue actualizada. Ya puedes iniciar sesion.');
     }
 
     public function registrationCountries()

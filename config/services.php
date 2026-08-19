@@ -35,6 +35,11 @@ return [
         'timeout' => env('SMTP2GO_TIMEOUT', 15),
     ],
 
+    'storefront' => [
+        'password_reset_url' => env('STOREFRONT_PASSWORD_RESET_URL', 'https://stjecommerce.stjacks.com/{country}/cuenta/restablecer/{token}'),
+        'password_reset_ttl_minutes' => env('STOREFRONT_PASSWORD_RESET_TTL_MINUTES', 30),
+    ],
+
     'fcm' => [
         'url' => env('FCM_API_URL', 'https://fcm.googleapis.com/v1'),
         'server_key' => env('FCM_SERVER_KEY'),

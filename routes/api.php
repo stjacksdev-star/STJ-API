@@ -51,6 +51,11 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);
+Route::post('/storefront/account/forgot-password/{country}', [StorefrontAccountController::class, 'forgotPassword'])
+    ->where('country', '[A-Za-z]{2}')
+    ->middleware('throttle:10,1');
+Route::post('/storefront/account/reset-password', [StorefrontAccountController::class, 'resetPassword'])
+    ->middleware('throttle:10,1');
 Route::get('/storefront/account/registration-countries', [StorefrontAccountController::class, 'registrationCountries']);
 Route::post('/storefront/account/register/{country}', [StorefrontAccountController::class, 'register'])
     ->where('country', '[A-Za-z]{2}');
