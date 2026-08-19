@@ -80,6 +80,27 @@ class StorefrontAccountController extends BaseController
         return $this->success([], 'Tu contrasena fue actualizada. Ya puedes iniciar sesion.');
     }
 
+    public function requestPasswordChange(Request $request)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer) return $this->error('No autorizado.', 403);
+
+        $email = strtolower(trim((string) ($customer->usu_correo ?: $customer->usu_usuario)));
+        $key = 'storefront-authenticated-password-change:'.$customer->getKey();
+        if (RateLimiter::tooManyAttempts($key, 3)) {
+            return $this->error('Has solicitado varios enlaces. Espera unos minutos antes de intentarlo nuevamente.', 429);
+        }
+
+        RateLimiter::hit($key, 900);
+        if (! $this->passwordResets->request($email, '', $request->ip())) {
+            return $this->error('No pudimos enviar el correo en este momento. Tu sesión continúa activa.', 503);
+        }
+
+        $request->user()?->currentAccessToken()?->delete();
+
+        return $this->success([], 'Te enviamos un enlace seguro para cambiar tu contraseña. La sesión fue cerrada.');
+    }
+
     public function registrationCountries()
     {
         return $this->success(DB::table('stj_world_countries')

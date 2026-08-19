@@ -19,14 +19,14 @@ class StorefrontPasswordResetService
         private readonly StorefrontMailTemplate $template,
     ) {}
 
-    public function request(string $email, string $country, ?string $ip): void
+    public function request(string $email, string $country, ?string $ip): bool
     {
         $customer = StorefrontCustomer::query()
             ->whereRaw('LOWER(usu_usuario) = ?', [$email])
             ->where('usu_activo', 1)
             ->first();
 
-        if (! $customer) return;
+        if (! $customer) return false;
 
         $token = bin2hex(random_bytes(32));
         $tokenHash = hash('sha256', $token);
@@ -49,12 +49,14 @@ class StorefrontPasswordResetService
                 'Restablece tu contraseña de St. Jack\'s',
                 $this->emailHtml($customer, $this->resetUrl($countryCode = $this->customerCountryCode($customer), $token), $countryCode),
             );
+            return true;
         } catch (Throwable $exception) {
             DB::table('stj_storefront_password_resets')->where('spr_token_hash', $tokenHash)->delete();
             Log::warning('No fue posible enviar el correo de recuperacion del storefront.', [
                 'customer_id' => $customer->getKey(),
                 'exception' => $exception->getMessage(),
             ]);
+            return false;
         }
     }
 
