@@ -16,11 +16,11 @@ class StorefrontOrderTrackingController extends BaseController
             'reference.regex' => 'Ingresa una referencia STJ válida.',
         ]);
 
-        $countryRow = DB::table('stj_paises')
+        $requestedCountryExists = DB::table('stj_paises')
             ->whereRaw('UPPER(pai_codigo) = ?', [strtoupper($country)])
-            ->first(['pai_id', 'pai_codigo']);
+            ->exists();
 
-        if (! $countryRow) {
+        if (! $requestedCountryExists) {
             throw ValidationException::withMessages(['country' => 'País no soportado.']);
         }
 
@@ -32,17 +32,18 @@ class StorefrontOrderTrackingController extends BaseController
                     ->where('payments.ppa_estado', '=', 'APROBADA');
             })
             ->leftJoin('stj_pedidos_direccion as delivery', 'delivery.pdi_pedido', '=', 'orders.ped_id')
-            ->where('orders.ped_id_pais', $countryRow->pai_id)
+            ->join('stj_paises as countries', 'countries.pai_id', '=', 'orders.ped_id_pais')
             ->orderByDesc('payments.ppa_id')
             ->first([
                 'orders.ped_estatus', 'orders.ped_checkout',
                 'payments.ppa_ref', 'payments.ppa_fecha', 'payments.ppa_fecha_procesado',
                 'payments.ppa_fecha_entregado', 'payments.ppa_articulos', 'payments.ppa_monto',
                 'delivery.pdi_fecha_ruta', 'delivery.pdi_id_shipping',
+                'countries.pai_codigo', 'countries.pai_nombre',
             ]);
 
         if (! $order) {
-            return $this->error('No encontramos un pedido con esa referencia en este país.', 404);
+            return $this->error('No encontramos un pedido con esa referencia.', 404);
         }
 
         $status = strtoupper(trim((string) $order->ped_estatus));
@@ -63,7 +64,23 @@ class StorefrontOrderTrackingController extends BaseController
             'amount' => $order->ppa_monto !== null ? (float) $order->ppa_monto : null,
             'status' => $status,
             'shippingId' => $order->pdi_id_shipping ?: null,
+            'country' => [
+                'code' => strtolower((string) $order->pai_codigo),
+                'name' => (string) $order->pai_nombre,
+                'currency' => $this->currency((string) $order->pai_codigo),
+            ],
             'steps' => $steps,
         ], 'Estado del pedido obtenido.');
+    }
+
+    private function currency(string $countryCode): string
+    {
+        return match (strtoupper($countryCode)) {
+            'GT' => 'GTQ',
+            'CR' => 'CRC',
+            'HN' => 'HNL',
+            'DO' => 'DOP',
+            default => 'USD',
+        };
     }
 }
