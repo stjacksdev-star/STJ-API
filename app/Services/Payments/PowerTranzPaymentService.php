@@ -158,7 +158,8 @@ class PowerTranzPaymentService
     private function assertAuthorizedAmount(int $orderId, object $payment): void
     {
         $subtotal = DB::table('stj_pedidos_detalle')->where('car_ref', $payment->ppa_ref)
-            ->selectRaw('COALESCE(SUM(car_precio * car_cantidad), 0) total')->value('total');
+            ->selectRaw('COALESCE(SUM(ROUND(car_precio * car_cantidad * (100 - COALESCE(car_descuento_final, car_descuento, 0)) / 100, 2)), 0) total')
+            ->value('total');
         $order = DB::table('stj_pedidos')->where('ped_id', $orderId)->first(['ped_checkout']);
         $shipping = $order?->ped_checkout === 'DOMICILIO'
             ? DB::table('stj_pedidos_direccion')->where('pdi_pedido', $orderId)->value('pdi_costo_envio_final')
