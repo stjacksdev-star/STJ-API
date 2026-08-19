@@ -22,7 +22,12 @@ class StorefrontPasswordResetServiceTest extends TestCase
             $table->string('usu_usuario');
             $table->string('usu_password');
             $table->string('usu_nombre')->nullable();
+            $table->unsignedBigInteger('usu_pais_registro')->nullable();
             $table->boolean('usu_activo')->default(true);
+        });
+        Schema::create('stj_paises', function (Blueprint $table) {
+            $table->unsignedBigInteger('pai_id')->primary();
+            $table->string('pai_codigo', 2);
         });
         Schema::create('stj_storefront_password_resets', function (Blueprint $table) {
             $table->bigIncrements('spr_id');
@@ -49,6 +54,7 @@ class StorefrontPasswordResetServiceTest extends TestCase
             'services.smtp2go.url' => 'https://smtp.test/send',
             'services.smtp2go.key' => 'test-key',
             'services.smtp2go.sender' => 'test@example.com',
+            'services.storefront.web_url' => 'https://shop.test/{country}',
             'services.storefront.password_reset_url' => 'https://shop.test/{country}/cuenta/restablecer/{token}',
         ]);
     }
@@ -57,6 +63,7 @@ class StorefrontPasswordResetServiceTest extends TestCase
     {
         Schema::dropIfExists('personal_access_tokens');
         Schema::dropIfExists('stj_storefront_password_resets');
+        Schema::dropIfExists('stj_paises');
         Schema::dropIfExists('stj_usuarios');
         parent::tearDown();
     }
@@ -64,10 +71,15 @@ class StorefrontPasswordResetServiceTest extends TestCase
     public function test_token_is_hashed_expires_and_can_only_be_used_once(): void
     {
         Http::fake(['https://smtp.test/send' => Http::response(['data' => ['failed' => 0]], 200)]);
+        DB::table('stj_paises')->insert([
+            ['pai_id' => 1, 'pai_codigo' => 'SV'],
+            ['pai_id' => 2, 'pai_codigo' => 'GT'],
+        ]);
         DB::table('stj_usuarios')->insert([
             'usu_usuario' => 'cliente@example.com',
             'usu_password' => Hash::make('Anterior123'),
             'usu_nombre' => 'Cliente',
+            'usu_pais_registro' => 2,
             'usu_activo' => 1,
         ]);
 
@@ -82,6 +94,11 @@ class StorefrontPasswordResetServiceTest extends TestCase
         $this->assertSame(64, strlen($token));
         $this->assertSame(hash('sha256', $token), $reset->spr_token_hash);
         $this->assertStringNotContainsString($token, json_encode($reset));
+        $this->assertStringContainsString('header-stjonline.png', $html);
+        $this->assertStringContainsString('footer-stjonline.png', $html);
+        $this->assertStringContainsString('https://shop.test/gt/politicas', $html);
+        $this->assertStringContainsString('https://shop.test/gt/terminos-y-condiciones', $html);
+        $this->assertStringContainsString('https://shop.test/gt/contactanos', $html);
         $this->assertTrue($service->reset($token, 'NuevaClave123'));
         $this->assertTrue(Hash::check('NuevaClave123', DB::table('stj_usuarios')->value('usu_password')));
         $this->assertFalse($service->reset($token, 'OtraClave123'));

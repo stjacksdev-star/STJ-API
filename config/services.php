@@ -36,6 +36,7 @@ return [
     ],
 
     'storefront' => [
+        'web_url' => env('STOREFRONT_WEB_URL', 'https://stjecommerce.stjacks.com/{country}'),
         'password_reset_url' => env('STOREFRONT_PASSWORD_RESET_URL', 'https://stjecommerce.stjacks.com/{country}/cuenta/restablecer/{token}'),
         'password_reset_ttl_minutes' => env('STOREFRONT_PASSWORD_RESET_TTL_MINUTES', 30),
     ],
