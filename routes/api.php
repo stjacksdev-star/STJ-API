@@ -139,6 +139,7 @@ Route::get('/storefront/shipping/{country}/states', [StorefrontShippingControlle
 Route::get('/storefront/shipping/{country}/states/{state}/cities', [StorefrontShippingController::class, 'cities'])->where(['country' => '[A-Za-z]{2}', 'state' => '[0-9]+']);
 Route::post('/storefront/shipping/{country}/quote', [StorefrontShippingController::class, 'quote'])->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/orders/{order}/payments/powertranz', [PowerTranzController::class, 'start'])->whereNumber('order')->middleware('throttle:5,1');
+Route::get('/storefront/payments/powertranz/challenge/{token}', [PowerTranzController::class, 'challenge'])->where('token', '[A-Za-z0-9]{64}')->middleware('throttle:20,1')->name('powertranz.challenge');
 Route::get('/storefront/orders/{order}/payment-status', [PowerTranzController::class, 'status'])->whereNumber('order');
 Route::post('/storefront/payments/powertranz/return/{country}/{token}', [PowerTranzController::class, 'handleReturn'])->where(['country' => '[A-Za-z]{2}', 'token' => '[A-Za-z0-9]{64}'])->middleware('throttle:30,1')->name('powertranz.return');
 Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {

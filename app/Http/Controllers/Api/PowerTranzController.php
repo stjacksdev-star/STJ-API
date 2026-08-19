@@ -12,7 +12,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class PowerTranzController extends Controller
 {
@@ -25,7 +27,27 @@ class PowerTranzController extends Controller
             return response()->json(['ok' => false, 'message' => $exception->getMessage()], 409);
         }
 
+        if (filled($result['redirectData'] ?? null)) {
+            $challengeToken = Str::random(64);
+            Cache::put('powertranz:challenge:'.hash('sha256', $challengeToken), (string) $result['redirectData'], now()->addMinutes(10));
+            unset($result['redirectData']);
+            $result['challengeUrl'] = route('powertranz.challenge', ['token' => $challengeToken]);
+        }
+
         return response()->json(['ok' => true, 'message' => 'Flujo PowerTranz iniciado.', 'data' => $result])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function challenge(string $token)
+    {
+        $html = Cache::get('powertranz:challenge:'.hash('sha256', $token));
+        abort_unless(is_string($html) && $html !== '', 404);
+
+        return response($html, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Cache-Control' => 'no-store, private',
+            'Pragma' => 'no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function handleReturn(Request $request, string $country, string $token, PowerTranzPaymentService $service, PowerTranzUrlFactory $urls): JsonResponse|RedirectResponse
