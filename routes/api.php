@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
+use App\Http\Controllers\Api\StorefrontContactController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontFavoriteController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -74,6 +75,9 @@ Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function 
 });
 Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
+Route::post('/storefront/contact/{country}', [StorefrontContactController::class, 'store'])
+    ->where('country', '[A-Za-z]{2}')
+    ->middleware('throttle:3,1');
 Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/best-sellers/{country}', [StorefrontBestSellerController::class, 'index'])
