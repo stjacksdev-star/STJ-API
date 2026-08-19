@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontFavoriteController;
 use App\Http\Controllers\Api\StorefrontHomeController;
 use App\Http\Controllers\Api\StorefrontOrderController;
+use App\Http\Controllers\Api\StorefrontOrderTrackingController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
@@ -89,6 +90,9 @@ Route::get('/storefront/promotion/{country}/{promotion}', [StorefrontPromotionLa
     ->whereNumber('promotion');
 Route::get('/storefront/stores/{country}', [StorefrontStoreController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
+Route::post('/storefront/orders/{country}/track', [StorefrontOrderTrackingController::class, 'show'])
+    ->where('country', '[A-Za-z]{2}')
+    ->middleware('throttle:10,1');
 Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class, 'index'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/collections/{country}/{collection}', [StorefrontCollectionController::class, 'show'])
