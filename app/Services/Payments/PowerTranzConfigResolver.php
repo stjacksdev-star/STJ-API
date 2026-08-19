@@ -26,7 +26,7 @@ class PowerTranzConfigResolver
         if (parse_url($saleUrl, PHP_URL_HOST) !== $expectedHost || parse_url($paymentUrl, PHP_URL_HOST) !== $expectedHost) {
             throw ValidationException::withMessages(['powertranz' => 'Las URLs no corresponden al ambiente PowerTranz seleccionado.']);
         }
-        if (blank($credentials['id'] ?? null) || blank($credentials['password'] ?? null) || $currency === '') {
+        if (blank($credentials['id'] ?? null) || blank($credentials['password'] ?? null) || ! preg_match('/^\d{3}$/', $currency)) {
             throw ValidationException::withMessages(['powertranz' => "PowerTranz no esta configurado para {$country}."]);
         }
 
