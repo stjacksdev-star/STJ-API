@@ -61,13 +61,8 @@ class PowerTranzPaymentService
             $gateway = $this->client->sale($configuration, $payload, $input['operation_uuid']);
             $this->verifyInitialResponse($gateway, $payment, $configuration['currency'], $input['operation_uuid']);
             $result = $this->safeInitialResult($gateway, $payment, $country, $input['operation_uuid']);
-            $debugPayload = $payload;
-            $pan = (string) data_get($debugPayload, 'Source.CardPan', '');
-            data_set($debugPayload, 'Source.CardPan', $pan === '' ? '' : str_repeat('*', max(0, strlen($pan) - 4)).substr($pan, -4));
-            data_set($debugPayload, 'Source.CardCvv', '***');
-            $result['requestPayload'] = json_encode($debugPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $storedResult = $result;
-            unset($storedResult['redirectData'], $storedResult['requestPayload']);
+            unset($storedResult['redirectData']);
             DB::table('stj_powertranz_operaciones')->insert(['pto_uuid' => $input['operation_uuid'], 'pto_pago_id' => $payment->ppa_id, 'pto_return_token_hash' => hash('sha256', $returnToken), 'pto_payload_hash' => $fingerprint, 'pto_estado' => $result['status'], 'pto_respuesta_segura' => Crypt::encryptString(json_encode($storedResult, JSON_UNESCAPED_SLASHES)), 'pto_creado_en' => now(), 'pto_actualizado_en' => now()]);
             DB::table('stj_pedidos_pago')->where('ppa_id', $payment->ppa_id)->update(['ppa_transactionidentifier' => $input['operation_uuid'], 'ppa_estado' => $result['status'] === 'DENEGADA' ? 'DENEGADA' : 'PENDIENTE', 'ppa_fecha_procesado' => now()]);
             if ($result['status'] === 'APROBADA') {

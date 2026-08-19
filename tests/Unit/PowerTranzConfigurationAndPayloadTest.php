@@ -77,6 +77,16 @@ class PowerTranzConfigurationAndPayloadTest extends TestCase
         Http::assertSent(fn ($request) => $request->body() === '{"TotalAmount":115,"TaxAmount":15,"CurrencyCode":"340"}');
     }
 
+    public function test_phone_country_code_is_not_duplicated(): void
+    {
+        $factory = new PowerTranzPayloadFactory;
+        $order = (object) ['ped_pais' => 'SV', 'ped_nombres' => 'Ana', 'ped_apellidos' => 'Lopez', 'ped_email' => 'ana@example.test', 'ped_telefono_pais' => '503', 'ped_telefono' => '+503 7704-2525'];
+        $payment = (object) ['ppa_monto' => '10.45', 'ppa_ref' => 'STJ-TEST'];
+        $payload = $factory->sale($order, $payment, ['pan' => '4012000000020006', 'cvv' => '123', 'expiration' => '2812', 'holder' => 'Ana Lopez'], '840', 'operation-id', 'https://api.example.test/return');
+
+        $this->assertSame('50377042525', $payload['BillingAddress']['PhoneNumber']);
+    }
+
     public function test_sv_public_payload_preflight_uses_persisted_authority_and_opaque_return(): void
     {
         config(['powertranz.return_base_url' => 'https://test-api.stjacks.com/api/storefront/payments/powertranz/return']);

@@ -20,7 +20,7 @@ class PowerTranzPayloadFactory
             'ThreeDSecure' => true,
             'Source' => ['CardPresent' => false, 'CardEmvFallback' => false, 'ManualEntry' => false, 'Debit' => false, 'Contactless' => false, 'CardPan' => preg_replace('/\s+/', '', (string) $card['pan']), 'CardCvv' => (string) $card['cvv'], 'CardExpiration' => (string) $card['expiration'], 'CardholderName' => trim(Str::ascii((string) $card['holder']))],
             'OrderIdentifier' => (string) $payment->ppa_ref,
-            'BillingAddress' => ['FirstName' => trim(Str::ascii((string) $order->ped_nombres)), 'LastName' => trim(Str::ascii((string) $order->ped_apellidos)), 'Line1' => '', 'Line2' => '', 'City' => '', 'State' => '', 'PostalCode' => '', 'CountryCode' => '', 'EmailAddress' => trim((string) $order->ped_email), 'PhoneNumber' => preg_replace('/\D+/', '', (string) ($order->ped_telefono_pais ?? '').(string) ($order->ped_telefono ?? ''))],
+            'BillingAddress' => ['FirstName' => trim(Str::ascii((string) $order->ped_nombres)), 'LastName' => trim(Str::ascii((string) $order->ped_apellidos)), 'Line1' => '', 'Line2' => '', 'City' => '', 'State' => '', 'PostalCode' => '', 'CountryCode' => '', 'EmailAddress' => trim((string) $order->ped_email), 'PhoneNumber' => $this->phoneNumber($order)],
             'AddressMatch' => false,
             'ExtendedData' => ['ThreeDSecure' => ['ChallengeWindowSize' => 4], 'MerchantResponseUrl' => $returnUrl],
         ];
@@ -36,6 +36,17 @@ class PowerTranzPayloadFactory
     private function decimal(string $value): float
     {
         return $this->cents($value) / 100;
+    }
+
+    private function phoneNumber(object $order): string
+    {
+        $countryCode = preg_replace('/\D+/', '', (string) ($order->ped_telefono_pais ?? ''));
+        $phone = preg_replace('/\D+/', '', (string) ($order->ped_telefono ?? ''));
+        if ($countryCode !== '' && str_starts_with($phone, $countryCode)) {
+            $phone = substr($phone, strlen($countryCode));
+        }
+
+        return $countryCode.$phone;
     }
 
     private function cents(string $value): int

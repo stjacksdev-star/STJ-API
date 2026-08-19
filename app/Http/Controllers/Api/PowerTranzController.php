@@ -27,10 +27,10 @@ class PowerTranzController extends Controller
             return response()->json(['ok' => false, 'message' => $exception->getMessage()], 409);
         }
 
-        if (filled($result['requestPayload'] ?? null)) {
+        if (filled($result['redirectData'] ?? null)) {
             $challengeToken = Str::random(64);
-            Cache::put('powertranz:challenge:'.hash('sha256', $challengeToken), (string) ($result['requestPayload'] ?? ''), now()->addMinutes(10));
-            unset($result['redirectData'], $result['requestPayload']);
+            Cache::put('powertranz:challenge:'.hash('sha256', $challengeToken), (string) $result['redirectData'], now()->addMinutes(10));
+            unset($result['redirectData']);
             $result['challengeUrl'] = route('powertranz.challenge', ['token' => $challengeToken]);
         }
 
@@ -43,7 +43,7 @@ class PowerTranzController extends Controller
         abort_unless(is_string($html) && $html !== '', 404);
 
         return response($html, 200, [
-            'Content-Type' => 'text/plain; charset=UTF-8',
+            'Content-Type' => 'text/html; charset=UTF-8',
             'Cache-Control' => 'no-store, private',
             'Pragma' => 'no-cache',
             'X-Content-Type-Options' => 'nosniff',
