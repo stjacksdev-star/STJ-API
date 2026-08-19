@@ -101,6 +101,53 @@ class StorefrontAccountController extends BaseController
         return $this->success([], 'Te enviamos un enlace seguro para cambiar tu contraseña. La sesión fue cerrada.');
     }
 
+    public function destroy(Request $request)
+    {
+        $customer = $this->storefrontCustomer($request);
+        if (! $customer) return $this->error('No autorizado.', 403);
+
+        $data = $request->validate([
+            'password' => ['required', 'string', 'max:255'],
+            'confirmation' => ['required', 'in:ELIMINAR'],
+        ]);
+
+        if (! Hash::check($data['password'], $customer->getAuthPassword())) {
+            return $this->error('La contraseña no es correcta.', 422);
+        }
+
+        DB::transaction(function () use ($customer) {
+            $lockedCustomer = StorefrontCustomer::query()->whereKey($customer->getKey())->lockForUpdate()->firstOrFail();
+            if (! (bool) $lockedCustomer->usu_activo) return;
+
+            $originalUsername = trim((string) $lockedCustomer->usu_usuario);
+            $suffix = '_deleted';
+            $sequence = 1;
+
+            do {
+                $numberedSuffix = $sequence === 1 ? $suffix : $suffix.'_'.$sequence;
+                $candidate = mb_substr($originalUsername, 0, 100 - mb_strlen($numberedSuffix)).$numberedSuffix;
+                $exists = StorefrontCustomer::query()
+                    ->where('usu_usuario', $candidate)
+                    ->where($lockedCustomer->getKeyName(), '<>', $lockedCustomer->getKey())
+                    ->exists();
+                $sequence++;
+            } while ($exists);
+
+            $lockedCustomer->forceFill([
+                'usu_usuario' => $candidate,
+                'usu_activo' => 0,
+                'usu_ultima_modificacion' => now(),
+            ])->save();
+
+            DB::table('stj_storefront_password_resets')
+                ->where('spr_email', strtolower($originalUsername))
+                ->delete();
+            $lockedCustomer->tokens()->delete();
+        });
+
+        return $this->success([], 'Tu cuenta fue eliminada y todas las sesiones fueron cerradas.');
+    }
+
     public function registrationCountries()
     {
         return $this->success(DB::table('stj_world_countries')

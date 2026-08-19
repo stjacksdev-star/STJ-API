@@ -66,6 +66,8 @@ Route::middleware('auth:sanctum')->prefix('storefront/account')->group(function 
     Route::get('/orders/{reference}', [StorefrontAccountController::class, 'order']);
     Route::post('/password-change-link', [StorefrontAccountController::class, 'requestPasswordChange'])
         ->middleware('throttle:5,1');
+    Route::delete('/', [StorefrontAccountController::class, 'destroy'])
+        ->middleware('throttle:3,1');
     Route::put('/profile', [StorefrontAccountController::class, 'update']);
     Route::get('/locations/countries', [StorefrontAccountController::class, 'countries']);
     Route::get('/locations/states/{country}', [StorefrontAccountController::class, 'states'])->whereNumber('country');
