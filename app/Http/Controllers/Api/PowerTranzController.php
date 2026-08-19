@@ -46,9 +46,9 @@ class PowerTranzController extends Controller
         $customer = $this->customer();
         $cart = DB::table('stj_carritos')->where('car_pedido_id', $order)->where('car_visitante_id', $visitor->getKey())->when($customer, fn ($q) => $q->where('car_usu_id', $customer->getKey()), fn ($q) => $q->whereNull('car_usu_id'))->first();
         abort_unless($cart, 404);
-        $payment = DB::table('stj_pedidos_pago')->where('ppa_pedido', $order)->orderByDesc('ppa_id')->first(['ppa_tipo', 'ppa_estado', 'ppa_ref', 'ppa_autorizacion', 'ppa_fecha_procesado']);
+        $payment = DB::table('stj_pedidos_pago')->where('ppa_pedido', $order)->orderByDesc('ppa_id')->first(['ppa_tipo', 'ppa_estado', 'ppa_ref', 'ppa_autorizacion', 'ppa_rsp_codigo', 'ppa_rsp_mensaje', 'ppa_fecha_procesado']);
 
-        return response()->json(['ok' => true, 'data' => ['orderId' => $order, 'paymentType' => $payment?->ppa_tipo, 'status' => $payment?->ppa_estado ?? 'PENDIENTE', 'reference' => $payment?->ppa_ref, 'authorization' => $payment?->ppa_autorizacion, 'processedAt' => $payment?->ppa_fecha_procesado]])->header('Cache-Control', 'no-store, private');
+        return response()->json(['ok' => true, 'data' => ['orderId' => $order, 'paymentType' => $payment?->ppa_tipo, 'status' => $payment?->ppa_estado ?? 'PENDIENTE', 'reference' => $payment?->ppa_ref, 'authorization' => $payment?->ppa_autorizacion, 'responseCode' => $payment?->ppa_rsp_codigo, 'responseMessage' => $payment?->ppa_rsp_mensaje, 'processedAt' => $payment?->ppa_fecha_procesado]])->header('Cache-Control', 'no-store, private');
     }
 
     private function visitor(Request $request): StorefrontVisitor
