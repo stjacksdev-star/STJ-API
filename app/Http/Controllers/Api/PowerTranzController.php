@@ -43,7 +43,7 @@ class PowerTranzController extends Controller
         abort_unless(is_string($html) && $html !== '', 404);
 
         return response($html, 200, [
-            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Type' => 'text/plain; charset=UTF-8',
             'Cache-Control' => 'no-store, private',
             'Pragma' => 'no-cache',
             'X-Content-Type-Options' => 'nosniff',
