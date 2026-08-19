@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\StorefrontCustomer;
+use App\Models\WebPushSubscription;
 use App\Support\StorefrontImageUrl;
 use App\Services\StorefrontFavoriteService;
 use App\Services\StorefrontWelcomeCouponService;
@@ -142,8 +143,19 @@ class StorefrontAccountController extends BaseController
             DB::table('stj_storefront_password_resets')
                 ->where('spr_email', strtolower($originalUsername))
                 ->delete();
+            WebPushSubscription::query()
+                ->where('psu_usu_id', $lockedCustomer->getKey())
+                ->update([
+                    'psu_estado' => 'REVOCADA',
+                    'psu_permiso' => 'REVOKED',
+                    'psu_revocado_en' => now(),
+                    'psu_ultima_actividad_en' => now(),
+                    'psu_actualizado_en' => now(),
+                ]);
             $lockedCustomer->tokens()->delete();
         });
+
+        $request->attributes->set('forgetStorefrontVisitor', true);
 
         return $this->success([], 'Tu cuenta fue eliminada y todas las sesiones fueron cerradas.');
     }

@@ -60,6 +60,12 @@ class ResolveStorefrontVisitor
         $request->attributes->set('storefrontVisitor', $visitor);
 
         $response = $next($request);
+        if ($request->attributes->get('forgetStorefrontVisitor') === true) {
+            $response->headers->setCookie(cookie()->forget($cookieName, '/', config('visitor.domain')));
+
+            return $response;
+        }
+
         $response->headers->setCookie(cookie(
             $cookieName,
             $uuid,
