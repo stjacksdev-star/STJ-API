@@ -150,7 +150,7 @@ class PowerTranzPaymentService
             throw ValidationException::withMessages(['powertranz' => 'PowerTranz devolvio un identificador no coincidente.']);
         }
         $this->verifyConfirmation($response, $payment, $currency);
-        if (filled($response['RedirectData'] ?? null) && ! preg_match('/<form\b|<script\b/i', (string) $response['RedirectData'])) {
+        if (filled($response['RedirectData'] ?? null) && ! preg_match('/<form\b|<script\b|<iframe\b/i', (string) $response['RedirectData'])) {
             throw ValidationException::withMessages(['powertranz' => 'PowerTranz devolvio RedirectData invalido.']);
         }
     }
