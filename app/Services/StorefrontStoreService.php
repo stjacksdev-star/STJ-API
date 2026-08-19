@@ -19,7 +19,7 @@ class StorefrontStoreService
         $stores = DB::table('stj_tiendas')
             ->where('tie_pais', $country->pai_id)->where('tie_productos', 1)
             ->orderBy('tie_nombre')
-            ->get(['tie_id', 'tie_codigo', 'tie_nombre', 'tie_direccion', 'tie_zona', 'tie_latitud', 'tie_longitud', 'tie_horario'])
+            ->get(['tie_id', 'tie_codigo', 'tie_nombre', 'tie_direccion', 'tie_zona', 'tie_latitud', 'tie_longitud', 'tie_horario', 'tie_telefono', 'tie_correo'])
             ->map(fn (object $store) => $this->normalizeStore($store, (int) $country->pai_id, $now, $latitude, $longitude))
             ->sortBy(fn (array $store) => [$store['distanceKm'] ?? PHP_FLOAT_MAX, $store['name']], SORT_REGULAR)
             ->values()->all();
@@ -47,6 +47,7 @@ class StorefrontStoreService
         return [
             'id' => (int) $store->tie_id, 'code' => trim((string) $store->tie_codigo), 'name' => trim((string) $store->tie_nombre),
             'address' => trim((string) $store->tie_direccion), 'zone' => trim((string) $store->tie_zona) ?: null,
+            'phone' => trim((string) $store->tie_telefono) ?: null, 'email' => trim((string) $store->tie_correo) ?: null,
             'latitude' => $storeLatitude, 'longitude' => $storeLongitude, 'distanceKm' => $distance,
             'distanceLabel' => $distance === null ? null : 'A '.number_format($distance, 1).' KM',
             'schedule' => $this->schedule($countryId, (string) $store->tie_codigo, $now, (string) $store->tie_horario),

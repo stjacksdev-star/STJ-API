@@ -27,6 +27,8 @@ class StorefrontStoreServiceTest extends TestCase
             $table->string('tie_latitud')->nullable();
             $table->string('tie_longitud')->nullable();
             $table->text('tie_horario')->nullable();
+            $table->string('tie_telefono')->nullable();
+            $table->string('tie_correo')->nullable();
             $table->bigInteger('tie_pais');
             $table->boolean('tie_productos');
         });
@@ -41,9 +43,9 @@ class StorefrontStoreServiceTest extends TestCase
         });
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
         DB::table('stj_tiendas')->insert([
-            ['tie_codigo' => 'A', 'tie_nombre' => 'Lejana', 'tie_direccion' => 'Direccion A', 'tie_zona' => 'Centro', 'tie_latitud' => '13.80', 'tie_longitud' => '-89.30', 'tie_horario' => 'Horario A', 'tie_pais' => 1, 'tie_productos' => 1],
-            ['tie_codigo' => 'B', 'tie_nombre' => 'Cercana', 'tie_direccion' => 'Direccion B', 'tie_zona' => 'Centro', 'tie_latitud' => '13.70', 'tie_longitud' => '-89.20', 'tie_horario' => 'Horario B', 'tie_pais' => 1, 'tie_productos' => 1],
-            ['tie_codigo' => 'X', 'tie_nombre' => 'Sin productos', 'tie_direccion' => 'Direccion X', 'tie_zona' => null, 'tie_latitud' => null, 'tie_longitud' => null, 'tie_horario' => null, 'tie_pais' => 1, 'tie_productos' => 0],
+            ['tie_codigo' => 'A', 'tie_nombre' => 'Lejana', 'tie_direccion' => 'Direccion A', 'tie_zona' => 'Centro', 'tie_latitud' => '13.80', 'tie_longitud' => '-89.30', 'tie_horario' => 'Horario A', 'tie_telefono' => '2200-0000', 'tie_correo' => 'a@example.com', 'tie_pais' => 1, 'tie_productos' => 1],
+            ['tie_codigo' => 'B', 'tie_nombre' => 'Cercana', 'tie_direccion' => 'Direccion B', 'tie_zona' => 'Centro', 'tie_latitud' => '13.70', 'tie_longitud' => '-89.20', 'tie_horario' => 'Horario B', 'tie_telefono' => '2200-0001', 'tie_correo' => 'b@example.com', 'tie_pais' => 1, 'tie_productos' => 1],
+            ['tie_codigo' => 'X', 'tie_nombre' => 'Sin productos', 'tie_direccion' => 'Direccion X', 'tie_zona' => null, 'tie_latitud' => null, 'tie_longitud' => null, 'tie_horario' => null, 'tie_telefono' => null, 'tie_correo' => null, 'tie_pais' => 1, 'tie_productos' => 0],
         ]);
         DB::table('stj_tiendas_horario')->insert(['tih_pais' => 1, 'tih_tienda' => 'B', 'tih_dia' => 1, 'tih_inicio' => '08:00:00', 'tih_fin' => '18:00:00', 'tih_open' => 'SI']);
         config(['inventory.domicilio_store_by_country.sv' => '57']);
@@ -56,6 +58,7 @@ class StorefrontStoreServiceTest extends TestCase
         $this->assertSame('DOMICILIO', $result['services'][0]['type']);
         $this->assertSame('Cercana', $result['stores'][0]['name']);
         $this->assertTrue($result['stores'][0]['schedule']['isOpen']);
+        $this->assertSame('2200-0001', $result['stores'][0]['phone']);
         $this->assertCount(2, $result['stores']);
         Carbon::setTestNow();
     }
