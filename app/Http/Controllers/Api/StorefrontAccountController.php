@@ -147,7 +147,7 @@ class StorefrontAccountController extends BaseController
                 ->where('psu_usu_id', $lockedCustomer->getKey())
                 ->update([
                     'psu_estado' => 'REVOCADA',
-                    'psu_permiso' => 'REVOKED',
+                    'psu_permiso' => 'DENIED',
                     'psu_revocado_en' => now(),
                     'psu_ultima_actividad_en' => now(),
                     'psu_actualizado_en' => now(),
