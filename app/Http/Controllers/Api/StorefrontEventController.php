@@ -26,7 +26,7 @@ class StorefrontEventController extends BaseController
             'metadata.slug' => ['sometimes', 'string', 'max:255'],
             'metadata.sku' => ['sometimes', 'string', 'max:50'],
             'metadata.placement' => ['sometimes', Rule::in(['PDP_RELATED', 'CART_RECOMMENDATIONS', 'ADD_TO_CART_RECOMMENDATIONS', 'ADD_TO_CART_DRAWER', 'RECENTLY_VIEWED'])],
-            'metadata.recommendation_reason' => ['sometimes', Rule::in(['SAME_COLLECTION', 'SAME_CATEGORY', 'SAME_BRAND', 'SIMILAR_PRICE', 'POPULAR', 'RECENTLY_VIEWED'])],
+            'metadata.recommendation_reason' => ['sometimes', Rule::in(['SAME_COLLECTION', 'SAME_CATEGORY', 'SAME_BRAND', 'SIMILAR_PRICE', 'POPULAR', 'RECENTLY_VIEWED', 'PURCHASE_HISTORY', 'PURCHASE_CHARACTER', 'PURCHASE_CATEGORY_GENDER', 'PURCHASE_BRAND_COLLECTION'])],
             'metadata.position' => ['sometimes', 'integer', 'min:1', 'max:10'],
         ]);
 

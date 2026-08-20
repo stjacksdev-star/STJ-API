@@ -128,6 +128,13 @@ class StorefrontOrderFromCartTest extends TestCase
             $this->assertDatabaseHas('stj_pedidos_pago', ['ppa_id' => $first['order']['pagoId'], 'ppa_estado' => $gatewayApproved ? 'APROBADA' : 'DENEGADA', 'ppa_autorizacion' => $gatewayApproved ? 'AUTH' : null, 'ppa_rsp_codigo' => $gatewayApproved ? '00' : '05', 'ppa_rsp_mensaje' => $gatewayApproved ? 'Approved' : 'Declined']);
             $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_estatus' => $gatewayApproved ? 'RECIBIDO' : 'PENDIENTE_PAGO']);
             $this->assertSame($gatewayApproved ? 1 : 0, DB::table('stj_cliente_eventos')->where('cev_tipo', 'PURCHASE')->count());
+            if (! $gatewayApproved) {
+                $this->assertDatabaseHas('stj_carritos', [
+                    'car_id' => $cart->getKey(),
+                    'car_estado' => 'ACTIVO',
+                    'car_pedido_id' => $first['order']['pedidoId'],
+                ]);
+            }
         } else {
             try {
                 $powerTranz->start((int) $first['order']['pedidoId'], $visitor, null, ['operation_uuid' => (string) Str::uuid(), 'card' => ['pan' => str_repeat('4', 16), 'cvv' => '123', 'expiration' => '3012', 'holder' => 'ANA LOPEZ']]);

@@ -36,6 +36,7 @@ class StorefrontCartService
             if (! $cart) {
                 throw ValidationException::withMessages(['cart' => 'No existe un carrito activo para iniciar checkout.']);
             }
+            $this->detachFailedOrder($cart);
 
             return $this->idempotent($cart, $visitor, $customer, 'CHECKOUT_START', $input['operation_uuid'], $input, function () use ($cart, $countryCode, $visitor, $customer, $input) {
                 if (! in_array($cart->car_estado, ['ACTIVO', 'CHECKOUT'], true)) {
@@ -412,6 +413,7 @@ class StorefrontCartService
     {
         return DB::transaction(function () use ($type, $uuid, $input, $country, $visitor, $customer, $callback) {
             $cart = $this->resolveCart($country, $visitor, $customer, true);
+            $this->detachFailedOrder($cart);
             $this->invalidateCheckout($cart, $visitor, $customer);
 
             return $this->idempotent($cart, $visitor, $customer, $type, $uuid, $input, fn () => $callback($cart));
@@ -653,6 +655,28 @@ class StorefrontCartService
         $cart->forceFill(['car_estado' => 'ACTIVO', 'car_checkout_en' => null, 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
         $this->pushCancellation()->cancelStaleCartDeliveries((int) $cart->getKey(), (int) $cart->car_version, 'El checkout fue invalidado y el carrito cambio.');
         $this->audit($cart, null, $visitor, $customer, 'CHECKOUT_INVALIDATED', ['state' => 'CHECKOUT'], ['state' => 'ACTIVO']);
+    }
+
+    private function detachFailedOrder(StorefrontCart $cart): void
+    {
+        if (! $cart->car_pedido_id) {
+            return;
+        }
+        $paymentStatus = DB::table('stj_pedidos_pago')
+            ->where('ppa_pedido', $cart->car_pedido_id)
+            ->orderByDesc('ppa_id')
+            ->value('ppa_estado');
+        if (! in_array((string) $paymentStatus, ['DENEGADA', 'TIMEOUT', 'ERROR'], true)) {
+            return;
+        }
+        $cart->forceFill([
+            'car_pedido_id' => null,
+            'car_estado' => 'ACTIVO',
+            'car_checkout_en' => null,
+            'car_convertido_en' => null,
+            'car_version' => $cart->car_version + 1,
+            'car_actualizado_en' => now(),
+        ])->save();
     }
 
     private function pushCancellation(): WebPushDeliveryCancellationService

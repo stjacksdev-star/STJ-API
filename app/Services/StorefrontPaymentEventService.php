@@ -41,6 +41,17 @@ class StorefrontPaymentEventService
                 }
                 ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder((int) $payment->ppa_pedido);
             } elseif (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR', 'ANULADO', 'REVERSION', 'DEVOLUCION'], true)) {
+                if (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR'], true)) {
+                    DB::table('stj_carritos')
+                        ->where('car_pedido_id', $payment->ppa_pedido)
+                        ->where('car_estado', 'CONVERTIDO')
+                        ->update([
+                            'car_estado' => 'ACTIVO',
+                            'car_checkout_en' => null,
+                            'car_convertido_en' => null,
+                            'car_actualizado_en' => now(),
+                        ]);
+                }
                 ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->closeUnapprovedOrder((int) $payment->ppa_pedido, $status);
             }
 

@@ -132,7 +132,7 @@ class StorefrontCartController extends BaseController
 
     private function itemRules(): array
     {
-        return ['operation_uuid' => ['required', 'uuid'], 'product_id' => ['required', 'integer'], 'sku' => ['required', 'string', 'max:50'], 'size' => ['required', 'string', 'max:10'], 'quantity' => ['required', 'integer', 'min:1', 'max:99'], 'recommendation_placement' => ['nullable', 'in:PDP_RELATED,CART_RECOMMENDATIONS,ADD_TO_CART_RECOMMENDATIONS,ADD_TO_CART_DRAWER,RECENTLY_VIEWED'], 'recommendation_reason' => ['nullable', 'in:SAME_COLLECTION,SAME_CATEGORY,SAME_BRAND,SIMILAR_PRICE,POPULAR,RECENTLY_VIEWED'], 'recommendation_position' => ['nullable', 'integer', 'min:1', 'max:10']];
+        return ['operation_uuid' => ['required', 'uuid'], 'product_id' => ['required', 'integer'], 'sku' => ['required', 'string', 'max:50'], 'size' => ['required', 'string', 'max:10'], 'quantity' => ['required', 'integer', 'min:1', 'max:99'], 'recommendation_placement' => ['nullable', 'in:PDP_RELATED,CART_RECOMMENDATIONS,ADD_TO_CART_RECOMMENDATIONS,ADD_TO_CART_DRAWER,RECENTLY_VIEWED'], 'recommendation_reason' => ['nullable', 'in:SAME_COLLECTION,SAME_CATEGORY,SAME_BRAND,SIMILAR_PRICE,POPULAR,RECENTLY_VIEWED,PURCHASE_HISTORY,PURCHASE_CHARACTER,PURCHASE_CATEGORY_GENDER,PURCHASE_BRAND_COLLECTION'], 'recommendation_position' => ['nullable', 'integer', 'min:1', 'max:10']];
     }
 
     private function visitor(Request $request): StorefrontVisitor
