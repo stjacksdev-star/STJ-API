@@ -54,12 +54,14 @@ class StorefrontShippingServiceTest extends TestCase
         $hn = (object) ['pai_id' => 7, 'pai_id_world' => 200, 'pai_codigo' => 'HN'];
         $this->assertSame('125.00', $this->shipping->quote($hn, 'DOMICILIO', 21, '10.00')['shipping_amount']);
         $this->assertSame('CITY_RATE', $this->shipping->quote($hn, 'DOMICILIO', 21, '10.00')['source']);
+        DB::table('stj_world_cities')->where('id', 11)->update(['costo' => 50]);
+        $this->assertSame('2.50', $this->shipping->quote($this->sv, 'DOMICILIO', 11, '10.00')['shipping_amount']);
         $this->assertSame('COUNTRY_RATE', $this->shipping->quote($this->sv, 'DOMICILIO', 11, '10.00')['source']);
     }
 
-    public function test_invalid_country_city_and_missing_configuration_are_errors(): void
+    public function test_invalid_city_and_missing_configuration_are_errors(): void
     {
-        try { $this->shipping->quote($this->sv, 'DOMICILIO', 21, '10.00'); $this->fail('Expected invalid city.'); }
+        try { $this->shipping->quote($this->sv, 'DOMICILIO', 999, '10.00'); $this->fail('Expected invalid city.'); }
         catch (ValidationException $e) { $this->assertArrayHasKey('delivery.city_id', $e->errors()); }
         DB::table('stj_envio_pais')->where('envio_pais', 1)->delete();
         $this->expectException(ValidationException::class);

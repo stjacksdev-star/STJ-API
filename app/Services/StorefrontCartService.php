@@ -151,7 +151,11 @@ class StorefrontCartService
                     $discount = round($authorized->sum('promotionDiscount') + $authorized->sum('couponDiscount'), 2);
                     $subtotal = round($authorized->sum('lineTotal'), 2);
                     $discountPercentage = $baseSubtotal > 0 ? round($discount * 100 / $baseSubtotal, 2) : 0.0;
-                    $shippingAmount = (float) data_get($couponResolution, 'totals.shipping', $shippingAmount);
+                    // El umbral de envio se evalua sobre el subtotal comercial final:
+                    // promociones y cupones ya descontados, sin incluir el envio.
+                    $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($input, 'delivery.city_id'), number_format($subtotal, 2, '.', ''));
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, (string) ($input['email'] ?? ''), (float) $shipping['shipping_amount']);
+                    $shippingAmount = (float) data_get($couponResolution, 'totals.shipping', $shipping['shipping_amount']);
                     $shipping['shipping_amount'] = number_format($shippingAmount, 2, '.', '');
                     $shipping['display_amount'] = $shippingAmount == 0.0 ? 'GRATIS' : $shipping['display_amount'];
                 }

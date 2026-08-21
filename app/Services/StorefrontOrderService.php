@@ -260,6 +260,14 @@ class StorefrontOrderService
                     $discountCents = collect($items)->sum(fn (array $item) => $this->cents($item['discount']));
                     $subtotalCents = collect($items)->sum(fn (array $item) => $this->cents($item['finalTotal']));
                     $subtotal = $this->decimal($subtotalCents);
+                    // Recalcular la regla con el subtotal final después de promociones
+                    // y cupones; el envío no forma parte del monto mínimo evaluado.
+                    $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, $checkoutType, data_get($payload, 'fulfillment.city_id'), $subtotal);
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate(
+                        $couponCart,
+                        (string) data_get($payload, 'customer.email', ''),
+                        (float) $shipping['shipping_amount'],
+                    );
                     $shippingCents = $this->cents((string) data_get($couponResolution, 'totals.shipping', $shipping['shipping_amount']));
                     $shipping['shipping_amount'] = $this->decimal($shippingCents);
                     $shipping['display_amount'] = $shippingCents === 0 ? 'GRATIS' : $shipping['display_amount'];

@@ -25,11 +25,9 @@ class StorefrontShippingService
         $city = DB::table('stj_world_cities as city')
             ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
             ->where('city.id', $cityId)
-            ->where('city.country_id', $country->pai_id_world)
-            ->where('state.country_id', $country->pai_id_world)
-            ->first(['city.id', 'city.name', 'city.costo', 'city.envio_disponible', 'city.id_urbano', 'state.id as state_id', 'state.name as state_name']);
+            ->first(['city.id', 'city.name', 'city.costo', 'city.id_urbano', 'state.id as state_id', 'state.name as state_name']);
         if (! $city) {
-            throw ValidationException::withMessages(['delivery.city_id' => 'La ciudad no pertenece al pais activo.']);
+            throw ValidationException::withMessages(['delivery.city_id' => 'La ciudad seleccionada no existe.']);
         }
         $countryRate = DB::table('stj_envio_pais')->where('envio_pais', $country->pai_id)->where('envio_estado', 'ACTIVO')->orderByDesc('envio_id')->first();
         if (! $countryRate) {
@@ -37,7 +35,8 @@ class StorefrontShippingService
         }
         $subtotalCents = $this->cents($subtotal);
         $countryCents = $this->cents((string) $countryRate->envio_valor);
-        $cityCents = $this->cents((string) ($city->costo ?? '0'));
+        $usesCityRate = strtoupper((string) $country->pai_codigo) === 'HN';
+        $cityCents = $usesCityRate ? $this->cents((string) ($city->costo ?? '0')) : 0;
         if ($countryCents < 0 || $cityCents < 0) {
             throw ValidationException::withMessages(['shipping' => 'La configuracion de envio contiene un importe invalido.']);
         }
