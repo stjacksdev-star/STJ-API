@@ -10,7 +10,7 @@ class ProductMetricsCalculator
 {
     public const COUNTRIES = [1, 2, 3, 5, 7];
 
-    public const PERIODS = [7, 14, 30];
+    public const PERIODS = [7, 14, 30, 365];
 
     /** @return Collection<int, object> */
     public function salesFor(int $countryId, int $days): Collection
@@ -152,7 +152,7 @@ class ProductMetricsCalculator
             throw new \InvalidArgumentException("El periodo {$days} no esta soportado.");
         }
 
-        return "{$days}D";
+        return $days === 365 ? 'ANUAL' : "{$days}D";
     }
 
     private function assertSupported(int $countryId, int $days): void

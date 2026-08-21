@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrde
 use App\Http\Controllers\Api\Dashboard\ProductCategoryController as DashboardProductCategoryController;
 use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProductCountryController;
 use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProductMasterController;
+use App\Http\Controllers\Api\Dashboard\ProductPerformanceReportController as DashboardProductPerformanceReportController;
 use App\Http\Controllers\Api\Dashboard\PromotionAssetController as DashboardPromotionAssetController;
 use App\Http\Controllers\Api\Dashboard\PromotionController as DashboardPromotionController;
 use App\Http\Controllers\Api\Dashboard\PushNotificationController as DashboardPushNotificationController;
@@ -171,6 +172,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/push/send', PushSendController::class);
 
     Route::prefix('dashboard')->group(function () {
+        Route::get('/reports/product-performance', DashboardProductPerformanceReportController::class);
         Route::get('/collections', [DashboardCollectionController::class, 'index']);
         Route::get('/coupons', [DashboardCouponController::class, 'index']);
         Route::get('/coupons/catalogs', [DashboardCouponController::class, 'catalogs']);
