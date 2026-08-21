@@ -53,7 +53,7 @@ class CouponUsageReportService
                 'usage.pca_descuento_productos', 'usage.pca_descuento_envio', 'usage.pca_descuento_total', 'usage.pca_consumido_en',
                 'coupon.cup_correo', 'coupon.cup_descuento', 'coupon.cup_monto',
                 'orders.ped_nombres', 'orders.ped_apellidos', 'orders.ped_email', 'orders.ped_fecha', 'orders.ped_checkout',
-                'payment.ppa_ref', 'payment.ppa_monto_senv',
+                'payment.ppa_ref', 'payment.ppa_monto_sdesc', 'payment.ppa_monto_senv',
             ])
             ->map(fn ($row) => [
                 'id' => (int) $row->pca_id,
@@ -68,7 +68,8 @@ class CouponUsageReportService
                 'totalDiscount' => (float) $row->pca_descuento_total,
                 'orderId' => (int) $row->pca_pedido_id,
                 'orderReference' => (string) ($row->ppa_ref ?? ''),
-                'orderAmount' => (float) ($row->ppa_monto_senv ?? 0),
+                'orderAmount' => (float) ($row->ppa_monto_sdesc ?? 0),
+                'orderFinalAmount' => (float) ($row->ppa_monto_senv ?? 0),
                 'currency' => $this->currency((string) $country->pai_codigo),
                 'checkout' => (string) ($row->ped_checkout ?? ''),
                 'customerName' => trim((string) $row->ped_nombres.' '.(string) $row->ped_apellidos),
