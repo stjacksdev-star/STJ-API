@@ -118,6 +118,7 @@ class StorefrontOrderFromCartTest extends TestCase
             $client->shouldReceive('confirm')->once()->andReturn(['Approved' => $gatewayApproved, 'TransactionIdentifier' => $operationUuid, 'OrderIdentifier' => $paymentReference, 'CurrencyCode' => $countryCode === 'hn' ? '340' : ($countryCode === 'gt' ? '320' : ($countryCode === 'cr' ? '188' : '840')), 'TotalAmount' => '50.00', 'AuthorizationCode' => $gatewayApproved ? 'AUTH' : null, 'IsoResponseCode' => $gatewayApproved ? '00' : '05', 'ResponseMessage' => $gatewayApproved ? 'Approved' : 'Declined']);
             $started = $powerTranz->start((int) $first['order']['pedidoId'], $visitor, null, ['operation_uuid' => $operationUuid, 'card' => ['pan' => str_repeat('4', 16), 'cvv' => '123', 'expiration' => '3012', 'holder' => 'ANA LOPEZ']]);
             $this->assertSame('PENDIENTE', $started['status']);
+            $this->assertDatabaseHas('stj_pedidos_pago', ['ppa_id' => $first['order']['pagoId'], 'ppa_emisor' => 'VISA']);
             $this->assertSame(1, DB::table('stj_powertranz_operaciones')->count());
             $this->assertStringNotContainsString(str_repeat('4', 16), (string) DB::table('stj_powertranz_operaciones')->value('pto_respuesta_segura'));
             $this->assertStringNotContainsString('123', (string) DB::table('stj_powertranz_operaciones')->value('pto_respuesta_segura'));

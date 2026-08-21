@@ -13,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 
 class PowerTranzPaymentService
 {
-    public function __construct(private PowerTranzConfigResolver $configuration, private PowerTranzPayloadFactory $payloads, private PowerTranzClient $client, private StorefrontPaymentEventService $events, private ?PowerTranzUrlFactory $urls = null) {}
+    public function __construct(private PowerTranzConfigResolver $configuration, private PowerTranzPayloadFactory $payloads, private PowerTranzClient $client, private StorefrontPaymentEventService $events, private ?PowerTranzUrlFactory $urls = null, private ?CardBrandDetector $cardBrands = null) {}
 
     public function start(int $orderId, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
     {
@@ -58,6 +58,9 @@ class PowerTranzPaymentService
             $returnUrl = ($this->urls ?? app(PowerTranzUrlFactory::class))->returnUrl($country, $returnToken);
             $payload = $this->payloads->sale($order, $payment, $input['card'], $configuration['currency'], $input['operation_uuid'], $returnUrl);
             $this->assertAuthorizedAmount($orderId, $payment);
+            DB::table('stj_pedidos_pago')->where('ppa_id', $payment->ppa_id)->update([
+                'ppa_emisor' => ($this->cardBrands ?? app(CardBrandDetector::class))->detect((string) $input['card']['pan']),
+            ]);
             $gateway = $this->client->sale($configuration, $payload, $input['operation_uuid']);
             $this->verifyInitialResponse($gateway, $payment, $configuration['currency'], $input['operation_uuid']);
             $result = $this->safeInitialResult($gateway, $payment, $country, $input['operation_uuid']);
