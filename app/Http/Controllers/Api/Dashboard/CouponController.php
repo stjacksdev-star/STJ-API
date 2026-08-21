@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Dashboard;
 
 use App\Http\Controllers\Api\BaseController;
 use App\Services\Dashboard\CouponService;
+use App\Services\Dashboard\CouponUsageReportService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -23,6 +24,21 @@ class CouponController extends BaseController
         ));
     }
     public function catalogs(Request $request) { abort_unless($request->user()?->tokenCan('dashboard'), 403); return $this->success($this->coupons->catalogs($request->string('country')->toString())); }
+
+    public function usageReport(Request $request, CouponUsageReportService $report)
+    {
+        abort_unless($request->user()?->tokenCan('dashboard'), 403);
+        $data = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date', 'after_or_equal:startDate'],
+            'search' => ['nullable', 'string', 'max:255'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'perPage' => ['nullable', 'integer', 'in:10,20,50,100'],
+        ]);
+
+        return $this->success($report->report($data['country'], $data['startDate'], $data['endDate'], $data['search'] ?? null, (int) ($data['page'] ?? 1), (int) ($data['perPage'] ?? 20)));
+    }
 
     public function store(Request $request) { return $this->persist($request); }
     public function update(Request $request, int $coupon) { return $this->persist($request, $coupon); }

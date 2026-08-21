@@ -174,6 +174,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/collections', [DashboardCollectionController::class, 'index']);
         Route::get('/coupons', [DashboardCouponController::class, 'index']);
         Route::get('/coupons/catalogs', [DashboardCouponController::class, 'catalogs']);
+        Route::get('/coupons/usage-report', [DashboardCouponController::class, 'usageReport']);
         Route::post('/coupons', [DashboardCouponController::class, 'store']);
         Route::put('/coupons/{coupon}', [DashboardCouponController::class, 'update'])->whereNumber('coupon');
         Route::post('/coupons/{coupon}', [DashboardCouponController::class, 'update'])->whereNumber('coupon');
