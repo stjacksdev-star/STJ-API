@@ -173,6 +173,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::prefix('dashboard')->group(function () {
         Route::get('/reports/product-performance', DashboardProductPerformanceReportController::class);
+        Route::get('/reports/product-performance/export', [DashboardProductPerformanceReportController::class, 'export']);
         Route::get('/collections', [DashboardCollectionController::class, 'index']);
         Route::get('/coupons', [DashboardCouponController::class, 'index']);
         Route::get('/coupons/catalogs', [DashboardCouponController::class, 'catalogs']);

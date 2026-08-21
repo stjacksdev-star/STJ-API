@@ -3,9 +3,59 @@
 namespace App\Services\Dashboard;
 
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ProductPerformanceReportService
 {
+    public function export(array $filters): array
+    {
+        $filters['page'] = 1;
+        $filters['perPage'] = 100;
+        $first = $this->report($filters);
+        $rows = collect($first['rows']);
+        for ($page = 2; $page <= $first['pagination']['lastPage']; $page++) {
+            $filters['page'] = $page;
+            $rows = $rows->concat($this->report($filters)['rows']);
+        }
+
+        $labels = ['summary' => 'Resumen', 'sales' => 'Mas vendidos', 'views' => 'Mas vistos', 'favorites' => 'Favoritos', 'cart' => 'Agregados al carrito'];
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(substr($labels[$filters['tab']] ?? 'Rendimiento', 0, 31));
+        $sheet->fromArray(['Producto', 'Codigo', 'Marca', 'Categoria', 'Ventas', 'Pedidos', 'Monto vendido', 'Vistas', 'Favoritos', 'Agregados al carrito', 'Conversion'], null, 'A1');
+
+        $rowNumber = 2;
+        foreach ($rows as $row) {
+            $sheet->fromArray([
+                $row['name'], $row['code'], $row['brand'], $row['category'], (int) $row['sales'], (int) $row['orders'],
+                (float) $row['amount'], (int) $row['views'], (int) $row['favorites'], (int) $row['cartAdds'], (float) $row['conversionRate'] / 100,
+            ], null, 'A'.$rowNumber++);
+        }
+        $lastRow = max(2, $rowNumber - 1);
+        $sheet->getStyle('A1:K1')->getFont()->setBold(true);
+        $sheet->getStyle('G2:G'.$lastRow)->getNumberFormat()->setFormatCode('$#,##0.00');
+        $sheet->getStyle('K2:K'.$lastRow)->getNumberFormat()->setFormatCode('0.00%');
+        $sheet->setAutoFilter('A1:K'.$lastRow);
+        $sheet->freezePane('A2');
+        for ($column = 1; $column <= 11; $column++) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($column))->setAutoSize(true);
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'stj-product-performance-');
+        try {
+            (new Xlsx($spreadsheet))->save($path);
+            return [
+                'filename' => 'rendimiento-productos-'.strtolower($filters['country']).'-'.strtolower($filters['period']).'-'.$filters['tab'].'.xlsx',
+                'contents' => (string) file_get_contents($path),
+            ];
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+            if (is_file($path)) unlink($path);
+        }
+    }
+
     public function report(array $filters): array
     {
         $country = DB::table('stj_paises')->whereRaw('UPPER(pai_codigo) = ?', [strtoupper($filters['country'])])->first();

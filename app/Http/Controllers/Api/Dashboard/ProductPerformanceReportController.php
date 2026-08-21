@@ -24,4 +24,25 @@ class ProductPerformanceReportController extends BaseController
         $data['perPage'] = (int) ($data['perPage'] ?? 20);
         return $this->success($report->report($data));
     }
+
+    public function export(Request $request, ProductPerformanceReportService $report)
+    {
+        abort_unless($request->user()?->tokenCan('dashboard'), 403);
+        $data = $this->validated($request);
+        $export = $report->export($data);
+        return response($export['contents'], 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$export['filename'].'"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
+    }
+
+    private function validated(Request $request): array
+    {
+        return $request->validate([
+            'country' => ['required', 'string', 'max:3'], 'period' => ['required', Rule::in(['7D', '14D', '30D', 'ANUAL'])],
+            'tab' => ['required', Rule::in(['summary', 'sales', 'views', 'favorites', 'cart'])],
+            'brand' => ['nullable', 'string', 'max:50'], 'category' => ['nullable', 'integer'], 'search' => ['nullable', 'string', 'max:100'],
+        ]);
+    }
 }
