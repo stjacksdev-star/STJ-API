@@ -8,7 +8,10 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontPaymentEventService
 {
-    public function __construct(private ?StorefrontCouponOrderLifecycleService $couponLifecycle = null) {}
+    public function __construct(
+        private ?StorefrontCouponOrderLifecycleService $couponLifecycle = null,
+        private ?StorefrontPostPurchaseService $postPurchase = null,
+    ) {}
 
     public function record(int $paymentId, string $status, string $eventUuid, array $metadata = []): array
     {
@@ -40,6 +43,9 @@ class StorefrontPaymentEventService
                     $purchaseCreated = true;
                 }
                 ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder((int) $payment->ppa_pedido);
+                if ($purchaseCreated) {
+                    ($this->postPurchase ?? app(StorefrontPostPurchaseService::class))->schedule((int) $payment->ppa_pedido, $paymentId);
+                }
             } elseif (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR', 'ANULADO', 'REVERSION', 'DEVOLUCION'], true)) {
                 if (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR'], true)) {
                     DB::table('stj_carritos')

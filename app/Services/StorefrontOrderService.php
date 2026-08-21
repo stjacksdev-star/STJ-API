@@ -25,6 +25,7 @@ class StorefrontOrderService
         private ?WebPushMeasurementService $pushMeasurements = null,
         private ?StorefrontCartCouponService $cartCoupons = null,
         private ?StorefrontCouponOrderLifecycleService $couponLifecycle = null,
+        private ?StorefrontPostPurchaseService $postPurchase = null,
     ) {
         $this->checkoutValidationService = $checkoutValidationService;
     }
@@ -117,6 +118,7 @@ class StorefrontOrderService
             ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->snapshot((int) $cart->getKey(), $orderId);
             if (data_get($result, 'order.paymentStatus') === 'APROBADA') {
                 ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder($orderId);
+                ($this->postPurchase ?? app(StorefrontPostPurchaseService::class))->schedule($orderId, (int) $result['order']['pagoId']);
             }
             $cart->forceFill(['car_pedido_id' => $orderId, 'car_estado' => 'CONVERTIDO', 'car_convertido_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
             $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito fue convertido en pedido.');
