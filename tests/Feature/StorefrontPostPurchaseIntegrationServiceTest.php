@@ -54,14 +54,33 @@ class StorefrontPostPurchaseIntegrationServiceTest extends TestCase
         ]);
         config([
             'storefront_post_purchase.integrations_enabled' => true,
-            'storefront_post_purchase.guatemala.enabled' => true,
-            'storefront_post_purchase.guatemala.url' => 'https://pos.example/reserva/{store}/{sku}-{size}/{reference}/{quantity}/GT',
+            'storefront_post_purchase.pos_reservation.countries.GT' => true,
+            'storefront_post_purchase.pos_reservation.url' => 'https://pos.example/reserva/{store}/{sku}-{size}/{reference}/{quantity}/{country}',
         ]);
         Http::fake(['*' => Http::response([], 200)]);
 
         app(StorefrontPostPurchaseIntegrationService::class)->dispatch(10, 20);
 
         Http::assertSent(fn ($request) => $request->url() === 'https://pos.example/reserva/002/20001234-4%2F5/WEB-100/2/GT');
+    }
+
+    public function test_costa_rica_and_panama_use_the_country_suffix(): void
+    {
+        Http::fake(['*' => Http::response([], 200)]);
+
+        foreach (['CR', 'PA'] as $country) {
+            DB::table('stj_pedidos_detalle')->delete();
+            DB::table('stj_pedidos_pago')->delete();
+            DB::table('stj_pedidos')->delete();
+            DB::table('stj_paises')->delete();
+            $this->seedOrder($country);
+            DB::table('stj_pedidos_detalle')->insert(['car_ref' => 'WEB-100', 'car_accion' => 'AGREGADO', 'car_estilo_final' => 'SKU1', 'car_talla_final' => 'M', 'car_talla' => 'M', 'car_cantidad' => 1]);
+            config(['storefront_post_purchase.integrations_enabled' => true, "storefront_post_purchase.pos_reservation.countries.{$country}" => true, 'storefront_post_purchase.pos_reservation.url' => 'https://pos.example/reserva/{store}/{sku}-{size}/{reference}/{quantity}/{country}']);
+            app(StorefrontPostPurchaseIntegrationService::class)->dispatch(10, 20);
+        }
+
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/1/CR'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/1/PA'));
     }
 
     public function test_honduras_uses_configured_prism_url_and_ids(): void

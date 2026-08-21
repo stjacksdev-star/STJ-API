@@ -25,21 +25,24 @@ class StorefrontPostPurchaseIntegrationService
         }
 
         match (strtoupper((string) $order->pai_codigo)) {
-            'GT' => $this->reserveGuatemalaItems($order),
+            'GT', 'CR', 'PA' => $this->reservePosItems($order, strtoupper((string) $order->pai_codigo)),
             'HN' => $this->triggerHondurasPrism($orderId, $paymentId),
             default => null,
         };
     }
 
-    private function reserveGuatemalaItems(object $order): void
+    private function reservePosItems(object $order, string $country): void
     {
-        if (! config('storefront_post_purchase.guatemala.enabled')) {
+        if (! config("storefront_post_purchase.pos_reservation.countries.{$country}")) {
             return;
         }
 
-        $template = trim((string) config('storefront_post_purchase.guatemala.url'));
+        $template = trim((string) config('storefront_post_purchase.pos_reservation.url'));
+        if ($country === 'GT' && filled(config('storefront_post_purchase.pos_reservation.legacy_gt_url'))) {
+            $template = trim((string) config('storefront_post_purchase.pos_reservation.legacy_gt_url'));
+        }
         if ($template === '') {
-            throw new RuntimeException('STOREFRONT_GT_ORDER_INTEGRATION_URL no está configurada.');
+            throw new RuntimeException('STOREFRONT_POS_RESERVATION_URL no está configurada.');
         }
 
         $items = DB::table('stj_pedidos_detalle')->where('car_ref', $order->ppa_ref)->where('car_accion', 'AGREGADO')->get();
@@ -50,6 +53,7 @@ class StorefrontPostPurchaseIntegrationService
                 '{size}' => rawurlencode((string) ($item->car_talla_final ?: $item->car_talla)),
                 '{reference}' => rawurlencode((string) $order->ppa_ref),
                 '{quantity}' => (string) ((int) $item->car_cantidad),
+                '{country}' => rawurlencode($country),
             ]);
             $this->client()->get($url)->throw();
         }

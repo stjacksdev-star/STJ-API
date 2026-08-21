@@ -94,6 +94,12 @@ class StorefrontOrderConfirmationEmailService
         $payment = strtoupper((string) $order->ppa_tipo) === 'EFECTIVO'
             ? 'Efectivo al retirar'
             : 'Tarjeta'.($order->ppa_autorizacion ? ' · autorización '.e((string) $order->ppa_autorizacion) : '');
+        $baseSubtotal = (float) $order->ppa_monto_sdesc;
+        $discountedSubtotal = (float) $order->ppa_monto_senv;
+        $discount = max(0, $baseSubtotal - $discountedSubtotal);
+        $shipping = strtoupper((string) $order->ped_checkout) === 'DOMICILIO'
+            ? max(0, (float) $order->ppa_monto - $discountedSubtotal)
+            : 0.0;
 
         return '<h1 style="margin:0 0 18px;font-size:26px">¡Gracias por tu compra!</h1>'
             .'<p>Hola <strong>'.$name.'</strong>, tu pago fue procesado con éxito y recibimos tu pedido.</p>'
@@ -101,9 +107,13 @@ class StorefrontOrderConfirmationEmailService
             .$this->infoRow('Comprobante', e((string) $order->ppa_ref))
             .$this->infoRow('Destino', $destination)
             .$this->infoRow('Método de pago', $payment)
-            .$this->infoRow('Teléfono', e(trim($order->ped_telefono_pais.' '.$order->ped_telefono)))
-            .$this->infoRow('Total', $currency.number_format((float) $order->ppa_monto, 2)).'</table>'
-            .'<table role="presentation" width="100%" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="left">Talla</th><th align="left">Descripción</th><th>Cant.</th><th align="right">Precio</th></tr>'.$rows.'</table>';
+            .$this->infoRow('Teléfono', e($this->phone($order)))
+            .'</table><table role="presentation" width="100%" style="margin:18px 0;border-collapse:collapse;font-size:14px;border-top:1px solid #e5e7eb">'
+            .$this->amountRow('Subtotal', $currency.number_format($baseSubtotal, 2))
+            .$this->amountRow('Descuento', '− '.$currency.number_format($discount, 2), '#047857')
+            .$this->amountRow('Envío', $currency.number_format($shipping, 2))
+            .$this->amountRow('Total', $currency.number_format((float) $order->ppa_monto, 2), '#111827', true)
+            .'</table><table role="presentation" width="100%" style="border-collapse:collapse;font-size:13px"><tr><th align="left">SKU</th><th align="left">Talla</th><th align="left">Descripción</th><th>Cant.</th><th align="right">Precio</th></tr>'.$rows.'</table>';
     }
 
     private function storeContent(object $order): string
@@ -112,13 +122,32 @@ class StorefrontOrderConfirmationEmailService
         return '<h1 style="margin:0 0 18px;font-size:26px">Pedido recibido</h1><p><strong>'.$checkout.'</strong></p><table role="presentation" width="100%" style="border-collapse:collapse;font-size:14px">'
             .$this->infoRow('Comprobante', e((string) $order->ppa_ref))
             .$this->infoRow('Nombre', e(trim($order->ped_nombres.' '.$order->ped_apellidos)))
-            .$this->infoRow('Teléfono', e(trim($order->ped_telefono_pais.' '.$order->ped_telefono)))
+            .$this->infoRow('Teléfono', e($this->phone($order)))
             .$this->infoRow('Hora del pedido', e((string) $order->ppa_fecha)).'</table><p style="margin-top:22px">Ingresa al administrador para gestionar el pedido.</p>';
     }
 
     private function infoRow(string $label, string $value): string
     {
         return '<tr><td style="padding:7px 12px 7px 0;font-weight:bold;vertical-align:top">'.e($label).'</td><td style="padding:7px 0">'.$value.'</td></tr>';
+    }
+
+    private function amountRow(string $label, string $value, string $color = '#475569', bool $total = false): string
+    {
+        $weight = $total ? 'font-weight:bold;font-size:16px' : '';
+        return '<tr><td style="padding:8px 0;color:'.$color.';'.$weight.'">'.e($label).'</td><td align="right" style="padding:8px 0;color:'.$color.';'.$weight.'">'.$value.'</td></tr>';
+    }
+
+    private function phone(object $order): string
+    {
+        $number = trim((string) $order->ped_telefono);
+        $countryCode = ltrim(trim((string) $order->ped_telefono_pais), '+');
+        $digits = preg_replace('/\D+/', '', $number) ?: '';
+
+        if ($countryCode !== '' && ! str_starts_with($digits, $countryCode)) {
+            return '+'.$countryCode.' '.$number;
+        }
+
+        return $number;
     }
 
     private function currency(string $country): string
