@@ -57,6 +57,8 @@ class StorefrontShippingServiceTest extends TestCase
         DB::table('stj_world_cities')->where('id', 11)->update(['costo' => 50]);
         $this->assertSame('2.50', $this->shipping->quote($this->sv, 'DOMICILIO', 11, '10.00')['shipping_amount']);
         $this->assertSame('COUNTRY_RATE', $this->shipping->quote($this->sv, 'DOMICILIO', 11, '10.00')['source']);
+        config(['storefront_shipping.city_rate_countries' => ['HN', 'SV']]);
+        $this->assertSame('50.00', $this->shipping->quote($this->sv, 'DOMICILIO', 11, '10.00')['shipping_amount']);
     }
 
     public function test_invalid_city_and_missing_configuration_are_errors(): void

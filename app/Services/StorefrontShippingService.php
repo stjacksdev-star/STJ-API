@@ -35,7 +35,11 @@ class StorefrontShippingService
         }
         $subtotalCents = $this->cents($subtotal);
         $countryCents = $this->cents((string) $countryRate->envio_valor);
-        $usesCityRate = strtoupper((string) $country->pai_codigo) === 'HN';
+        $usesCityRate = in_array(
+            strtoupper((string) $country->pai_codigo),
+            (array) config('storefront_shipping.city_rate_countries', ['HN']),
+            true,
+        );
         $cityCents = $usesCityRate ? $this->cents((string) ($city->costo ?? '0')) : 0;
         if ($countryCents < 0 || $cityCents < 0) {
             throw ValidationException::withMessages(['shipping' => 'La configuracion de envio contiene un importe invalido.']);
