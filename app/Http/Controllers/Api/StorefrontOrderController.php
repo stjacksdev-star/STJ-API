@@ -7,13 +7,14 @@ use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontOrderService;
+use App\Services\CheckoutEventService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class StorefrontOrderController extends Controller
 {
-    public function store(Request $request, string $country, StorefrontOrderService $service): JsonResponse
+    public function store(Request $request, string $country, StorefrontOrderService $service, CheckoutEventService $events): JsonResponse
     {
         $payload = $request->validate([
             'operation_uuid' => ['required', 'uuid'],
@@ -48,11 +49,20 @@ class StorefrontOrderController extends Controller
         $user = Auth::guard('sanctum')->user();
         $customer = $user instanceof StorefrontCustomer ? $user : null;
 
+        $event = ['country' => $country, 'flow' => 'ORDER', 'stage' => 'ORDER_CREATION', 'event' => 'ORDER_CREATION_STARTED', 'result' => 'STARTED', 'operation_uuid' => $payload['operation_uuid'], 'checkout_type' => data_get($payload, 'delivery.method') === 'store_pickup' ? 'TIENDA' : 'DOMICILIO', 'payment_method' => $payload['payment_type'] ?? 'TARJETA'];
+        $events->record($request, $event, $visitor, $customer);
+
         try {
             $result = $service->createFromCart($country, $visitor, $customer, $payload);
         } catch (CartOperationConflict $exception) {
+            $events->record($request, array_merge($event, ['event' => 'ORDER_CREATION_FAILED', 'result' => 'ERROR', 'severity' => 'WARNING', 'code' => 'OPERATION_CONFLICT', 'message' => $exception->getMessage(), 'http_status' => 409]), $visitor, $customer);
             return response()->json(['ok' => false, 'message' => $exception->getMessage()], 409);
+        } catch (\Throwable $exception) {
+            $events->record($request, array_merge($event, ['event' => 'ORDER_CREATION_FAILED', 'result' => 'ERROR', 'severity' => 'ERROR', 'code' => class_basename($exception), 'message' => $events->exceptionMessage($exception)]), $visitor, $customer);
+            throw $exception;
         }
+
+        $events->record($request, array_merge($event, ['event' => 'ORDER_CREATED', 'result' => 'SUCCESS', 'order_id' => data_get($result, 'order.pedidoId'), 'payment_id' => data_get($result, 'order.pagoId'), 'currency' => data_get($result, 'order.currency'), 'amount' => data_get($result, 'order.total')]), $visitor, $customer);
 
         return response()->json(['ok' => true, 'message' => $result['message'], 'data' => $result], 201);
     }

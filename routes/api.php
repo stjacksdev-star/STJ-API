@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscrib
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\PowerTranzController;
+use App\Http\Controllers\Api\CheckoutEventController;
 use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\PushSendController;
 use App\Http\Controllers\Api\StorefrontAccountController;
@@ -111,6 +112,7 @@ Route::get('/storefront/product/{country}/{slug}', [StorefrontProductController:
 Route::get('/storefront/product/{country}/{slug}/availability', [StorefrontProductAvailabilityController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::post('/storefront/checkout/validate', StorefrontCheckoutValidationController::class);
+Route::post('/storefront/checkout/{country}/events', CheckoutEventController::class)->where('country', '[A-Za-z]{2}')->middleware('throttle:120,1');
 Route::get('/storefront/checkout/{country}/catalogs', [StorefrontCheckoutCatalogController::class, 'index'])->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/checkout/catalogs/countries/{country}/states', [StorefrontCheckoutCatalogController::class, 'states'])->whereNumber('country');
 Route::get('/storefront/checkout/catalogs/countries/{country}/states/{state}/cities', [StorefrontCheckoutCatalogController::class, 'cities'])->whereNumber(['country', 'state']);

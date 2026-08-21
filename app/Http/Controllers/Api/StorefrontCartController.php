@@ -7,13 +7,14 @@ use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontCartCouponService;
 use App\Services\StorefrontCartService;
+use App\Services\CheckoutEventService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class StorefrontCartController extends BaseController
 {
-    public function __construct(private StorefrontCartService $carts, private StorefrontCartCouponService $coupons) {}
+    public function __construct(private StorefrontCartService $carts, private StorefrontCartCouponService $coupons, private CheckoutEventService $checkoutEvents) {}
 
     public function storeCoupon(Request $request, string $country): JsonResponse
     {
@@ -113,7 +114,23 @@ class StorefrontCartController extends BaseController
             'email' => ['required', 'email:rfc', 'max:255'],
         ]);
 
-        return $this->mutation(fn () => $this->carts->startCheckout($country, $this->visitor($request), $this->customer(), $data), 'Checkout iniciado.');
+        $visitor = $this->visitor($request); $customer = $this->customer();
+        $event = ['country' => $country, 'flow' => 'CHECKOUT', 'stage' => 'INVENTORY', 'event' => 'INVENTORY_VALIDATION_STARTED', 'result' => 'STARTED', 'operation_uuid' => $data['operation_uuid']];
+        $this->checkoutEvents->record($request, $event, $visitor, $customer);
+        try {
+            $result = $this->carts->startCheckout($country, $visitor, $customer, $data);
+        } catch (CartOperationConflict $exception) {
+            $this->checkoutEvents->record($request, array_merge($event, ['event' => 'CART_VERSION_CONFLICT', 'result' => 'ERROR', 'severity' => 'WARNING', 'code' => 'OPERATION_CONFLICT', 'message' => $exception->getMessage(), 'http_status' => 409]), $visitor, $customer);
+            return $this->error($exception->getMessage(), 409);
+        } catch (\Throwable $exception) {
+            $message = $this->checkoutEvents->exceptionMessage($exception);
+            $inventory = str_contains(strtolower($message), 'inventario') || str_contains(strtolower($message), 'stock') || str_contains(strtolower($message), 'existencia');
+            $this->checkoutEvents->record($request, array_merge($event, ['event' => $inventory ? 'INVENTORY_VALIDATION_FAILED' : 'CHECKOUT_START_FAILED', 'result' => 'ERROR', 'severity' => 'WARNING', 'code' => class_basename($exception), 'message' => $message]), $visitor, $customer);
+            throw $exception;
+        }
+        $this->checkoutEvents->record($request, array_merge($event, ['event' => 'INVENTORY_VALIDATION_PASSED', 'result' => 'SUCCESS', 'metadata' => ['itemsCount' => count(data_get($result, 'checkout.lines', [])), 'inventorySource' => data_get($result, 'checkout.inventorySource.usedSource')]]), $visitor, $customer);
+
+        return $this->success($result, 'Checkout iniciado.');
     }
 
     public function previewFulfillment(Request $request, string $country): JsonResponse
