@@ -4,11 +4,15 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Services\Mobile\MobileCategoryService;
+use App\Services\Mobile\MobileSizeGuideService;
 use Illuminate\Http\Request;
 
 class MobileCategoryController extends Controller
 {
-    public function __construct(private readonly MobileCategoryService $categories) {}
+    public function __construct(
+        private readonly MobileCategoryService $categories,
+        private readonly MobileSizeGuideService $sizeGuides,
+    ) {}
 
     public function index(Request $request)
     {
@@ -56,5 +60,16 @@ class MobileCategoryController extends Controller
         return response()->json(
             $this->categories->find((int) $data['countryId'], $category)
         );
+    }
+
+    public function sizeGuide(Request $request, int $category)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json([
+            'html' => $this->sizeGuides->html((int) $data['countryId'], $category),
+        ]);
     }
 }

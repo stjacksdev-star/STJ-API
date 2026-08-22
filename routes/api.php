@@ -65,6 +65,9 @@ Route::get('/mobile/v1/catalog/categories/{category}/subcategories/{type}', [Mob
     ->whereNumber('category')
     ->where('type', '[A-Za-z0-9_-]+')
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/categories/{category}/size-guide', [MobileCategoryController::class, 'sizeGuide'])
+    ->whereNumber('category')
+    ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/categories/{category}', [MobileCategoryController::class, 'show'])
     ->whereNumber('category')
     ->middleware('throttle:120,1');
@@ -74,6 +77,15 @@ Route::get('/mobile/v1/catalog/products', [MobileProductController::class, 'inde
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/products/{sku}/availability', [MobileProductController::class, 'sizes'])
     ->where('sku', '[A-Za-z0-9._-]+')
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/products/{product}/suggestions', [MobileProductController::class, 'suggestions'])
+    ->whereNumber('product')
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/products/{product}/photos', [MobileProductController::class, 'photos'])
+    ->whereNumber('product')
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/products/{product}/favorite-status', [MobileProductController::class, 'favoriteStatus'])
+    ->whereNumber('product')
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/products/{product}', [MobileProductController::class, 'show'])
     ->whereNumber('product')

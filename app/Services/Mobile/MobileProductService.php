@@ -6,11 +6,32 @@ use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class MobileProductService
 {
+    private const RELATED_GENDERS = [
+        'TEEN CHICOS' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
+        'CABALLEROS JUVENIL' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
+        'CABALLERO' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
+        'CABALLERO JUVENI' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
+        'CABALLEROS' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
+        'TEEN CHICAS' => ['TEEN CHICAS', 'DAMAS JUVENIL', 'DAMAS'],
+        'DAMAS JUVENIL' => ['TEEN CHICAS', 'DAMAS JUVENIL', 'DAMAS'],
+        'DAMAS' => ['TEEN CHICAS', 'DAMAS JUVENIL', 'DAMAS'],
+        'BEBOS' => ['BEBOS', 'NIÑOS', 'TODDLERS NIÑOS', 'TODDLERNIÑOS', 'TODDLER NIÑOS'],
+        'NIÑOS' => ['BEBOS', 'NIÑOS', 'TODDLERS NIÑOS', 'TODDLERNIÑOS', 'TODDLER NIÑOS'],
+        'TODDLERS NIÑOS' => ['BEBOS', 'NIÑOS', 'TODDLERS NIÑOS', 'TODDLERNIÑOS', 'TODDLER NIÑOS'],
+        'TODDLERNIÑOS' => ['BEBOS', 'NIÑOS', 'TODDLERS NIÑOS', 'TODDLERNIÑOS', 'TODDLER NIÑOS'],
+        'TODDLER NIÑOS' => ['BEBOS', 'NIÑOS', 'TODDLERS NIÑOS', 'TODDLERNIÑOS', 'TODDLER NIÑOS'],
+        'BEBAS' => ['BEBAS', 'NIÑAS', 'TODDLERS NIÑAS', 'TODDLER NIÑAS'],
+        'NIÑAS' => ['BEBAS', 'NIÑAS', 'TODDLERS NIÑAS', 'TODDLER NIÑAS'],
+        'TODDLERS NIÑAS' => ['BEBAS', 'NIÑAS', 'TODDLERS NIÑAS', 'TODDLER NIÑAS'],
+        'TODDLER NIÑAS' => ['BEBAS', 'NIÑAS', 'TODDLERS NIÑAS', 'TODDLER NIÑAS'],
+    ];
+
     public function __construct(
         private readonly ProductListAvailabilityService $availability,
         private readonly ProductDetailAvailabilityService $detailAvailability,
@@ -123,6 +144,146 @@ class MobileProductService
                 ->values()
                 ->all(),
             'disp' => $this->availabilityTable($availability),
+        ];
+    }
+
+    public function suggestions(int $countryId, int $productId, string $storeCode): array
+    {
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages(['codigoTienda' => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $seed = DB::table('stj_producto_pais as pp')
+            ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_id', $productId)
+            ->first(['p.pro_id', 'p.pro_oc_personaje', 'p.pro_oc_genero']);
+        if (! $seed) {
+            throw ValidationException::withMessages(['product' => 'Producto no encontrado para el pais seleccionado.']);
+        }
+
+        $query = $this->productQuery($countryId)
+            ->where('p.pro_id', '<>', $productId)
+            ->where('p.pro_oc_personaje', (string) $seed->pro_oc_personaje);
+        $genders = self::RELATED_GENDERS[strtoupper(trim((string) $seed->pro_oc_genero))] ?? [];
+        if ($genders !== []) {
+            $query->whereIn('p.pro_oc_genero', $genders);
+        }
+
+        $products = $query->inRandomOrder()->limit(30)->get([
+            'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca', 'p.pro_oc_marca',
+            'p.pro_categoria', 'p.pro_sub_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
+            'pp.ppa_precio', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre',
+            'pp.ppa_promo_logo', 'pp.ppa_tipo_descuento', 'pp.ppa_precio_tienda',
+        ]);
+        $availability = $this->summarize($country, $products, $storeCode);
+        $bySku = $availability['availabilityBySku'] ?? [];
+
+        $popular = $products
+            ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
+            ->take(10)
+            ->map(function (object $product) use ($bySku): array {
+                $sku = trim((string) $product->pro_codigo);
+
+                return [
+                    'pro_id' => $product->pro_id,
+                    'pro_codigo' => $sku,
+                    'pro_nombre' => $product->pro_nombre,
+                    'pro_descripcion' => $product->pro_descripcion,
+                    'pro_marca' => $this->normalizeBrand($product),
+                    'pro_oc_marca' => $this->normalizeBrand($product),
+                    'pro_categoria' => $product->pro_categoria,
+                    'pro_sub_categoria' => $product->pro_sub_categoria,
+                    'pro_tallas' => $product->pro_tallas,
+                    'cat_nombre' => $product->cat_nombre,
+                    'sca_nombre' => $product->sca_nombre,
+                    'ppa_precio' => $product->ppa_precio,
+                    'ppa_descuento' => $product->ppa_descuento,
+                    'ppa_origen_descuento' => $product->ppa_origen_descuento,
+                    'ppa_promo_nombre' => $product->ppa_promo_nombre,
+                    'ppa_promo_logo' => $product->ppa_promo_logo,
+                    'ppa_tipo_descuento' => $product->ppa_tipo_descuento,
+                    'ppa_precio_tienda' => $product->ppa_precio_tienda,
+                    'availableSizes' => $bySku[$sku]['availableSizes'] ?? [],
+                    'hasStock' => true,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return ['populares' => $popular, 'resultado' => true];
+    }
+
+    public function photos(int $countryId, int $productId): array
+    {
+        if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $product = DB::table('stj_producto_pais as pp')
+            ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_id', $productId)
+            ->first(['p.pro_id', 'p.pro_nombre']);
+        if (! $product) {
+            throw ValidationException::withMessages(['product' => 'Producto no encontrado para el pais seleccionado.']);
+        }
+
+        $imageUrl = (string) config('mobile.legacy_product_image_url');
+
+        return DB::table('stj_productos_fotos')
+            ->where('pfo_producto', $productId)
+            ->orderBy('pfo_orden')
+            ->get(['pfo_url'])
+            ->map(fn (object $photo): array => [
+                'foto' => $imageUrl.'/'.ltrim((string) $photo->pfo_url, '/').'?'.(string) $product->pro_nombre,
+            ])
+            ->values()
+            ->all();
+    }
+
+    public function favoriteStatus(int $countryId, int $productId, int $userId): array
+    {
+        if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $productExists = DB::table('stj_producto_pais')
+            ->where('ppa_pais', $countryId)
+            ->where('ppa_producto', $productId)
+            ->where('ppa_estado', 'ACTIVO')
+            ->exists();
+        if (! $productExists) {
+            throw ValidationException::withMessages(['product' => 'Producto no encontrado para el pais seleccionado.']);
+        }
+
+        $isNewFavorite = Schema::hasTable('stj_favoritos') && DB::table('stj_favoritos')
+            ->where('fav_pais', $countryId)
+            ->where('fav_usuario', $userId)
+            ->where('fav_producto', $productId)
+            ->exists();
+        $legacyState = Schema::hasTable('stj_hearts')
+            ? DB::table('stj_hearts')
+                ->where('hea_pais', $countryId)
+                ->where('hea_usuario', $userId)
+                ->where('hea_producto', $productId)
+                ->orderByDesc('hea_id')
+                ->value('hea_estado')
+            : null;
+        $favorite = $isNewFavorite || strtoupper(trim((string) $legacyState)) === 'ACTIVO';
+
+        return [
+            'resultado' => true,
+            'favorito' => $favorite,
+            'estado' => $favorite ? 'ACTIVO' : 'INACTIVO',
         ];
     }
 

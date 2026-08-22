@@ -55,6 +55,46 @@ class MobileProductController extends Controller
         ));
     }
 
+    public function suggestions(Request $request, int $product)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'codigoTienda' => ['required', 'string', 'max:30'],
+            'idUser' => ['required', 'integer', 'min:0'],
+        ]);
+
+        return response()->json($this->products->suggestions(
+            (int) $data['countryId'],
+            $product,
+            (string) $data['codigoTienda'],
+        ));
+    }
+
+    public function photos(Request $request, int $product)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json([
+            'records' => $this->products->photos((int) $data['countryId'], $product),
+        ]);
+    }
+
+    public function favoriteStatus(Request $request, int $product)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'idUser' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json($this->products->favoriteStatus(
+            (int) $data['countryId'],
+            $product,
+            (int) $data['idUser'],
+        ));
+    }
+
     public function filter(Request $request)
     {
         $data = $request->validate([

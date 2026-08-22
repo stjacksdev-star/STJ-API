@@ -43,6 +43,8 @@ class MobileProductEndpointTest extends TestCase
             $table->text('pro_descripcion')->nullable();
             $table->string('pro_marca')->nullable();
             $table->string('pro_oc_marca')->nullable();
+            $table->string('pro_oc_personaje')->nullable();
+            $table->string('pro_oc_genero')->nullable();
             $table->unsignedBigInteger('pro_categoria');
             $table->unsignedBigInteger('pro_sub_categoria');
             $table->string('pro_tallas')->nullable();
@@ -60,6 +62,32 @@ class MobileProductEndpointTest extends TestCase
             $table->string('ppa_tipo_descuento')->nullable();
             $table->decimal('ppa_precio_tienda')->nullable();
         });
+        Schema::create('stj_productos_fotos', function (Blueprint $table) {
+            $table->id('pfo_id');
+            $table->unsignedBigInteger('pfo_producto');
+            $table->string('pfo_url');
+            $table->integer('pfo_orden');
+            $table->boolean('pfo_portada')->default(false);
+        });
+        Schema::create('stj_hearts', function (Blueprint $table) {
+            $table->id('hea_id');
+            $table->bigInteger('hea_pais');
+            $table->bigInteger('hea_usuario')->nullable();
+            $table->bigInteger('hea_producto');
+            $table->string('hea_estado');
+        });
+        if (! Schema::hasTable('stj_favoritos')) {
+            Schema::create('stj_favoritos', function (Blueprint $table) {
+                $table->id('fav_id');
+                $table->bigInteger('fav_pais');
+                $table->bigInteger('fav_visitante')->nullable();
+                $table->bigInteger('fav_usuario')->nullable();
+                $table->bigInteger('fav_producto');
+                $table->string('fav_origen')->default('WEB');
+                $table->timestamp('fav_created_at')->nullable();
+                $table->timestamp('fav_updated_at')->nullable();
+            });
+        }
 
         DB::table('stj_paises')->insert([
             ['pai_id' => 1, 'pai_codigo' => 'SV'],
@@ -94,6 +122,13 @@ class MobileProductEndpointTest extends TestCase
                 'ppa_tipo_descuento' => null, 'ppa_precio_tienda' => null,
             ]);
         }
+        DB::table('stj_productos')->where('pro_id', 100)->update(['pro_oc_personaje' => 'MICKEY', 'pro_oc_genero' => 'NIÑOS']);
+        DB::table('stj_productos')->where('pro_id', 101)->update(['pro_oc_personaje' => 'MICKEY', 'pro_oc_genero' => 'BEBOS']);
+        DB::table('stj_productos')->where('pro_id', 102)->update(['pro_oc_personaje' => 'MINNIE', 'pro_oc_genero' => 'NIÑAS']);
+        DB::table('stj_productos_fotos')->insert([
+            ['pfo_producto' => 100, 'pfo_url' => 'SKU-1-2.jpg', 'pfo_orden' => 2, 'pfo_portada' => 0],
+            ['pfo_producto' => 100, 'pfo_url' => 'SKU-1-1.jpg', 'pfo_orden' => 1, 'pfo_portada' => 1],
+        ]);
 
         config(['mobile.legacy_product_image_url' => 'https://assets.example/p400']);
     }
@@ -231,6 +266,102 @@ class MobileProductEndpointTest extends TestCase
         $this->getJson('/api/mobile/v1/catalog/products/SKU-1/availability?countryId=1&codigoTienda=019')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_it_returns_in_stock_detail_suggestions_for_the_selected_store(): void
+    {
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', [['pro_codigo' => 'SKU-2']], '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'SKU-2' => ['hasStock' => true, 'availableSizes' => ['8'], 'totalQuantity' => 2],
+                    ],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products/100/suggestions?countryId=1&codigoTienda=019&idUser=0')
+            ->assertOk()
+            ->assertJsonPath('resultado', true)
+            ->assertJsonCount(1, 'populares')
+            ->assertJsonPath('populares.0.pro_id', 101)
+            ->assertJsonPath('populares.0.pro_codigo', 'SKU-2')
+            ->assertJsonPath('populares.0.pro_marca', "ST. JACK'S")
+            ->assertJsonPath('populares.0.availableSizes', ['8'])
+            ->assertJsonMissing(['pro_id' => 100]);
+    }
+
+    public function test_detail_suggestions_validate_product_country_store_and_compatibility_user_parameter(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100/suggestions?countryId=1&codigoTienda=019')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('idUser');
+
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+        $this->getJson('/api/mobile/v1/catalog/products/100/suggestions?countryId=1&codigoTienda=019&idUser=0')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_it_returns_the_legacy_product_photo_contract_in_photo_order(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100/photos?countryId=1')
+            ->assertOk()
+            ->assertExactJson([
+                'records' => [
+                    ['foto' => 'https://assets.example/p400/SKU-1-1.jpg?VESTIDO ROJO'],
+                    ['foto' => 'https://assets.example/p400/SKU-1-2.jpg?VESTIDO ROJO'],
+                ],
+            ]);
+    }
+
+    public function test_product_photos_validate_country_and_product_country_assignment(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100/photos')
+            ->assertUnprocessable()->assertJsonValidationErrors('countryId');
+        $this->getJson('/api/mobile/v1/catalog/products/100/photos?countryId=2')
+            ->assertUnprocessable()->assertJsonValidationErrors('product');
+    }
+
+    public function test_it_returns_the_legacy_favorite_status_contract_during_table_transition(): void
+    {
+        DB::table('stj_hearts')->insert([
+            'hea_pais' => 1,
+            'hea_usuario' => 77,
+            'hea_producto' => 100,
+            'hea_estado' => 'ACTIVO',
+        ]);
+
+        $this->getJson('/api/mobile/v1/catalog/products/100/favorite-status?countryId=1&idUser=77')
+            ->assertOk()
+            ->assertExactJson(['resultado' => true, 'favorito' => true, 'estado' => 'ACTIVO']);
+    }
+
+    public function test_it_also_recognizes_the_new_favorites_table(): void
+    {
+        DB::table('stj_favoritos')->insert([
+            'fav_pais' => 1,
+            'fav_visitante' => null,
+            'fav_usuario' => 88,
+            'fav_producto' => 100,
+            'fav_origen' => 'IOS',
+            'fav_created_at' => now(),
+            'fav_updated_at' => now(),
+        ]);
+
+        $this->getJson('/api/mobile/v1/catalog/products/100/favorite-status?countryId=1&idUser=88')
+            ->assertOk()
+            ->assertJsonPath('favorito', true)
+            ->assertJsonPath('estado', 'ACTIVO');
+    }
+
+    public function test_favorite_status_validates_identity_product_and_country(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100/favorite-status?countryId=1')
+            ->assertUnprocessable()->assertJsonValidationErrors('idUser');
+        $this->getJson('/api/mobile/v1/catalog/products/100/favorite-status?countryId=2&idUser=77')
+            ->assertUnprocessable()->assertJsonValidationErrors('product');
     }
 
     public function test_category_products_validate_the_selected_store_and_required_parameters(): void

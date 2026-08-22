@@ -39,6 +39,23 @@ class MobileCategoryEndpointTest extends TestCase
             $table->string('sca_nombre');
             $table->string('sca_logo')->nullable();
         });
+        Schema::create('stj_guia_tallas', function (Blueprint $table) {
+            $table->id('gta_id');
+            $table->bigInteger('gta_categoria');
+            $table->integer('gta_orden');
+            $table->string('gta_talla');
+            $table->string('gta_peso')->nullable();
+            $table->string('gta_longitud')->nullable();
+            $table->string('gta_longitud_cm')->nullable();
+            $table->string('gta_pecho')->nullable();
+            $table->string('gta_pecho_cm')->nullable();
+            $table->string('gta_cintura')->nullable();
+            $table->string('gta_cintura_cm')->nullable();
+            $table->string('gta_altura')->nullable();
+            $table->string('gta_altura_cm')->nullable();
+            $table->string('gta_cadera')->nullable();
+            $table->string('gta_cadera_cm')->nullable();
+        });
 
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
         DB::table('stj_categorias')->insert([
@@ -54,6 +71,10 @@ class MobileCategoryEndpointTest extends TestCase
             ['sca_id' => 10, 'sca_categoria' => 1, 'sca_nombre' => 'Camisas', 'sca_logo' => 'camisas.jpg'],
             ['sca_id' => 30, 'sca_categoria' => 2, 'sca_nombre' => 'Vestidos', 'sca_logo' => 'vestidos.jpg'],
             ['sca_id' => 40, 'sca_categoria' => 3, 'sca_nombre' => 'Bodies', 'sca_logo' => 'bodies.jpg'],
+        ]);
+        DB::table('stj_guia_tallas')->insert([
+            ['gta_categoria' => 1, 'gta_orden' => 2, 'gta_talla' => '6', 'gta_peso' => '40-45', 'gta_longitud' => '24', 'gta_longitud_cm' => '61', 'gta_pecho' => null, 'gta_pecho_cm' => null, 'gta_cintura' => null, 'gta_cintura_cm' => null, 'gta_altura' => null, 'gta_altura_cm' => null, 'gta_cadera' => null, 'gta_cadera_cm' => null],
+            ['gta_categoria' => 1, 'gta_orden' => 1, 'gta_talla' => '4<script>', 'gta_peso' => '35-40', 'gta_longitud' => '22', 'gta_longitud_cm' => '56', 'gta_pecho' => null, 'gta_pecho_cm' => null, 'gta_cintura' => null, 'gta_cintura_cm' => null, 'gta_altura' => null, 'gta_altura_cm' => null, 'gta_cadera' => null, 'gta_cadera_cm' => null],
         ]);
 
         config([
@@ -177,5 +198,26 @@ class MobileCategoryEndpointTest extends TestCase
         $this->getJson('/api/mobile/v1/catalog/categories/1?countryId=99')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('countryId');
+    }
+
+    public function test_it_returns_the_legacy_size_guide_html_in_configured_order(): void
+    {
+        $response = $this->getJson('/api/mobile/v1/catalog/categories/1/size-guide?countryId=1');
+
+        $response->assertOk()
+            ->assertJsonStructure(['html'])
+            ->assertJsonPath('html', fn (string $html) => str_contains($html, 'Guía de tallas')
+                && str_contains($html, '<ion-card-title>Pulgadas</ion-card-title>')
+                && str_contains($html, '<ion-card-title>Centimetros</ion-card-title>')
+                && str_contains($html, '4&lt;script&gt;')
+                && strpos($html, '4&lt;script&gt;') < strpos($html, '>6<'));
+    }
+
+    public function test_size_guide_validates_country_and_category(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/categories/999/size-guide?countryId=1')
+            ->assertUnprocessable()->assertJsonValidationErrors('category');
+        $this->getJson('/api/mobile/v1/catalog/categories/1/size-guide?countryId=99')
+            ->assertUnprocessable()->assertJsonValidationErrors('countryId');
     }
 }
