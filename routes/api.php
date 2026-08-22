@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CheckoutEventController;
 use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
 use App\Http\Controllers\Api\Dashboard\AppointmentController as DashboardAppointmentController;
 use App\Http\Controllers\Api\Dashboard\AssetPublicationController as DashboardAssetPublicationController;
@@ -20,9 +21,9 @@ use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiCo
 use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
+use App\Http\Controllers\Api\Mobile\MobileStoreController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\PowerTranzController;
-use App\Http\Controllers\Api\CheckoutEventController;
 use App\Http\Controllers\Api\ProductoController;
 use App\Http\Controllers\Api\PushSendController;
 use App\Http\Controllers\Api\StorefrontAccountController;
@@ -30,12 +31,12 @@ use App\Http\Controllers\Api\StorefrontAssetController;
 use App\Http\Controllers\Api\StorefrontBestSellerController;
 use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
-use App\Http\Controllers\Api\StorefrontCouponLandingController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontContactController;
+use App\Http\Controllers\Api\StorefrontCouponLandingController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontFavoriteController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -54,6 +55,8 @@ use App\Http\Controllers\Api\WebPushClickController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
+    ->middleware('throttle:120,1');
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);
 Route::post('/storefront/account/forgot-password/{country}', [StorefrontAccountController::class, 'forgotPassword'])
     ->where('country', '[A-Za-z]{2}')
