@@ -20,8 +20,7 @@ class StorefrontCatalogService
 
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailabilityService,
-    ) {
-    }
+    ) {}
 
     public function forCountry(string $countryCode, ?string $query = null, array $filters = []): array
     {
@@ -30,6 +29,7 @@ class StorefrontCatalogService
         $activeGroup = trim((string) ($filters['group'] ?? ''));
         $activeCategory = trim((string) ($filters['category'] ?? ''));
         $activeSort = trim((string) ($filters['sort'] ?? 'featured'));
+        $activeStore = trim((string) ($filters['store'] ?? ''));
         $promoOnly = filter_var($filters['promo'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         if (! $country) {
@@ -105,6 +105,7 @@ class StorefrontCatalogService
         $availability = $this->productListAvailabilityService->summarize(
             strtolower((string) $country->pai_codigo),
             $rawProducts->map(fn ($product) => ['pro_codigo' => $product->pro_codigo])->all(),
+            $activeStore !== '' ? $activeStore : null,
         );
 
         $products = $rawProducts

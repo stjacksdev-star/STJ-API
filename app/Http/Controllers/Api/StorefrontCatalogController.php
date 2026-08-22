@@ -9,8 +9,7 @@ class StorefrontCatalogController extends BaseController
 {
     public function __construct(
         private readonly StorefrontCatalogService $storefrontCatalogService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request, string $country)
     {
@@ -20,6 +19,7 @@ class StorefrontCatalogController extends BaseController
                 'category' => $request->string('category')->toString(),
                 'sort' => $request->string('sort')->toString(),
                 'promo' => $request->boolean('promo'),
+                'store' => $request->string('store')->toString(),
             ]),
             'Catalogo del storefront obtenido'
         );

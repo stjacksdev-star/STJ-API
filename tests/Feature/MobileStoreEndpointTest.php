@@ -39,7 +39,7 @@ class MobileStoreEndpointTest extends TestCase
         ]);
 
         DB::table('stj_tiendas')->insert([
-            ['tie_codigo' => '57', 'tie_nombre' => 'Domicilio', 'tie_telefono' => null, 'tie_horario' => 'WEB', 'tie_correo' => 'domicilio@example.com', 'tie_direccion' => 'Centro de distribucion', 'tie_pais' => 1, 'tie_productos' => 1],
+            ['tie_codigo' => '57', 'tie_nombre' => 'Bodega web', 'tie_telefono' => null, 'tie_horario' => 'WEB', 'tie_correo' => 'domicilio@example.com', 'tie_direccion' => 'Centro de distribucion', 'tie_pais' => 1, 'tie_productos' => 0],
             ['tie_codigo' => '001', 'tie_nombre' => 'Galerias', 'tie_telefono' => '2200-0001', 'tie_horario' => '9:00 a 18:00', 'tie_correo' => 'galerias@example.com', 'tie_direccion' => 'San Salvador', 'tie_pais' => 1, 'tie_productos' => 1],
             ['tie_codigo' => '999', 'tie_nombre' => 'Inactiva para productos', 'tie_telefono' => null, 'tie_horario' => null, 'tie_correo' => null, 'tie_direccion' => null, 'tie_pais' => 1, 'tie_productos' => 0],
             ['tie_codigo' => '2', 'tie_nombre' => 'Domicilio Guatemala', 'tie_telefono' => null, 'tie_horario' => 'WEB', 'tie_correo' => null, 'tie_direccion' => 'Guatemala', 'tie_pais' => 2, 'tie_productos' => 1],
@@ -96,5 +96,19 @@ class MobileStoreEndpointTest extends TestCase
             ->assertJsonCount(1, 'records')
             ->assertJsonPath('records.0.id', '2')
             ->assertJsonPath('records.0.tipo', 'Domicilio');
+    }
+
+    public function test_it_adds_a_delivery_option_when_the_configured_store_has_no_database_row(): void
+    {
+        config(['inventory.domicilio_store_by_country.gt' => 'DOM']);
+
+        $this->getJson('/api/mobile/v1/catalog/stores?countryId=2')
+            ->assertOk()
+            ->assertJsonCount(2, 'records')
+            ->assertJsonPath('records.0.id', 'DOM')
+            ->assertJsonPath('records.0.nombre', 'Domicilio')
+            ->assertJsonPath('records.0.tipo', 'Domicilio')
+            ->assertJsonPath('records.1.id', '2')
+            ->assertJsonPath('records.1.tipo', 'Tienda');
     }
 }

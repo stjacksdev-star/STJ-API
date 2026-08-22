@@ -24,10 +24,39 @@ class MobileStoreService
             ''
         ));
 
-        return DB::table('stj_tiendas')
+        $deliveryStore = $deliveryCode === ''
+            ? null
+            : DB::table('stj_tiendas')
+                ->where('tie_pais', $countryId)
+                ->where('tie_codigo', $deliveryCode)
+                ->first([
+                    'tie_codigo',
+                    'tie_nombre',
+                    'tie_telefono',
+                    'tie_horario',
+                    'tie_correo',
+                    'tie_direccion',
+                ]);
+
+        $records = collect();
+        if ($deliveryCode !== '') {
+            $records->push($deliveryStore
+                ? $this->mapStore($deliveryStore, 'Domicilio')
+                : [
+                    'id' => $deliveryCode,
+                    'nombre' => 'Domicilio',
+                    'telefono' => '',
+                    'horario' => '',
+                    'correo' => '',
+                    'direccion' => '',
+                    'tipo' => 'Domicilio',
+                ]);
+        }
+
+        $physicalStores = DB::table('stj_tiendas')
             ->where('tie_pais', $countryId)
             ->where('tie_productos', 1)
-            ->orderByRaw('CASE WHEN tie_codigo = ? THEN 0 ELSE 1 END', [$deliveryCode])
+            ->when($deliveryCode !== '', fn ($query) => $query->where('tie_codigo', '<>', $deliveryCode))
             ->orderBy('tie_nombre')
             ->get([
                 'tie_codigo',
@@ -37,20 +66,21 @@ class MobileStoreService
                 'tie_correo',
                 'tie_direccion',
             ])
-            ->map(static function (object $store) use ($deliveryCode): array {
-                $code = trim((string) $store->tie_codigo);
+            ->map(fn (object $store): array => $this->mapStore($store, 'Tienda'));
 
-                return [
-                    'id' => $code,
-                    'nombre' => trim((string) $store->tie_nombre),
-                    'telefono' => trim((string) $store->tie_telefono),
-                    'horario' => trim((string) $store->tie_horario),
-                    'correo' => trim((string) $store->tie_correo),
-                    'direccion' => trim((string) $store->tie_direccion),
-                    'tipo' => $deliveryCode !== '' && $code === $deliveryCode ? 'Domicilio' : 'Tienda',
-                ];
-            })
-            ->values()
-            ->all();
+        return $records->concat($physicalStores)->values()->all();
+    }
+
+    private function mapStore(object $store, string $type): array
+    {
+        return [
+            'id' => trim((string) $store->tie_codigo),
+            'nombre' => $type === 'Domicilio' ? 'Domicilio' : trim((string) $store->tie_nombre),
+            'telefono' => trim((string) $store->tie_telefono),
+            'horario' => trim((string) $store->tie_horario),
+            'correo' => trim((string) $store->tie_correo),
+            'direccion' => trim((string) $store->tie_direccion),
+            'tipo' => $type,
+        ];
     }
 }
