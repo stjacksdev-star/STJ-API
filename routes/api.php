@@ -58,6 +58,8 @@ use Illuminate\Support\Facades\Route;
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/categories/search', [MobileCategoryController::class, 'search'])
+    ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);

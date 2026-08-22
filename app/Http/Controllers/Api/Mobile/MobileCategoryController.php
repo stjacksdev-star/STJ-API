@@ -20,4 +20,15 @@ class MobileCategoryController extends Controller
             'records' => $this->categories->all((int) $data['countryId']),
         ]);
     }
+
+    public function search(Request $request)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json([
+            'records' => $this->categories->search((int) $data['countryId']),
+        ]);
+    }
 }
