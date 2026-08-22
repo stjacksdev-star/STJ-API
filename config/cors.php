@@ -4,7 +4,7 @@ $origins = array_values(array_unique(array_filter(array_map(
     static fn (string $origin) => trim($origin),
     array_merge(
         explode(',', (string) env('CORS_ALLOWED_ORIGINS', 'http://localhost')),
-        explode(',', (string) env('CORS_MOBILE_ALLOWED_ORIGINS', 'capacitor://localhost,http://localhost,https://localhost')),
+        explode(',', (string) env('CORS_MOBILE_ALLOWED_ORIGINS', 'capacitor://localhost,http://localhost,http://localhost:8100,https://localhost')),
     ),
 ))));
 
