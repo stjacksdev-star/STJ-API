@@ -14,53 +14,51 @@ class MobileProductService
         private readonly ProductListAvailabilityService $availability,
     ) {}
 
+    public function forCategory(int $countryId, int $categoryId, string $storeCode): array
+    {
+        [$country, $category, $storeCode] = $this->validatedContext(
+            $countryId,
+            $categoryId,
+            $storeCode,
+            'categoryId',
+            'codigoTienda',
+        );
+
+        $query = $this->productQuery($countryId);
+        $this->applyCategory($query, $category, []);
+        $query->orderByDesc('pp.ppa_promo_logo')
+            ->orderByDesc('pp.ppa_tipo_descuento')
+            ->orderByDesc('p.pro_id')
+            ->orderByDesc('p.pro_nombre');
+
+        $products = $this->getProducts($query);
+        $availability = $this->summarize($country, $products, $storeCode);
+        $bySku = $availability['availabilityBySku'] ?? [];
+
+        return $products
+            ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
+            ->map(fn (object $product) => $this->legacyProduct($product, $bySku, true))
+            ->values()
+            ->all();
+    }
+
     public function filter(int $countryId, array $filters): array
     {
-        $country = DB::table('stj_paises')
-            ->where('pai_id', $countryId)
-            ->first(['pai_id', 'pai_codigo']);
+        [$country, $category, $storeCode] = $this->validatedContext(
+            $countryId,
+            (int) $filters['categoria'],
+            (string) $filters['tienda'],
+        );
 
-        if (! $country) {
-            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
-        }
-
-        $storeCode = trim((string) $filters['tienda']);
-        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
-            throw ValidationException::withMessages(['tienda' => 'La tienda no pertenece al pais seleccionado.']);
-        }
-
-        $category = DB::table('stj_categorias')
-            ->where('cat_id', (int) $filters['categoria'])
-            ->first(['cat_id', 'cat_si_sub_otras', 'cat_sub_otras', 'cat_marca']);
-
-        if (! $category) {
-            throw ValidationException::withMessages(['categoria' => 'Categoria no encontrada.']);
-        }
-
-        $query = DB::table('stj_productos as p')
-            ->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
-            ->join('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
-            ->join('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
-            ->where('pp.ppa_pais', $countryId)
-            ->where('pp.ppa_estado', 'ACTIVO')
-            ->where('pp.ppa_precio', '>', 0.99);
+        $query = $this->productQuery($countryId)->where('pp.ppa_precio', '>', 0.99);
 
         $this->applyCategory($query, $category, $filters);
         $this->applyPriceAndSizeFilters($query, $filters);
         $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
 
-        $products = $query->limit($countryId === 1 ? 150 : 100)->get([
-            'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca',
-            'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
-            'pp.ppa_precio', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre',
-            'pp.ppa_promo_logo', 'pp.ppa_tipo_descuento', 'pp.ppa_precio_tienda',
-        ]);
+        $products = $this->getProducts($query, $countryId === 1 ? 150 : 100);
 
-        $availability = $this->availability->summarize(
-            strtolower((string) $country->pai_codigo),
-            $products->map(fn (object $product) => ['pro_codigo' => $product->pro_codigo])->all(),
-            $storeCode,
-        );
+        $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
 
         return [
@@ -71,6 +69,131 @@ class MobileProductService
                 ->all(),
             'existenciaTalla' => $availability['availabilityRows'] ?? [],
         ];
+    }
+
+    public function filterJackCo(int $countryId, array $filters): array
+    {
+        [$country, $category, $storeCode] = $this->validatedContext(
+            $countryId,
+            (int) $filters['categoria'],
+            (string) $filters['codigoTienda'],
+            'categoria',
+            'codigoTienda',
+        );
+
+        $query = $this->productQuery($countryId)
+            ->where('pp.ppa_precio', '>', 0.99)
+            ->where('p.pro_marca', 'JACK & CO');
+        $this->applyCategoryScope($query, $category, $filters);
+        $this->applyPriceAndSizeFilters($query, $filters);
+        $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
+
+        $products = $this->getProducts($query);
+        $availability = $this->summarize($country, $products, $storeCode);
+        $bySku = $availability['availabilityBySku'] ?? [];
+
+        return $products
+            ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
+            ->map(function (object $product) use ($bySku): array {
+                $item = $this->legacyProduct($product, $bySku);
+                $item['sello'] = 'https://stjacks.com/img/v2/icons/Icon%20awesome-tag.svg';
+
+                return $item;
+            })
+            ->values()
+            ->all();
+    }
+
+    public function filterBasikos(int $countryId, array $filters): array
+    {
+        [$country, $category, $storeCode] = $this->validatedContext(
+            $countryId,
+            (int) $filters['categoria'],
+            (string) $filters['codigoTienda'],
+            'categoria',
+            'codigoTienda',
+        );
+
+        $query = $this->productQuery($countryId)
+            ->where('pp.ppa_precio', '>=', 0.99)
+            ->whereIn('p.pro_marca', ['BASICS', 'BASIKOS']);
+        $this->applyCategoryScope($query, $category, $filters);
+        $this->applyPriceAndSizeFilters($query, $filters);
+        $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
+
+        $products = $this->getProducts($query);
+        $availability = $this->summarize($country, $products, $storeCode);
+        $bySku = $availability['availabilityBySku'] ?? [];
+
+        return $products
+            ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
+            ->map(function (object $product) use ($bySku): array {
+                $item = $this->legacyProduct($product, $bySku);
+                $item['sello'] = 'https://stjacks.com/img/v2/icons/Icon%20awesome-tag.svg';
+
+                return $item;
+            })
+            ->values()
+            ->all();
+    }
+
+    private function productQuery(int $countryId): Builder
+    {
+        return DB::table('stj_productos as p')
+            ->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
+            ->join('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
+            ->join('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO');
+    }
+
+    private function getProducts(Builder $query, ?int $limit = null)
+    {
+        if ($limit !== null) {
+            $query->limit($limit);
+        }
+
+        return $query->get([
+            'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca',
+            'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
+            'pp.ppa_precio', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre',
+            'pp.ppa_promo_logo', 'pp.ppa_tipo_descuento', 'pp.ppa_precio_tienda',
+        ]);
+    }
+
+    private function summarize(object $country, $products, string $storeCode): array
+    {
+        return $this->availability->summarize(
+            strtolower((string) $country->pai_codigo),
+            $products->map(fn (object $product) => ['pro_codigo' => $product->pro_codigo])->all(),
+            $storeCode,
+        );
+    }
+
+    private function validatedContext(
+        int $countryId,
+        int $categoryId,
+        string $storeCode,
+        string $categoryField = 'categoria',
+        string $storeField = 'tienda',
+    ): array {
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages([$storeField => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $category = DB::table('stj_categorias')->where('cat_id', $categoryId)
+            ->first(['cat_id', 'cat_si_sub_otras', 'cat_sub_otras', 'cat_marca']);
+        if (! $category) {
+            throw ValidationException::withMessages([$categoryField => 'Categoria no encontrada.']);
+        }
+
+        return [$country, $category, $storeCode];
     }
 
     private function applyCategory(Builder $query, object $category, array $filters): void
@@ -87,6 +210,21 @@ class MobileProductService
                 ctype_digit($subcategory)
                     ? $query->where('p.pro_sub_categoria', (int) $subcategory)
                     : $query->where('sc.sca_nombre', $subcategory);
+            }
+        }
+    }
+
+    private function applyCategoryScope(Builder $query, object $category, array $filters): void
+    {
+        if ((bool) $category->cat_si_sub_otras) {
+            $subcategoryIds = collect(explode(',', (string) $category->cat_sub_otras))
+                ->map(fn (string $id) => (int) trim($id))->filter()->unique()->all();
+            $query->whereIn('p.pro_sub_categoria', $subcategoryIds);
+        } else {
+            $query->where('p.pro_categoria', (int) $category->cat_id);
+            $subcategory = trim((string) ($filters['scat'] ?? ''));
+            if ($subcategory !== '') {
+                $query->where('p.pro_sub_categoria', (int) $subcategory);
             }
         }
     }
@@ -116,7 +254,7 @@ class MobileProductService
         };
     }
 
-    private function legacyProduct(object $product, array $availabilityBySku): array
+    private function legacyProduct(object $product, array $availabilityBySku, bool $includeSeal = false): array
     {
         $price = (float) $product->ppa_precio;
         $discount = (float) ($product->ppa_descuento ?? 0);
@@ -135,7 +273,9 @@ class MobileProductService
             'precio' => number_format($price, 2, '.', ''),
             'descuento' => $discount,
             'origen' => (string) ($product->ppa_origen_descuento ?? ''),
-            'sello' => '',
+            'sello' => $includeSeal && trim((string) $product->ppa_promo_logo) !== ''
+                ? 'https://stjacks.com/img/logos/'.trim((string) $product->ppa_promo_logo)
+                : '',
             'precioCD' => number_format($discountedPrice, 2, '.', ''),
             'descripcion' => str_replace('-', '<br/>-', (string) $product->pro_descripcion),
             'categoria' => $product->pro_categoria,

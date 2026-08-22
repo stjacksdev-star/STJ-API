@@ -68,7 +68,12 @@ class MobileProductEndpointTest extends TestCase
             ['tie_id' => 1, 'tie_pais' => 1, 'tie_codigo' => '019'],
             ['tie_id' => 2, 'tie_pais' => 2, 'tie_codigo' => '019'],
         ]);
-        DB::table('stj_categorias')->insert(['cat_id' => 5, 'cat_nombre' => 'Niñas', 'cat_marca' => 'ST JACKS']);
+        DB::table('stj_categorias')->insert([
+            ['cat_id' => 5, 'cat_nombre' => 'Niñas', 'cat_marca' => 'ST JACKS', 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 15, 'cat_nombre' => 'Jack & Co', 'cat_marca' => 'JACK & CO', 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 12, 'cat_nombre' => 'Basikos', 'cat_marca' => 'BASICS', 'cat_si_sub_otras' => 1, 'cat_sub_otras' => '10,20'],
+            ['cat_id' => 99, 'cat_nombre' => 'Origen Basikos', 'cat_marca' => 'BASICS', 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+        ]);
         DB::table('stj_sub_categorias')->insert([
             ['sca_id' => 10, 'sca_nombre' => 'Vestidos'],
             ['sca_id' => 20, 'sca_nombre' => 'Blusas'],
@@ -77,8 +82,10 @@ class MobileProductEndpointTest extends TestCase
             ['pro_id' => 100, 'pro_codigo' => 'SKU-1', 'pro_nombre' => 'VESTIDO ROJO', 'pro_descripcion' => 'Detalle-producto', 'pro_marca' => 'ST JACKS', 'pro_oc_marca' => null, 'pro_categoria' => 5, 'pro_sub_categoria' => 10, 'pro_tallas' => '4,6'],
             ['pro_id' => 101, 'pro_codigo' => 'SKU-2', 'pro_nombre' => 'VESTIDO AZUL', 'pro_descripcion' => null, 'pro_marca' => 'ST JACKS', 'pro_oc_marca' => null, 'pro_categoria' => 5, 'pro_sub_categoria' => 10, 'pro_tallas' => '8'],
             ['pro_id' => 102, 'pro_codigo' => 'SKU-3', 'pro_nombre' => 'BLUSA', 'pro_descripcion' => null, 'pro_marca' => 'ST JACKS', 'pro_oc_marca' => null, 'pro_categoria' => 5, 'pro_sub_categoria' => 20, 'pro_tallas' => '6'],
+            ['pro_id' => 200, 'pro_codigo' => 'JACK-1', 'pro_nombre' => 'CAMISA JACK', 'pro_descripcion' => null, 'pro_marca' => 'JACK & CO', 'pro_oc_marca' => 'JACK & CO', 'pro_categoria' => 15, 'pro_sub_categoria' => 20, 'pro_tallas' => 'S,M'],
+            ['pro_id' => 300, 'pro_codigo' => 'BAS-1', 'pro_nombre' => 'CAMISETA BASIKA', 'pro_descripcion' => null, 'pro_marca' => 'BASICS', 'pro_oc_marca' => 'BASICS', 'pro_categoria' => 99, 'pro_sub_categoria' => 10, 'pro_tallas' => '6,8'],
         ]);
-        foreach ([100, 101, 102] as $productId) {
+        foreach ([100, 101, 102, 200, 300] as $productId) {
             DB::table('stj_producto_pais')->insert([
                 'ppa_pais' => 1, 'ppa_producto' => $productId, 'ppa_estado' => 'ACTIVO',
                 'ppa_precio' => 20, 'ppa_descuento' => 10, 'ppa_origen_descuento' => 'WEB',
@@ -122,6 +129,117 @@ class MobileProductEndpointTest extends TestCase
             ->assertJsonPath('records.0.precioCD', '18.00')
             ->assertJsonPath('records.0.availableSizes', ['4', '6'])
             ->assertJsonPath('existenciaTalla.1.existencia', 2);
+    }
+
+    public function test_it_returns_products_for_a_category_using_the_selected_store(): void
+    {
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', \Mockery::on(fn (array $products) => collect($products)->pluck('pro_codigo')->all() === ['SKU-3', 'SKU-2', 'SKU-1']), '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'SKU-3' => ['hasStock' => true, 'availableSizes' => ['6'], 'totalQuantity' => 2],
+                        'SKU-1' => ['hasStock' => true, 'availableSizes' => ['4'], 'totalQuantity' => 1],
+                    ],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products?countryId=1&codigoTienda=019&categoryId=5')
+            ->assertOk()
+            ->assertJsonCount(2, 'records')
+            ->assertJsonPath('records.0.sku', 'SKU-3')
+            ->assertJsonPath('records.1.sku', 'SKU-1')
+            ->assertJsonPath('records.1.availableSizes', ['4']);
+    }
+
+    public function test_category_products_validate_the_selected_store_and_required_parameters(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['countryId', 'categoryId', 'codigoTienda']);
+
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+        $this->getJson('/api/mobile/v1/catalog/products?countryId=1&codigoTienda=019&categoryId=5')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_it_filters_jack_co_products_with_the_mobile_contract_and_store_inventory(): void
+    {
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', [['pro_codigo' => 'JACK-1']], '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'JACK-1' => ['hasStock' => true, 'availableSizes' => ['S'], 'totalQuantity' => 2],
+                    ],
+                ]);
+        });
+
+        $this->postJson('/api/mobile/v1/catalog/products/jack-co/filter?countryId=1&codigoTienda=019', [
+            'categoria' => 15,
+            'scat' => '',
+            'ordenamiento' => 'Más recientes',
+            'min' => '',
+            'max' => '',
+            'talla' => '',
+            'pais' => 1,
+        ])->assertOk()
+            ->assertJsonCount(1, 'records')
+            ->assertJsonPath('records.0.sku', 'JACK-1')
+            ->assertJsonPath('records.0.marca', 'JACK & CO')
+            ->assertJsonPath('records.0.sello', 'https://stjacks.com/img/v2/icons/Icon%20awesome-tag.svg')
+            ->assertJsonPath('records.0.availableSizes', ['S']);
+    }
+
+    public function test_jack_co_filter_requires_a_store_from_the_selected_country(): void
+    {
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+
+        $this->postJson('/api/mobile/v1/catalog/products/jack-co/filter?countryId=1&codigoTienda=019', [
+            'categoria' => 15,
+        ])->assertUnprocessable()->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_it_filters_basikos_from_the_dynamic_category_scope_and_selected_store(): void
+    {
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', [['pro_codigo' => 'BAS-1']], '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'BAS-1' => ['hasStock' => true, 'availableSizes' => ['6'], 'totalQuantity' => 1],
+                    ],
+                ]);
+        });
+
+        $this->postJson('/api/mobile/v1/catalog/products/basikos/filter?countryId=1&codigoTienda=019', [
+            'categoria' => 12,
+            'scat' => '',
+            'ordenamiento' => 'Más recientes',
+            'min' => '',
+            'max' => '',
+            'talla' => '',
+            'pais' => 1,
+            'tienda' => '019',
+        ])->assertOk()
+            ->assertJsonCount(1, 'records')
+            ->assertJsonPath('records.0.sku', 'BAS-1')
+            ->assertJsonPath('records.0.marca', 'BASIKOS')
+            ->assertJsonPath('records.0.sello', 'https://stjacks.com/img/v2/icons/Icon%20awesome-tag.svg')
+            ->assertJsonPath('records.0.availableSizes', ['6']);
+    }
+
+    public function test_basikos_filter_requires_a_store_from_the_selected_country(): void
+    {
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+
+        $this->postJson('/api/mobile/v1/catalog/products/basikos/filter?countryId=1&codigoTienda=019', [
+            'categoria' => 12,
+        ])->assertUnprocessable()->assertJsonValidationErrors('codigoTienda');
     }
 
     public function test_it_rejects_a_store_that_does_not_belong_to_the_country(): void
