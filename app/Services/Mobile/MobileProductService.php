@@ -2,6 +2,7 @@
 
 namespace App\Services\Mobile;
 
+use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +13,7 @@ class MobileProductService
 {
     public function __construct(
         private readonly ProductListAvailabilityService $availability,
+        private readonly ProductDetailAvailabilityService $detailAvailability,
     ) {}
 
     public function forCategory(int $countryId, int $categoryId, string $storeCode): array
@@ -40,6 +42,145 @@ class MobileProductService
             ->map(fn (object $product) => $this->legacyProduct($product, $bySku, true))
             ->values()
             ->all();
+    }
+
+    public function detail(int $countryId, int $productId, string $storeCode): array
+    {
+        if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages(['codigoTienda' => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $product = DB::table('stj_productos as p')
+            ->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
+            ->join('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
+            ->join('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
+            ->where('p.pro_id', $productId)
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->first(['p.pro_id', 'p.pro_nombre', 'p.pro_descripcion', 'pp.ppa_precio']);
+
+        if (! $product) {
+            throw ValidationException::withMessages(['product' => 'Producto no encontrado para el pais seleccionado.']);
+        }
+
+        return [
+            'id' => $product->pro_id,
+            'nombre' => mb_convert_case(mb_strtolower((string) $product->pro_nombre, 'UTF-8'), MB_CASE_TITLE, 'UTF-8'),
+            'preciov2' => number_format((float) $product->ppa_precio, 2),
+            'descripcion' => str_replace('-', '<br/>-', (string) $product->pro_descripcion),
+            'Domicilio' => true,
+            'Tienda' => true,
+        ];
+    }
+
+    public function sizes(int $countryId, string $sku, string $storeCode): array
+    {
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages(['codigoTienda' => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $product = DB::table('stj_producto_pais as pp')
+            ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_codigo', trim($sku))
+            ->first(['p.pro_id']);
+        if (! $product) {
+            throw ValidationException::withMessages(['sku' => 'Producto no encontrado para el pais seleccionado.']);
+        }
+
+        $availability = $this->detailAvailability->forCountryAndSlug(
+            strtolower((string) $country->pai_codigo),
+            'mobile-product-'.(int) $product->pro_id,
+            $storeCode,
+            'product_detail',
+        );
+        if (! $availability) {
+            throw ValidationException::withMessages(['sku' => 'No se pudo resolver la disponibilidad del producto.']);
+        }
+
+        $sizes = collect($availability['sizes'] ?? []);
+
+        return [
+            'records' => $sizes
+                ->filter(fn (array $size) => (bool) ($size['availableInActiveStore'] ?? false))
+                ->map(fn (array $size) => ['talla' => (string) $size['size']])
+                ->values()
+                ->all(),
+            'records2' => $sizes
+                ->map(fn (array $size) => ['talla' => (string) $size['size']])
+                ->values()
+                ->all(),
+            'disp' => $this->availabilityTable($availability),
+        ];
+    }
+
+    private function availabilityTable(array $availability): string
+    {
+        $sizes = collect($availability['sizes'] ?? []);
+        if ($sizes->isEmpty()) {
+            return '';
+        }
+
+        $activeStore = $availability['activeStore'] ?? null;
+        $stores = collect();
+        if (is_array($activeStore) && trim((string) ($activeStore['code'] ?? '')) !== '') {
+            $stores->put((string) $activeStore['code'], [
+                'name' => (string) ($activeStore['name'] ?? $activeStore['code']),
+                'active' => true,
+                'quantities' => [],
+            ]);
+        }
+
+        foreach ($sizes as $size) {
+            $sizeName = (string) ($size['size'] ?? '');
+            if ($activeStore) {
+                $row = $stores->get((string) $activeStore['code']);
+                $row['quantities'][$sizeName] = (int) ($size['quantityInActiveStore'] ?? 0);
+                $stores->put((string) $activeStore['code'], $row);
+            }
+            foreach ($size['alternativeStores'] ?? [] as $alternative) {
+                $code = (string) ($alternative['code'] ?? '');
+                if ($code === '') {
+                    continue;
+                }
+                $row = $stores->get($code, [
+                    'name' => (string) ($alternative['name'] ?? $code),
+                    'active' => false,
+                    'quantities' => [],
+                ]);
+                $row['quantities'][$sizeName] = (int) ($alternative['quantity'] ?? 0);
+                $stores->put($code, $row);
+            }
+        }
+
+        $escape = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $html = '<div class="tabs"><div class="tab"><div class="content"><table class="tbDisp" style="width:90%;margin:1em auto 2em;font-size:0.9em;"><thead><tr><td>Tienda</td>';
+        foreach ($sizes as $size) {
+            $html .= '<td>'.$escape((string) $size['size']).'</td>';
+        }
+        $html .= '</tr></thead><tbody>';
+        foreach ($stores as $store) {
+            $html .= '<tr'.($store['active'] ? ' style="background-color:yellow;"' : '').'><td>'.$escape($store['name']).'</td>';
+            foreach ($sizes as $size) {
+                $quantity = max(0, (int) ($store['quantities'][(string) $size['size']] ?? 0));
+                $html .= '<td>'.($quantity > 4 ? '4+' : $quantity).'</td>';
+            }
+            $html .= '</tr>';
+        }
+
+        return $html.'</tbody></table></div></div></div>';
     }
 
     public function filter(int $countryId, array $filters): array

@@ -6,6 +6,7 @@ use App\Services\Inventory\ExternalInventoryProvider;
 use App\Services\Inventory\InventorySourceResolver;
 use App\Services\Inventory\LocalInventoryProvider;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class ProductDetailAvailabilityService
@@ -45,7 +46,7 @@ class ProductDetailAvailabilityService
         }
 
         $countryCode = strtolower((string) $country->pai_codigo);
-        $storeCodes = config("inventory.stores_by_country.{$countryCode}", []);
+        $storeCodes = $this->inventoryStoreCodes((int) $country->pai_id, $countryCode);
         $requestedStoreCode = trim((string) $storeCode);
         $requestedStoreIsValid = $requestedStoreCode !== '' && DB::table('stj_tiendas')
             ->where('tie_pais', $country->pai_id)
@@ -264,6 +265,29 @@ class ProductDetailAvailabilityService
             ->whereIn('tie_codigo', $storeCodes)
             ->pluck('tie_nombre', 'tie_codigo')
             ->map(fn ($name) => trim((string) $name))
+            ->all();
+    }
+
+    private function inventoryStoreCodes(int $countryId, string $countryCode): array
+    {
+        $domicilioCode = trim((string) config("inventory.domicilio_store_by_country.{$countryCode}", ''));
+        $query = DB::table('stj_tiendas')->where('tie_pais', $countryId);
+
+        if (Schema::hasColumn('stj_tiendas', 'tie_productos')) {
+            $query->where(function ($scope) use ($domicilioCode) {
+                $scope->where('tie_productos', 1);
+                if ($domicilioCode !== '') {
+                    $scope->orWhere('tie_codigo', $domicilioCode);
+                }
+            });
+        }
+
+        return $query->pluck('tie_codigo')
+            ->map(fn ($code) => trim((string) $code))
+            ->when($domicilioCode !== '', fn ($codes) => $codes->push($domicilioCode))
+            ->filter()
+            ->unique()
+            ->values()
             ->all();
     }
 

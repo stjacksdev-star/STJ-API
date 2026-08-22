@@ -27,6 +27,34 @@ class MobileProductController extends Controller
         ]);
     }
 
+    public function show(Request $request, int $product)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'codigoTienda' => ['required', 'string', 'max:30'],
+        ]);
+
+        return response()->json($this->products->detail(
+            (int) $data['countryId'],
+            $product,
+            (string) $data['codigoTienda'],
+        ));
+    }
+
+    public function sizes(Request $request, string $sku)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'codigoTienda' => ['required', 'string', 'max:30'],
+        ]);
+
+        return response()->json($this->products->sizes(
+            (int) $data['countryId'],
+            $sku,
+            (string) $data['codigoTienda'],
+        ));
+    }
+
     public function filter(Request $request)
     {
         $data = $request->validate([

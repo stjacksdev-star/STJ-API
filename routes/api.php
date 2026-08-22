@@ -72,6 +72,12 @@ Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/products', [MobileProductController::class, 'index'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/products/{sku}/availability', [MobileProductController::class, 'sizes'])
+    ->where('sku', '[A-Za-z0-9._-]+')
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/products/{product}', [MobileProductController::class, 'show'])
+    ->whereNumber('product')
+    ->middleware('throttle:120,1');
 Route::post('/mobile/v1/catalog/products/filter', [MobileProductController::class, 'filter'])
     ->middleware('throttle:120,1');
 Route::post('/mobile/v1/catalog/products/jack-co/filter', [MobileProductController::class, 'filterJackCo'])

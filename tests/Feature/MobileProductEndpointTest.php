@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -151,6 +152,85 @@ class MobileProductEndpointTest extends TestCase
             ->assertJsonPath('records.0.sku', 'SKU-3')
             ->assertJsonPath('records.1.sku', 'SKU-1')
             ->assertJsonPath('records.1.availableSizes', ['4']);
+    }
+
+    public function test_it_returns_the_direct_legacy_product_detail_contract(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100?countryId=1&codigoTienda=019')
+            ->assertOk()
+            ->assertExactJson([
+                'id' => 100,
+                'nombre' => 'Vestido Rojo',
+                'preciov2' => '20.00',
+                'descripcion' => 'Detalle<br/>-producto',
+                'Domicilio' => true,
+                'Tienda' => true,
+            ]);
+    }
+
+    public function test_product_detail_isolated_by_country_and_selected_store(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100?countryId=2&codigoTienda=019')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('product');
+
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+        $this->getJson('/api/mobile/v1/catalog/products/100?countryId=1&codigoTienda=019')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_product_detail_requires_country_and_store(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/100')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['countryId', 'codigoTienda']);
+    }
+
+    public function test_it_returns_selected_store_sizes_and_other_store_availability(): void
+    {
+        $this->mock(ProductDetailAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('forCountryAndSlug')
+                ->once()
+                ->with('sv', 'mobile-product-100', '019', 'product_detail')
+                ->andReturn([
+                    'activeStore' => ['code' => '019', 'name' => 'Ahuachapán'],
+                    'sizes' => [
+                        [
+                            'size' => '4', 'quantityInActiveStore' => 0, 'availableInActiveStore' => false,
+                            'alternativeStores' => [['code' => '57', 'name' => 'Domicilio', 'quantity' => 3]],
+                        ],
+                        [
+                            'size' => '6', 'quantityInActiveStore' => 2, 'availableInActiveStore' => true,
+                            'alternativeStores' => [['code' => '002', 'name' => 'Las Cascadas', 'quantity' => 7]],
+                        ],
+                        [
+                            'size' => '8', 'quantityInActiveStore' => 0, 'availableInActiveStore' => false,
+                            'alternativeStores' => [],
+                        ],
+                    ],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products/SKU-1/availability?countryId=1&codigoTienda=019')
+            ->assertOk()
+            ->assertExactJson([
+                'records' => [['talla' => '6']],
+                'records2' => [['talla' => '4'], ['talla' => '6'], ['talla' => '8']],
+                'disp' => '<div class="tabs"><div class="tab"><div class="content"><table class="tbDisp" style="width:90%;margin:1em auto 2em;font-size:0.9em;"><thead><tr><td>Tienda</td><td>4</td><td>6</td><td>8</td></tr></thead><tbody><tr style="background-color:yellow;"><td>Ahuachapán</td><td>0</td><td>2</td><td>0</td></tr><tr><td>Domicilio</td><td>3</td><td>0</td><td>0</td></tr><tr><td>Las Cascadas</td><td>0</td><td>4+</td><td>0</td></tr></tbody></table></div></div></div>',
+            ]);
+    }
+
+    public function test_product_availability_validates_sku_country_and_store(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/UNKNOWN/availability?countryId=1&codigoTienda=019')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('sku');
+
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+        $this->getJson('/api/mobile/v1/catalog/products/SKU-1/availability?countryId=1&codigoTienda=019')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('codigoTienda');
     }
 
     public function test_category_products_validate_the_selected_store_and_required_parameters(): void
