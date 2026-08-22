@@ -31,4 +31,30 @@ class MobileCategoryController extends Controller
             'records' => $this->categories->search((int) $data['countryId']),
         ]);
     }
+
+    public function subcategories(Request $request, int $category, string $type)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json([
+            'records' => $this->categories->subcategories(
+                (int) $data['countryId'],
+                $category,
+                $type
+            ),
+        ]);
+    }
+
+    public function show(Request $request, int $category)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+        ]);
+
+        return response()->json(
+            $this->categories->find((int) $data['countryId'], $category)
+        );
+    }
 }

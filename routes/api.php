@@ -60,6 +60,13 @@ Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'i
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/categories/search', [MobileCategoryController::class, 'search'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/categories/{category}/subcategories/{type}', [MobileCategoryController::class, 'subcategories'])
+    ->whereNumber('category')
+    ->where('type', '[A-Za-z0-9_-]+')
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/categories/{category}', [MobileCategoryController::class, 'show'])
+    ->whereNumber('category')
+    ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);

@@ -73,6 +73,92 @@ class MobileCategoryService
         })->values()->all();
     }
 
+    public function subcategories(int $countryId, int $categoryId, string $type): array
+    {
+        $this->assertCountryExists($countryId);
+
+        $category = DB::table('stj_categorias')
+            ->where('cat_id', $categoryId)
+            ->first(['cat_id', 'cat_si_sub_otras', 'cat_sub_otras']);
+
+        if (! $category) {
+            throw ValidationException::withMessages([
+                'category' => 'Categoria no encontrada.',
+            ]);
+        }
+
+        // The legacy endpoint requires this URL segment but does not use it.
+        unset($type);
+
+        $usesOtherSubcategories = (bool) $category->cat_si_sub_otras;
+        $query = DB::table('stj_sub_categorias as subcategory')
+            ->join('stj_categorias as category', 'category.cat_id', '=', 'subcategory.sca_categoria');
+
+        if ($usesOtherSubcategories) {
+            $subcategoryIds = collect(explode(',', (string) $category->cat_sub_otras))
+                ->map(static fn (string $id): int => (int) trim($id))
+                ->filter(static fn (int $id): bool => $id > 0)
+                ->unique()
+                ->values()
+                ->all();
+            $query->whereIn('subcategory.sca_id', $subcategoryIds);
+        } else {
+            $query->where('subcategory.sca_categoria', $categoryId);
+        }
+
+        $imageUrl = (string) config('mobile.legacy_product_image_url');
+
+        return $query
+            ->orderBy('subcategory.sca_nombre')
+            ->get([
+                'category.cat_id',
+                'category.cat_nombre',
+                'category.cat_tallas',
+                'subcategory.sca_id',
+                'subcategory.sca_nombre',
+                'subcategory.sca_logo',
+            ])
+            ->map(static function (object $subcategory) use ($usesOtherSubcategories, $imageUrl): array {
+                $categoryName = (string) $subcategory->cat_nombre;
+                $subcategoryName = (string) $subcategory->sca_nombre;
+
+                return [
+                    'categoria' => $subcategory->cat_id,
+                    'id' => $subcategory->sca_id,
+                    'nombre' => $usesOtherSubcategories
+                        ? $categoryName.'<br/>'.$subcategoryName
+                        : $subcategoryName,
+                    'titulo' => '<div style="width:100%;font-family:\'WesBold\';color:rgb(0,122,201);text-align:center;font-size:18px;padding:10px;">'.$categoryName.' &#8226; '.$subcategoryName.'</div>',
+                    'foto' => $imageUrl.'/'.ltrim((string) $subcategory->sca_logo, '/').'?'.$subcategoryName,
+                    'tallas' => $subcategory->cat_tallas,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    public function find(int $countryId, int $categoryId): array
+    {
+        $this->assertCountryExists($countryId);
+
+        $category = DB::table('stj_categorias')
+            ->where('cat_id', $categoryId)
+            ->first(['cat_id', 'cat_nombre']);
+
+        if (! $category) {
+            throw ValidationException::withMessages([
+                'category' => 'Categoria no encontrada.',
+            ]);
+        }
+
+        return [
+            'id' => $category->cat_id,
+            'nombre' => $category->cat_nombre,
+            'foto' => (string) config('mobile.legacy_category_asset_url').'/ocho/'.$category->cat_id.'.jpg',
+            'tipo' => 1,
+        ];
+    }
+
     private function assertCountryExists(int $countryId): void
     {
         if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {

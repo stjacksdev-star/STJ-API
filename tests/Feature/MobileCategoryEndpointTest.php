@@ -25,32 +25,41 @@ class MobileCategoryEndpointTest extends TestCase
             $table->bigInteger('cat_id')->primary();
             $table->boolean('cat_habilitado_app');
             $table->integer('cat_orden_app');
+            $table->string('cat_nombre');
             $table->string('cat_nombre_app')->nullable();
             $table->string('cat_logo_app')->nullable();
             $table->string('cat_tallas')->nullable();
+            $table->boolean('cat_si_sub_otras')->default(false);
+            $table->string('cat_sub_otras')->nullable();
         });
 
         Schema::create('stj_sub_categorias', function (Blueprint $table) {
             $table->bigInteger('sca_id')->primary();
             $table->bigInteger('sca_categoria');
             $table->string('sca_nombre');
+            $table->string('sca_logo')->nullable();
         });
 
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
         DB::table('stj_categorias')->insert([
-            ['cat_id' => 2, 'cat_habilitado_app' => 1, 'cat_orden_app' => 2, 'cat_nombre_app' => 'Niña', 'cat_logo_app' => 'nina.png', 'cat_tallas' => '2-12'],
-            ['cat_id' => 1, 'cat_habilitado_app' => 1, 'cat_orden_app' => 1, 'cat_nombre_app' => 'Niño', 'cat_logo_app' => 'nino.png', 'cat_tallas' => '2-14'],
-            ['cat_id' => 10, 'cat_habilitado_app' => 1, 'cat_orden_app' => 3, 'cat_nombre_app' => 'Excluida búsqueda', 'cat_logo_app' => 'diez.png', 'cat_tallas' => null],
-            ['cat_id' => 11, 'cat_habilitado_app' => 1, 'cat_orden_app' => 4, 'cat_nombre_app' => 'Categoría once', 'cat_logo_app' => 'once.png', 'cat_tallas' => null],
-            ['cat_id' => 4, 'cat_habilitado_app' => 0, 'cat_orden_app' => 5, 'cat_nombre_app' => 'Inactiva', 'cat_logo_app' => 'inactiva.png', 'cat_tallas' => null],
+            ['cat_id' => 2, 'cat_habilitado_app' => 1, 'cat_orden_app' => 2, 'cat_nombre' => 'Niña', 'cat_nombre_app' => 'Niña', 'cat_logo_app' => 'nina.png', 'cat_tallas' => '2-12', 'cat_si_sub_otras' => 1, 'cat_sub_otras' => '10,40'],
+            ['cat_id' => 1, 'cat_habilitado_app' => 1, 'cat_orden_app' => 1, 'cat_nombre' => 'Niño', 'cat_nombre_app' => 'Niño', 'cat_logo_app' => 'nino.png', 'cat_tallas' => '2-14', 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 3, 'cat_habilitado_app' => 0, 'cat_orden_app' => 6, 'cat_nombre' => 'Bebé', 'cat_nombre_app' => 'Bebé', 'cat_logo_app' => 'bebe.png', 'cat_tallas' => '0-24M', 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 10, 'cat_habilitado_app' => 1, 'cat_orden_app' => 3, 'cat_nombre' => 'Diez', 'cat_nombre_app' => 'Excluida búsqueda', 'cat_logo_app' => 'diez.png', 'cat_tallas' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 11, 'cat_habilitado_app' => 1, 'cat_orden_app' => 4, 'cat_nombre' => 'Once', 'cat_nombre_app' => 'Categoría once', 'cat_logo_app' => 'once.png', 'cat_tallas' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 4, 'cat_habilitado_app' => 0, 'cat_orden_app' => 5, 'cat_nombre' => 'Inactiva', 'cat_nombre_app' => 'Inactiva', 'cat_logo_app' => 'inactiva.png', 'cat_tallas' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
         ]);
         DB::table('stj_sub_categorias')->insert([
-            ['sca_id' => 20, 'sca_categoria' => 1, 'sca_nombre' => 'Zapatos'],
-            ['sca_id' => 10, 'sca_categoria' => 1, 'sca_nombre' => 'Camisas'],
-            ['sca_id' => 30, 'sca_categoria' => 2, 'sca_nombre' => 'Vestidos'],
+            ['sca_id' => 20, 'sca_categoria' => 1, 'sca_nombre' => 'Zapatos', 'sca_logo' => 'zapatos.jpg'],
+            ['sca_id' => 10, 'sca_categoria' => 1, 'sca_nombre' => 'Camisas', 'sca_logo' => 'camisas.jpg'],
+            ['sca_id' => 30, 'sca_categoria' => 2, 'sca_nombre' => 'Vestidos', 'sca_logo' => 'vestidos.jpg'],
+            ['sca_id' => 40, 'sca_categoria' => 3, 'sca_nombre' => 'Bodies', 'sca_logo' => 'bodies.jpg'],
         ]);
 
-        config(['mobile.legacy_category_asset_url' => 'https://assets.example/categories']);
+        config([
+            'mobile.legacy_category_asset_url' => 'https://assets.example/categories',
+            'mobile.legacy_product_image_url' => 'https://assets.example/p400',
+        ]);
     }
 
     public function test_it_returns_the_legacy_category_contract_in_app_order(): void
@@ -111,5 +120,62 @@ class MobileCategoryEndpointTest extends TestCase
             ->assertJsonPath('records.2.id', 11);
 
         $this->assertNotContains(10, collect($response->json('records'))->pluck('id')->all());
+    }
+
+    public function test_it_returns_direct_subcategories_and_keeps_the_unused_type_segment(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/categories/1/subcategories/8?countryId=1')
+            ->assertOk()
+            ->assertJsonCount(2, 'records')
+            ->assertJsonPath('records.0.categoria', 1)
+            ->assertJsonPath('records.0.id', 10)
+            ->assertJsonPath('records.0.nombre', 'Camisas')
+            ->assertJsonPath('records.0.foto', 'https://assets.example/p400/camisas.jpg?Camisas')
+            ->assertJsonPath('records.0.tallas', '2-14');
+    }
+
+    public function test_it_returns_configured_subcategories_from_other_categories(): void
+    {
+        $response = $this->getJson('/api/mobile/v1/catalog/categories/2/subcategories/88?countryId=1');
+
+        $response->assertOk()
+            ->assertJsonCount(2, 'records')
+            ->assertJsonPath('records.0.categoria', 3)
+            ->assertJsonPath('records.0.nombre', 'Bebé<br/>Bodies')
+            ->assertJsonPath('records.0.tallas', '0-24M')
+            ->assertJsonPath('records.1.categoria', 1)
+            ->assertJsonPath('records.1.nombre', 'Niño<br/>Camisas');
+    }
+
+    public function test_subcategories_require_a_supported_category_and_country(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/categories/999/subcategories/8?countryId=1')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('category');
+        $this->getJson('/api/mobile/v1/catalog/categories/1/subcategories/8?countryId=99')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('countryId');
+    }
+
+    public function test_it_returns_the_legacy_single_category_contract(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/categories/1?countryId=1')
+            ->assertOk()
+            ->assertExactJson([
+                'id' => 1,
+                'nombre' => 'Niño',
+                'foto' => 'https://assets.example/categories/ocho/1.jpg',
+                'tipo' => 1,
+            ]);
+    }
+
+    public function test_single_category_requires_a_supported_category_and_country(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/categories/999?countryId=1')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('category');
+        $this->getJson('/api/mobile/v1/catalog/categories/1?countryId=99')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('countryId');
     }
 }
