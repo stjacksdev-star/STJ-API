@@ -1,9 +1,12 @@
 <?php
 
-$origins = array_values(array_filter(array_map(
+$origins = array_values(array_unique(array_filter(array_map(
     static fn (string $origin) => trim($origin),
-    explode(',', (string) env('CORS_ALLOWED_ORIGINS', 'http://localhost')),
-)));
+    array_merge(
+        explode(',', (string) env('CORS_ALLOWED_ORIGINS', 'http://localhost')),
+        explode(',', (string) env('CORS_MOBILE_ALLOWED_ORIGINS', 'capacitor://localhost,http://localhost,https://localhost')),
+    ),
+))));
 
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
