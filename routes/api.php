@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreRe
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
 use App\Http\Controllers\Api\Mobile\MobileCategoryController;
+use App\Http\Controllers\Api\Mobile\MobileProductController;
 use App\Http\Controllers\Api\Mobile\MobileStoreController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\PowerTranzController;
@@ -68,6 +69,8 @@ Route::get('/mobile/v1/catalog/categories/{category}', [MobileCategoryController
     ->whereNumber('category')
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
+    ->middleware('throttle:120,1');
+Route::post('/mobile/v1/catalog/products/filter', [MobileProductController::class, 'filter'])
     ->middleware('throttle:120,1');
 Route::post('/storefront/account/login', [StorefrontAccountController::class, 'login']);
 Route::post('/storefront/account/forgot-password/{country}', [StorefrontAccountController::class, 'forgotPassword'])

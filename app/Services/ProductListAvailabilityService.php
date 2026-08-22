@@ -13,8 +13,7 @@ class ProductListAvailabilityService
         private readonly InventorySourceResolver $resolver,
         private readonly ExternalInventoryProvider $externalProvider,
         private readonly LocalInventoryProvider $localProvider,
-    ) {
-    }
+    ) {}
 
     public function summarize(string $countryCode, array $products, ?string $storeCode = null): array
     {
@@ -23,6 +22,7 @@ class ProductListAvailabilityService
         if (! $country || $products === []) {
             return [
                 'availabilityBySku' => [],
+                'availabilityRows' => [],
                 'activeStoreCode' => null,
                 'usedSource' => null,
             ];
@@ -41,6 +41,7 @@ class ProductListAvailabilityService
         if ($activeStoreCode === '' || $productCodes === []) {
             return [
                 'availabilityBySku' => [],
+                'availabilityRows' => [],
                 'activeStoreCode' => $activeStoreCode ?: null,
                 'usedSource' => null,
             ];
@@ -78,6 +79,16 @@ class ProductListAvailabilityService
 
         return [
             'availabilityBySku' => $availabilityBySku,
+            'availabilityRows' => collect($result['rows'])
+                ->filter(fn (array $row) => (int) ($row['existencia'] ?? 0) > 0)
+                ->map(fn (array $row) => [
+                    'estilo' => trim((string) ($row['estilo'] ?? '')),
+                    'talla' => trim((string) ($row['talla'] ?? '')),
+                    'existencia' => (int) ($row['existencia'] ?? 0),
+                ])
+                ->filter(fn (array $row) => $row['estilo'] !== '' && $row['talla'] !== '')
+                ->values()
+                ->all(),
             'activeStoreCode' => $activeStoreCode,
             'usedSource' => $result['used_source'] ?? null,
         ];
