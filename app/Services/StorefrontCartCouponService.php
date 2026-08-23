@@ -112,10 +112,10 @@ class StorefrontCartCouponService
     }
 
     /** @return array<string, mixed> */
-    public function revalidateForIdentity(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $email = ''): array
+    public function revalidateForIdentity(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $email = '', float $shipping = 0): array
     {
-        return DB::transaction(function () use ($countryCode, $visitor, $customer, $email) {
-            return $this->revalidate($this->cart($countryCode, $visitor, $customer), $email);
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $email, $shipping) {
+            return $this->revalidate($this->cart($countryCode, $visitor, $customer), $email, $shipping);
         });
     }
 

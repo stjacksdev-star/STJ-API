@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontCartService;
+use App\Services\StorefrontCartCouponService;
 use App\Services\StorefrontShippingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class MobileCartController extends Controller
 {
     public function __construct(
         private StorefrontCartService $carts,
+        private StorefrontCartCouponService $coupons,
         private StorefrontShippingService $shipping,
     ) {}
 
@@ -126,6 +128,24 @@ class MobileCartController extends Controller
             isset($data['municipioId']) ? (int) $data['municipioId'] : null,
             $subtotal,
         );
+        $couponResolution = $this->coupons->revalidateForIdentity(
+            strtolower((string) $country->pai_codigo),
+            $visitor,
+            $customer,
+            (string) $customer->usu_correo,
+            (float) $quote['shipping_amount'],
+        );
+        $shippingDiscount = min(
+            (float) $quote['shipping_amount'],
+            (float) data_get($couponResolution, 'totals.shippingDiscount', 0),
+        );
+        if ($shippingDiscount > 0) {
+            $quote['shipping_amount'] = number_format(max(0, (float) $quote['shipping_amount'] - $shippingDiscount), 2, '.', '');
+            $quote['display_amount'] = (float) $quote['shipping_amount'] === 0.0 ? 'GRATIS' : $quote['display_amount'];
+            $quote['source'] = 'COUPON';
+            $quote['message'] = 'Tu cupón aplica para envío gratis.';
+            $quote['coupon_discount'] = number_format($shippingDiscount, 2, '.', '');
+        }
 
         return response()->json([
             'resultado' => true,
@@ -138,6 +158,57 @@ class MobileCartController extends Controller
             'ENVIO_VALOR_TXT' => $quote['display_amount'],
             'TiendaDomicilio' => data_get($cart, 'cart.fulfillment.storeCode'),
         ]);
+    }
+
+    public function coupons(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $applications = $this->coupons->revalidateForIdentity(
+            strtolower((string) $country->pai_codigo), $visitor, $customer, (string) $customer->usu_correo,
+        );
+
+        return response()->json($this->couponPayload(
+            $country,
+            $customer,
+            data_get($applications, 'applications', []),
+            $applications,
+        ));
+    }
+
+    public function storeCoupon(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $data = $request->validate(['code' => ['required', 'string', 'max:100']]);
+        $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $resolution = $this->coupons->add(strtolower((string) $country->pai_codigo), $visitor, $customer, [
+            'operation_uuid' => (string) Str::uuid(),
+            'code' => $data['code'],
+            'email' => (string) $customer->usu_correo,
+        ]);
+        $applications = data_get($resolution, 'applications', []);
+        $application = collect($applications)->first(fn ($item) => strtoupper((string) ($item['code'] ?? '')) === strtoupper(trim($data['code'])));
+        $valid = ($application['status'] ?? null) === 'APLICADO';
+        $payload = $this->couponPayload($country, $customer, $applications, $resolution);
+
+        return response()->json($payload + [
+            'valido' => $valid,
+            'mensaje' => $valid ? 'Cupón aplicado.' : (string) ($application['reason'] ?? 'El cupón no aplica al carrito actual.'),
+        ]);
+    }
+
+    public function destroyCoupon(Request $request, int $application): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $resolution = $this->coupons->remove(strtolower((string) $country->pai_codigo), $application, $visitor, $customer, [
+            'operation_uuid' => (string) Str::uuid(),
+            'email' => (string) $customer->usu_correo,
+        ]);
+
+        return response()->json($this->couponPayload(
+            $country, $customer, data_get($resolution, 'applications', []), $resolution,
+        ) + ['mensaje' => 'Cupón eliminado.']);
     }
 
     private function cartInCurrentStore(Request $request, object $country, StorefrontVisitor $visitor, StorefrontCustomer $customer): array
@@ -230,6 +301,52 @@ class MobileCartController extends Controller
             'monto_tipo_desc' => number_format((float) data_get($result, 'cart.totals.total', 0), 2, '.', ''),
             'seleccionados' => $selectedUnits, 'cartVersion' => data_get($result, 'cart.version'),
             'ENVIO_GRATIS' => false, 'ENVIO_VALOR' => 0, 'ENVIO_VALOR_TXT' => '',
+        ];
+    }
+
+    private function couponPayload(object $country, StorefrontCustomer $customer, array $applications, array $resolution): array
+    {
+        $available = $this->coupons->available(strtolower((string) $country->pai_codigo), $customer);
+        $byCoupon = collect($available)->keyBy('id');
+        $applied = collect($applications)->map(function (array $application) use ($byCoupon) {
+            $coupon = $byCoupon->get((int) ($application['couponId'] ?? 0), []);
+
+            return $this->legacyCoupon($coupon) + [
+                'id' => $application['id'],
+                'pcu_id' => $application['id'],
+                'cup_id' => $application['couponId'],
+                'cup_codigo' => $application['code'],
+                'status' => $application['status'],
+                'reason' => $application['reason'],
+                'productDiscount' => $application['productDiscount'],
+                'shippingDiscount' => $application['shippingDiscount'],
+            ];
+        })->values()->all();
+
+        return [
+            'resultado' => true,
+            'cupones' => $applied,
+            'disponibles' => collect($available)->map(fn (array $coupon) => $this->legacyCoupon($coupon))->values()->all(),
+            'totals' => $resolution['totals'] ?? ['couponDiscount' => '0.00', 'shippingDiscount' => '0.00'],
+        ];
+    }
+
+    private function legacyCoupon(array $coupon): array
+    {
+        return [
+            ...$coupon,
+            'cup_id' => $coupon['id'] ?? null,
+            'cup_codigo' => $coupon['code'] ?? null,
+            'che_nombre' => $coupon['commercialName'] ?? $coupon['name'] ?? null,
+            'che_tipo' => $coupon['type'] ?? null,
+            'cup_descuento' => $coupon['discount'] ?? 0,
+            'che_descuento' => $coupon['discount'] ?? 0,
+            'cup_monto' => $coupon['amount'] ?? 0,
+            'che_monto' => $coupon['amount'] ?? 0,
+            'che_checkout' => $coupon['checkout'] ?? null,
+            'che_solo_primera_compra' => ($coupon['firstPurchaseOnly'] ?? false) ? 'SI' : 'NO',
+            'che_final' => $coupon['endsAt'] ?? null,
+            'che_aplica_promo' => $coupon['promotionRule'] ?? null,
         ];
     }
 }
