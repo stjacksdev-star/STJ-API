@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiCo
 use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
+use App\Http\Controllers\Api\Mobile\MobileAddressController;
 use App\Http\Controllers\Api\Mobile\MobileAuthController;
 use App\Http\Controllers\Api\Mobile\MobileCategoryController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
@@ -67,6 +68,10 @@ Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
 Route::middleware('auth:sanctum')->prefix('mobile/v1/account')->group(function () {
     Route::get('/', [MobileAuthController::class, 'account']);
     Route::put('/', [MobileAuthController::class, 'updateAccount'])->middleware('throttle:30,1');
+    Route::get('/addresses', [MobileAddressController::class, 'index']);
+    Route::get('/addresses/primary', [MobileAddressController::class, 'primary']);
+    Route::post('/addresses', [MobileAddressController::class, 'store'])->middleware('throttle:30,1');
+    Route::put('/addresses/{address}/primary', [MobileAddressController::class, 'makePrimary'])->whereNumber('address');
 });
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');
