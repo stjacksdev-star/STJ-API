@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontCartService;
+use App\Services\StorefrontShippingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +17,10 @@ use Illuminate\Validation\ValidationException;
 
 class MobileCartController extends Controller
 {
-    public function __construct(private StorefrontCartService $carts) {}
+    public function __construct(
+        private StorefrontCartService $carts,
+        private StorefrontShippingService $shipping,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -99,6 +103,43 @@ class MobileCartController extends Controller
         return response()->json($this->legacy($result, true));
     }
 
+    public function quoteShipping(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $data = $request->validate(['municipioId' => ['nullable', 'integer', 'min:1']]);
+        $cart = $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $type = (string) data_get($cart, 'cart.type', 'DOMICILIO');
+        if ($type === 'DOMICILIO') {
+            $validCity = isset($data['municipioId']) && DB::table('stj_world_cities as city')
+                ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
+                ->where('city.id', (int) $data['municipioId'])
+                ->where('state.country_id', $country->pai_id_world)
+                ->exists();
+            if (! $validCity) {
+                throw ValidationException::withMessages(['municipioId' => 'El municipio no pertenece al pais seleccionado.']);
+            }
+        }
+        $subtotal = number_format((float) data_get($cart, 'cart.totals.total', 0), 2, '.', '');
+        $quote = $this->shipping->quote(
+            $country,
+            $type,
+            isset($data['municipioId']) ? (int) $data['municipioId'] : null,
+            $subtotal,
+        );
+
+        return response()->json([
+            'resultado' => true,
+            'mensaje' => (string) $quote['message'],
+            'cotizacion' => $quote,
+            'valorenvio' => $quote['shipping_amount'],
+            'montominimoenvio' => $quote['minimum_free_shipping'],
+            'ENVIO_GRATIS' => (float) $quote['shipping_amount'] === 0.0,
+            'ENVIO_VALOR' => $quote['shipping_amount'],
+            'ENVIO_VALOR_TXT' => $quote['display_amount'],
+            'TiendaDomicilio' => data_get($cart, 'cart.fulfillment.storeCode'),
+        ]);
+    }
+
     private function cartInCurrentStore(Request $request, object $country, StorefrontVisitor $visitor, StorefrontCustomer $customer): array
     {
         $result = $this->carts->get(strtolower($country->pai_codigo), $visitor, $customer);
@@ -128,7 +169,7 @@ class MobileCartController extends Controller
             'countryId' => ['required', 'integer', 'min:1'],
             'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID', 'WEB'])],
         ]);
-        $country = DB::table('stj_paises')->where('pai_id', $data['countryId'])->first(['pai_id', 'pai_codigo']);
+        $country = DB::table('stj_paises')->where('pai_id', $data['countryId'])->first(['pai_id', 'pai_id_world', 'pai_codigo']);
         if (! $country) {
             throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
         }

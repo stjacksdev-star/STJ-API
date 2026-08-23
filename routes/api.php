@@ -79,6 +79,7 @@ Route::middleware(['auth:sanctum', 'throttle:120,1'])->prefix('mobile/v1/cart')-
     Route::post('/items', [MobileCartController::class, 'store']);
     Route::patch('/items/{item}', [MobileCartController::class, 'update'])->whereNumber('item');
     Route::put('/selection', [MobileCartController::class, 'select']);
+    Route::post('/shipping-quote', [MobileCartController::class, 'quoteShipping']);
 });
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');
