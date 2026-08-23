@@ -43,8 +43,19 @@ class MobileAuthEndpointTest extends TestCase
             $table->string('usu_estado')->nullable();
             $table->string('usu_ciudad')->nullable();
             $table->string('usu_direccion')->nullable();
+            $table->string('usu_telefono_w_pais')->nullable();
             $table->string('usu_telefono_w')->nullable();
             $table->string('usu_foto_perfil')->nullable();
+        });
+        Schema::create('stj_world_countries', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('phonecode');
+        });
+        Schema::create('stj_world_states', function (Blueprint $table) {
+            $table->id();
+            $table->bigInteger('country_id');
+            $table->string('name');
         });
         Schema::create('stj_usuarios_dispositivos', function (Blueprint $table) {
             $table->id('dis_id');
@@ -56,6 +67,11 @@ class MobileAuthEndpointTest extends TestCase
         });
 
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
+        DB::table('stj_world_countries')->insert(['id' => 1, 'name' => 'El Salvador', 'phonecode' => '503']);
+        DB::table('stj_world_states')->insert([
+            ['id' => 10, 'country_id' => 1, 'name' => 'San Salvador'],
+            ['id' => 20, 'country_id' => 2, 'name' => 'Guatemala'],
+        ]);
         DB::table('stj_usuarios')->insert([
             'usu_id' => 77,
             'usu_usuario' => 'cliente@example.com',
@@ -161,5 +177,75 @@ class MobileAuthEndpointTest extends TestCase
             ->getJson('/api/mobile/v1/auth/session')
             ->assertForbidden()
             ->assertJsonPath('resultado', 'false');
+    }
+
+    public function test_it_reads_and_updates_only_the_authenticated_mobile_account(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-ios-account', ['mobile:account'], now()->addDays(30));
+
+        $this->withToken($token->plainTextToken)->getJson('/api/mobile/v1/account')
+            ->assertOk()
+            ->assertJsonPath('resultado', 'true')
+            ->assertJsonPath('idUser', 77)
+            ->assertJsonPath('nombres', 'Ana');
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
+            'form1' => [
+                'idUser' => 999,
+                'nombres' => 'Ana Maria',
+                'apellidos' => 'Lopez Perez',
+                'email' => 'nuevo@example.com',
+                'tipoIdentificacion' => 'DUI',
+                'identificacion' => '01234567-8',
+                'pais' => 'El Salvador',
+                'departamento' => 10,
+                'estado' => 'Texto manipulado',
+                'ciudad' => 'San Salvador',
+                'direccion' => 'Colonia Escalon',
+                'telefono' => '70001111',
+                'whatsapp' => '70002222',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('resultado', 'true')
+            ->assertJsonPath('idUser', 77)
+            ->assertJsonPath('correo', 'nuevo@example.com')
+            ->assertJsonPath('departamento', 'San Salvador');
+
+        $this->assertDatabaseHas('stj_usuarios', [
+            'usu_id' => 77,
+            'usu_usuario' => 'nuevo@example.com',
+            'usu_correo' => 'nuevo@example.com',
+            'usu_nombre' => 'Ana Maria',
+            'usu_departamento_id' => 10,
+            'usu_estado' => 'San Salvador',
+            'usu_telefono_pais' => '+503',
+        ]);
+    }
+
+    public function test_account_update_rejects_duplicate_email_and_cross_country_department(): void
+    {
+        DB::table('stj_usuarios')->insert([
+            'usu_id' => 88,
+            'usu_usuario' => 'ocupado@example.com',
+            'usu_correo' => 'ocupado@example.com',
+            'usu_password' => Hash::make('OtraClave123'),
+            'usu_activo' => 1,
+        ]);
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-ios-validation', ['mobile:account'], now()->addDays(30));
+        $base = [
+            'nombres' => 'Ana', 'apellidos' => 'Lopez', 'tipoIdentificacion' => '', 'identificacion' => '',
+            'pais' => 'El Salvador', 'departamento' => '', 'estado' => '', 'ciudad' => '', 'direccion' => '',
+            'telefono' => '70000000', 'whatsapp' => '',
+        ];
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
+            'form1' => $base + ['email' => 'ocupado@example.com'],
+        ])->assertOk()->assertJsonPath('resultado', 'false');
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
+            'form1' => array_merge($base, ['email' => 'cliente@example.com', 'departamento' => 20]),
+        ])->assertUnprocessable()->assertJsonValidationErrors('form1.departamento');
     }
 }

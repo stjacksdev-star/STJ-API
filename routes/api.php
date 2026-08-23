@@ -64,6 +64,10 @@ Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
     Route::get('/session', [MobileAuthController::class, 'session']);
     Route::post('/logout', [MobileAuthController::class, 'logout']);
 });
+Route::middleware('auth:sanctum')->prefix('mobile/v1/account')->group(function () {
+    Route::get('/', [MobileAuthController::class, 'account']);
+    Route::put('/', [MobileAuthController::class, 'updateAccount'])->middleware('throttle:30,1');
+});
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/categories/search', [MobileCategoryController::class, 'search'])

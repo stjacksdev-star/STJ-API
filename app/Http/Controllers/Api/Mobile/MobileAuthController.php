@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class MobileAuthController extends Controller
 {
@@ -83,6 +84,96 @@ class MobileAuthController extends Controller
         $customer->currentAccessToken()?->delete();
 
         return response()->json(['resultado' => 'true', 'mensaje' => 'Sesion cerrada.']);
+    }
+
+    public function account(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        return response()->json($this->legacyProfile($customer) + ['resultado' => 'true']);
+    }
+
+    public function updateAccount(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        $data = $request->validate([
+            'form1.idUser' => ['nullable'],
+            'form1.nombres' => ['required', 'string', 'min:2', 'max:40', "regex:/^[\\pL\\s'.-]+$/u"],
+            'form1.apellidos' => ['required', 'string', 'min:2', 'max:40', "regex:/^[\\pL\\s'.-]+$/u"],
+            'form1.email' => ['required', 'email', 'max:150'],
+            'form1.tipoIdentificacion' => ['nullable', 'string', 'max:50'],
+            'form1.identificacion' => ['nullable', 'string', 'max:50'],
+            'form1.pais' => ['required', 'string', 'max:100'],
+            'form1.departamento' => ['nullable'],
+            'form1.estado' => ['nullable', 'string', 'max:100'],
+            'form1.ciudad' => ['nullable', 'string', 'max:100'],
+            'form1.direccion' => ['nullable', 'string', 'max:500'],
+            'form1.telefono' => ['required', 'string', 'max:30', 'regex:/^[+ 0-9-]+$/'],
+            'form1.whatsapp' => ['nullable', 'string', 'max:30', 'regex:/^[+ 0-9-]*$/'],
+        ])['form1'];
+
+        $email = strtolower(trim((string) $data['email']));
+        $duplicate = StorefrontCustomer::query()
+            ->whereKeyNot($customer->getKey())
+            ->where(function ($query) use ($email) {
+                $query->whereRaw('LOWER(usu_usuario) = ?', [$email])
+                    ->orWhereRaw('LOWER(usu_correo) = ?', [$email]);
+            })->exists();
+        if ($duplicate) {
+            return response()->json([
+                'resultado' => 'false',
+                'mensaje' => 'El correo '.$email.' ya se encuentra registrado.',
+            ]);
+        }
+
+        $country = DB::table('stj_world_countries')
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower(trim((string) $data['pais']), 'UTF-8')])
+            ->first(['id', 'name', 'phonecode']);
+        if (! $country) {
+            throw ValidationException::withMessages(['form1.pais' => 'El pais seleccionado no es valido.']);
+        }
+
+        $departmentId = trim((string) ($data['departamento'] ?? ''));
+        $department = $departmentId !== ''
+            ? DB::table('stj_world_states')->where('id', $departmentId)->where('country_id', $country->id)->first(['id', 'name'])
+            : null;
+        if ($departmentId !== '' && ! $department) {
+            throw ValidationException::withMessages(['form1.departamento' => 'El departamento no pertenece al pais seleccionado.']);
+        }
+
+        $stateName = $department?->name ?: trim((string) ($data['estado'] ?? ''));
+        $city = trim((string) ($data['ciudad'] ?? ''));
+        $phoneCode = '+'.ltrim((string) $country->phonecode, '+');
+
+        $customer->forceFill([
+            'usu_usuario' => $email,
+            'usu_correo' => $email,
+            'usu_nombre' => trim((string) $data['nombres']),
+            'usu_apellido' => trim((string) $data['apellidos']),
+            'usu_tipo_identificacion' => trim((string) ($data['tipoIdentificacion'] ?? '')),
+            'usu_identificacion' => trim((string) ($data['identificacion'] ?? '')),
+            'usu_pais' => $country->name,
+            'usu_departamento_id' => $department?->id,
+            'usu_departamento_txt' => $stateName,
+            'usu_estado' => $stateName,
+            'usu_municipio_id' => null,
+            'usu_municipio_txt' => $city,
+            'usu_ciudad' => $city,
+            'usu_direccion' => trim((string) ($data['direccion'] ?? '')),
+            'usu_telefono_pais' => $phoneCode,
+            'usu_telefono' => trim((string) $data['telefono']),
+            'usu_telefono_w_pais' => trim((string) ($data['whatsapp'] ?? '')) !== '' ? $phoneCode : '',
+            'usu_telefono_w' => trim((string) ($data['whatsapp'] ?? '')),
+        ])->save();
+
+        return response()->json($this->legacyProfile($customer->refresh()) + ['resultado' => 'true']);
     }
 
     private function mobileCustomer(Request $request): ?StorefrontCustomer
