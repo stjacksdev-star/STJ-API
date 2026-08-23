@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiCo
 use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
+use App\Http\Controllers\Api\Mobile\MobileAuthController;
 use App\Http\Controllers\Api\Mobile\MobileCategoryController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
 use App\Http\Controllers\Api\Mobile\MobileStoreController;
@@ -57,6 +58,8 @@ use App\Http\Controllers\Api\WebPushClickController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
+    ->middleware('throttle:10,1');
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/categories/search', [MobileCategoryController::class, 'search'])
