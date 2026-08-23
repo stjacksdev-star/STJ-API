@@ -364,6 +364,57 @@ class MobileProductEndpointTest extends TestCase
             ->assertUnprocessable()->assertJsonValidationErrors('product');
     }
 
+    public function test_it_sets_and_removes_a_favorite_in_both_tables(): void
+    {
+        $url = '/api/mobile/v1/catalog/favorites?countryId=1&plataforma=IOS';
+
+        $this->postJson($url, [
+            'idUser' => 77,
+            'producto' => 100,
+            'estado' => 'ACTIVO',
+        ])->assertOk()->assertExactJson([
+            'resultado' => true,
+            'mensaje' => 'Favorito actualizado.',
+            'estado' => 'ACTIVO',
+            'favorito' => true,
+        ]);
+
+        $this->assertDatabaseHas('stj_favoritos', [
+            'fav_pais' => 1, 'fav_usuario' => 77, 'fav_producto' => 100, 'fav_origen' => 'IOS',
+        ]);
+        $this->assertDatabaseHas('stj_hearts', [
+            'hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100, 'hea_estado' => 'ACTIVO',
+        ]);
+
+        $this->postJson($url, [
+            'idUser' => 77,
+            'producto' => 100,
+            'estado' => 'INACTIVO',
+        ])->assertOk()->assertJsonPath('favorito', false)->assertJsonPath('estado', 'INACTIVO');
+
+        $this->assertDatabaseMissing('stj_favoritos', [
+            'fav_pais' => 1, 'fav_usuario' => 77, 'fav_producto' => 100,
+        ]);
+        $this->assertDatabaseHas('stj_hearts', [
+            'hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100, 'hea_estado' => 'INACTIVO',
+        ]);
+    }
+
+    public function test_set_favorite_requires_a_user_and_valid_product_country(): void
+    {
+        $this->postJson('/api/mobile/v1/catalog/favorites?countryId=1', [
+            'producto' => 100,
+        ])->assertOk()->assertExactJson([
+            'resultado' => false,
+            'mensaje' => 'Debes iniciar sesion.',
+        ]);
+
+        $this->postJson('/api/mobile/v1/catalog/favorites?countryId=2', [
+            'idUser' => 77,
+            'producto' => 100,
+        ])->assertUnprocessable()->assertJsonValidationErrors('producto');
+    }
+
     public function test_category_products_validate_the_selected_store_and_required_parameters(): void
     {
         $this->getJson('/api/mobile/v1/catalog/products')

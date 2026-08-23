@@ -287,6 +287,92 @@ class MobileProductService
         ];
     }
 
+    public function setFavorite(
+        int $countryId,
+        int $productId,
+        int $userId,
+        string $state,
+        string $platform,
+        array $legacyData = [],
+    ): array {
+        if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $product = DB::table('stj_producto_pais as pp')
+            ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_id', $productId)
+            ->first(['p.pro_id', 'p.pro_categoria', 'p.pro_sub_categoria']);
+        if (! $product) {
+            throw ValidationException::withMessages(['producto' => 'Producto no encontrado para el pais seleccionado.']);
+        }
+
+        $origin = strtoupper(trim($platform));
+        if (! in_array($origin, ['IOS', 'ANDROID'], true)) {
+            $origin = 'MOBILE';
+        }
+
+        DB::transaction(function () use ($countryId, $productId, $userId, $state, $origin, $legacyData, $product): void {
+            if (Schema::hasTable('stj_favoritos')) {
+                $key = [
+                    'fav_pais' => $countryId,
+                    'fav_usuario' => $userId,
+                    'fav_producto' => $productId,
+                ];
+                if ($state === 'ACTIVO') {
+                    $favorite = DB::table('stj_favoritos')->where($key);
+                    if ($favorite->exists()) {
+                        $favorite->update(['fav_origen' => $origin, 'fav_updated_at' => now()]);
+                    } else {
+                        DB::table('stj_favoritos')->insert($key + [
+                            'fav_visitante' => null,
+                            'fav_origen' => $origin,
+                            'fav_created_at' => now(),
+                            'fav_updated_at' => now(),
+                        ]);
+                    }
+                } else {
+                    DB::table('stj_favoritos')->where($key)->delete();
+                }
+            }
+
+            if (Schema::hasTable('stj_hearts')) {
+                $key = [
+                    'hea_pais' => $countryId,
+                    'hea_usuario' => $userId,
+                    'hea_producto' => $productId,
+                ];
+                $values = ['hea_estado' => $state];
+                $optional = [
+                    'hea_categoria' => $legacyData['categoria'] ?? $product->pro_categoria,
+                    'hea_sub_categoria' => $legacyData['subCategoria'] ?? $product->pro_sub_categoria,
+                    'hea_id_sesion' => $legacyData['idSesion'] ?? null,
+                    'hea_sesion' => $legacyData['sesion'] ?? null,
+                ];
+                foreach ($optional as $column => $value) {
+                    if (Schema::hasColumn('stj_hearts', $column)) {
+                        $values[$column] = $value;
+                    }
+                }
+
+                if ($state === 'ACTIVO') {
+                    DB::table('stj_hearts')->updateOrInsert($key, $values);
+                } else {
+                    DB::table('stj_hearts')->where($key)->update(['hea_estado' => 'INACTIVO']);
+                }
+            }
+        });
+
+        return [
+            'resultado' => true,
+            'mensaje' => 'Favorito actualizado.',
+            'estado' => $state,
+            'favorito' => $state === 'ACTIVO',
+        ];
+    }
+
     private function availabilityTable(array $availability): string
     {
         $sizes = collect($availability['sizes'] ?? []);

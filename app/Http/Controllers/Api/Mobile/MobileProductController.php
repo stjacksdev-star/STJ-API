@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Models\StorefrontCustomer;
 use App\Services\Mobile\MobileProductService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 
 class MobileProductController extends Controller
 {
@@ -92,6 +95,41 @@ class MobileProductController extends Controller
             (int) $data['countryId'],
             $product,
             (int) $data['idUser'],
+        ));
+    }
+
+    public function setFavorite(Request $request)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'idUser' => ['nullable', 'integer', 'min:1'],
+            'producto' => ['required', 'integer', 'min:1'],
+            'estado' => ['nullable', 'string', Rule::in(['ACTIVO', 'INACTIVO', 'activo', 'inactivo'])],
+            'categoria' => ['nullable'],
+            'subCategoria' => ['nullable'],
+            'idSesion' => ['nullable'],
+            'sesion' => ['nullable'],
+        ]);
+
+        $authenticated = Auth::guard('sanctum')->user();
+        $userId = $authenticated instanceof StorefrontCustomer
+            ? (int) $authenticated->getKey()
+            : (int) ($data['idUser'] ?? 0);
+
+        if ($userId < 1) {
+            return response()->json([
+                'resultado' => false,
+                'mensaje' => 'Debes iniciar sesion.',
+            ]);
+        }
+
+        return response()->json($this->products->setFavorite(
+            (int) $data['countryId'],
+            (int) $data['producto'],
+            $userId,
+            strtoupper((string) ($data['estado'] ?? 'ACTIVO')),
+            (string) $request->query('plataforma', 'MOBILE'),
+            $data,
         ));
     }
 
