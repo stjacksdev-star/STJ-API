@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\StorefrontCustomer;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -125,5 +127,39 @@ class MobileAuthEndpointTest extends TestCase
             'password' => 'ClaveSegura123',
             'dispositivo' => 'WINDOWS',
         ])->assertUnprocessable()->assertJsonValidationErrors('dispositivo');
+    }
+
+    public function test_it_restores_the_profile_and_revokes_only_the_current_device_token(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $current = $customer->createToken('mobile-ios-current', ['mobile:account'], now()->addDays(30));
+        $other = $customer->createToken('mobile-android-other', ['mobile:account'], now()->addDays(30));
+
+        $headers = ['Authorization' => 'Bearer '.$current->plainTextToken];
+        $this->withHeaders($headers)->getJson('/api/mobile/v1/auth/session')
+            ->assertOk()
+            ->assertJsonPath('resultado', 'true')
+            ->assertJsonPath('idUser', 77)
+            ->assertJsonStructure(['expiresAt']);
+
+        $this->withHeaders($headers)->postJson('/api/mobile/v1/auth/logout')
+            ->assertOk()
+            ->assertExactJson(['resultado' => 'true', 'mensaje' => 'Sesion cerrada.']);
+
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $current->accessToken->getKey()]);
+        $this->assertDatabaseHas('personal_access_tokens', ['id' => $other->accessToken->getKey()]);
+        Auth::forgetGuards();
+        $this->withHeaders($headers)->getJson('/api/mobile/v1/auth/session')->assertUnauthorized();
+    }
+
+    public function test_mobile_session_rejects_a_non_mobile_customer_token(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $webToken = $customer->createToken('storefront-customer', ['storefront:account'], now()->addHours(3));
+
+        $this->withToken($webToken->plainTextToken)
+            ->getJson('/api/mobile/v1/auth/session')
+            ->assertForbidden()
+            ->assertJsonPath('resultado', 'false');
     }
 }

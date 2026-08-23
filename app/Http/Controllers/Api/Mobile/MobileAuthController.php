@@ -60,6 +60,38 @@ class MobileAuthController extends Controller
         ]);
     }
 
+    public function session(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        return response()->json($this->legacyProfile($customer) + [
+            'resultado' => 'true',
+            'expiresAt' => $customer->currentAccessToken()?->expires_at?->toISOString(),
+        ]);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        $customer->currentAccessToken()?->delete();
+
+        return response()->json(['resultado' => 'true', 'mensaje' => 'Sesion cerrada.']);
+    }
+
+    private function mobileCustomer(Request $request): ?StorefrontCustomer
+    {
+        $user = $request->user();
+
+        return $user instanceof StorefrontCustomer && $user->tokenCan('mobile:account') ? $user : null;
+    }
+
     private function savePushToken(StorefrontCustomer $customer, array $data, string $platform): void
     {
         $pushToken = trim((string) ($data['token'] ?? ''));

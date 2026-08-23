@@ -60,6 +60,10 @@ use Illuminate\Support\Facades\Route;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
     ->middleware('throttle:10,1');
+Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
+    Route::get('/session', [MobileAuthController::class, 'session']);
+    Route::post('/logout', [MobileAuthController::class, 'logout']);
+});
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/categories/search', [MobileCategoryController::class, 'search'])
