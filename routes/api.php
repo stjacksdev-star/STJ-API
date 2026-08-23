@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardU
 use App\Http\Controllers\Api\Mobile\MobileAddressController;
 use App\Http\Controllers\Api\Mobile\MobileAuthController;
 use App\Http\Controllers\Api\Mobile\MobileCategoryController;
+use App\Http\Controllers\Api\Mobile\MobileCartController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
 use App\Http\Controllers\Api\Mobile\MobileStoreController;
 use App\Http\Controllers\Api\PedidoController;
@@ -72,6 +73,12 @@ Route::middleware('auth:sanctum')->prefix('mobile/v1/account')->group(function (
     Route::get('/addresses/primary', [MobileAddressController::class, 'primary']);
     Route::post('/addresses', [MobileAddressController::class, 'store'])->middleware('throttle:30,1');
     Route::put('/addresses/{address}/primary', [MobileAddressController::class, 'makePrimary'])->whereNumber('address');
+});
+Route::middleware(['auth:sanctum', 'throttle:120,1'])->prefix('mobile/v1/cart')->group(function () {
+    Route::get('/', [MobileCartController::class, 'show']);
+    Route::post('/items', [MobileCartController::class, 'store']);
+    Route::patch('/items/{item}', [MobileCartController::class, 'update'])->whereNumber('item');
+    Route::put('/selection', [MobileCartController::class, 'select']);
 });
 Route::get('/mobile/v1/catalog/categories', [MobileCategoryController::class, 'index'])
     ->middleware('throttle:120,1');

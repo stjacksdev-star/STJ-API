@@ -1,0 +1,194 @@
+<?php
+
+namespace App\Http\Controllers\Api\Mobile;
+
+use App\Exceptions\CartOperationConflict;
+use App\Http\Controllers\Controller;
+use App\Models\StorefrontCustomer;
+use App\Models\StorefrontVisitor;
+use App\Services\StorefrontCartService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+
+class MobileCartController extends Controller
+{
+    public function __construct(private StorefrontCartService $carts) {}
+
+    public function show(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+
+        return response()->json($this->legacy(
+            $this->cartInCurrentStore($request, $country, $visitor, $customer),
+            $request->boolean('selected'),
+        ));
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $data = $request->validate([
+            'producto' => ['required', 'integer', 'min:1'],
+            'talla' => ['required', 'string', 'max:10'],
+            'cantidad' => ['required', 'integer', 'min:1', 'max:99'],
+            'idUser' => ['nullable'],
+            'idSesion' => ['nullable'],
+            'tipo' => ['nullable', 'string'],
+        ]);
+        $product = DB::table('stj_productos')->where('pro_id', $data['producto'])->first(['pro_id', 'pro_codigo']);
+        if (! $product) {
+            throw ValidationException::withMessages(['producto' => 'Producto no encontrado.']);
+        }
+
+        try {
+            $this->cartInCurrentStore($request, $country, $visitor, $customer);
+            $result = $this->carts->add(strtolower($country->pai_codigo), $visitor, $customer, [
+                'operation_uuid' => (string) Str::uuid(),
+                'product_id' => (int) $product->pro_id,
+                'sku' => (string) $product->pro_codigo,
+                'size' => trim((string) $data['talla']),
+                'quantity' => (int) $data['cantidad'],
+            ]);
+
+            return response()->json($this->legacy($result), 201);
+        } catch (CartOperationConflict $exception) {
+            return response()->json(['resultado' => false, 'mensaje' => $exception->getMessage()], 409);
+        }
+    }
+
+    public function update(Request $request, int $item): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $data = $request->validate([
+            'cantidad' => ['nullable', 'integer', 'min:1', 'max:99'],
+            'eliminar' => ['nullable', 'boolean'],
+            'idUser' => ['nullable'],
+            'idSesion' => ['nullable'],
+        ]);
+        $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $operation = ['operation_uuid' => (string) Str::uuid()];
+        $result = ($data['eliminar'] ?? false)
+            ? $this->carts->remove(strtolower($country->pai_codigo), $item, $visitor, $customer, $operation)
+            : $this->carts->update(strtolower($country->pai_codigo), $item, $visitor, $customer, $operation + ['quantity' => (int) ($data['cantidad'] ?? 1)]);
+
+        return response()->json($this->legacy($result));
+    }
+
+    public function select(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $data = $request->validate(['items' => ['present', 'array', 'max:100'], 'items.*' => ['integer', 'min:1']]);
+        $result = $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $selected = collect($data['items'])->map(fn ($id) => (int) $id)->unique();
+
+        foreach (data_get($result, 'cart.items', []) as $line) {
+            $shouldSelect = $selected->contains((int) $line['id']);
+            if ((bool) $line['selected'] === $shouldSelect) {
+                continue;
+            }
+            $result = $this->carts->update(strtolower($country->pai_codigo), (int) $line['id'], $visitor, $customer, [
+                'operation_uuid' => (string) Str::uuid(),
+                'selected' => $shouldSelect,
+            ]);
+        }
+
+        return response()->json($this->legacy($result, true));
+    }
+
+    private function cartInCurrentStore(Request $request, object $country, StorefrontVisitor $visitor, StorefrontCustomer $customer): array
+    {
+        $result = $this->carts->get(strtolower($country->pai_codigo), $visitor, $customer);
+        $type = strtoupper((string) $request->query('tipoServicio')) === 'TIENDA' ? 'TIENDA' : 'DOMICILIO';
+        $store = trim((string) $request->query('codigoTienda', ''));
+        $currentType = (string) data_get($result, 'cart.type');
+        $currentStore = (string) data_get($result, 'cart.fulfillment.storeCode');
+        if ($currentType === $type && ($store === '' || $currentStore === $store)) {
+            return $result;
+        }
+
+        return $this->carts->applyFulfillment(strtolower($country->pai_codigo), $visitor, $customer, [
+            'operation_uuid' => (string) Str::uuid(),
+            'fulfillment_type' => $type,
+            'store_code' => $store !== '' ? $store : null,
+            'confirm_affected' => true,
+        ]);
+    }
+
+    private function context(Request $request): array
+    {
+        $customer = $request->user();
+        if (! $customer instanceof StorefrontCustomer || ! $customer->tokenCan('mobile:account')) {
+            abort(403, 'Sesion mobile no valida.');
+        }
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID', 'WEB'])],
+        ]);
+        $country = DB::table('stj_paises')->where('pai_id', $data['countryId'])->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+        $tokenId = (string) ($customer->currentAccessToken()?->getKey() ?? 'customer');
+        $hex = substr(hash('sha256', "stj-mobile:{$customer->getKey()}:{$tokenId}"), 0, 32);
+        $uuid = substr($hex, 0, 8).'-'.substr($hex, 8, 4).'-'.substr($hex, 12, 4).'-'.substr($hex, 16, 4).'-'.substr($hex, 20);
+        $now = now();
+        $visitor = StorefrontVisitor::query()->firstOrCreate(['vis_uuid' => $uuid], [
+            'vis_origen' => 'MOBILE', 'vis_pais_id' => $country->pai_id,
+            'vis_primera_visita' => $now, 'vis_ultima_visita' => $now,
+            'vis_expira_en' => $now->copy()->addYear(), 'vis_creado_en' => $now, 'vis_actualizado_en' => $now,
+        ]);
+        $visitor->forceFill(['vis_pais_id' => $country->pai_id, 'vis_ultima_visita' => $now, 'vis_expira_en' => $now->copy()->addYear(), 'vis_actualizado_en' => $now])->save();
+
+        return [$customer, $country, $visitor];
+    }
+
+    private function legacy(array $result, bool $selectedOnly = false): array
+    {
+        $items = collect(data_get($result, 'cart.items', []));
+        if ($selectedOnly) {
+            $items = $items->where('selected', true);
+        }
+        $products = DB::table('stj_productos')->whereIn('pro_id', $items->pluck('productId'))->get([
+            'pro_id', 'pro_codigo', 'pro_nombre', 'pro_marca', 'pro_oc_marca', 'pro_thumbs', 'pro_categoria',
+        ])->keyBy('pro_id');
+        $cartType = (string) data_get($result, 'cart.type', 'DOMICILIO');
+        $rows = $items->map(function (array $item) use ($products, $cartType) {
+            $product = $products->get($item['productId']);
+            $regular = (float) $item['regularPrice'];
+            $final = (float) $item['finalPrice'];
+            $discount = $regular > 0 ? round((1 - ($final / $regular)) * 100, 4) : 0;
+
+            return [
+                'car_id' => $item['id'], 'car_tipo' => $cartType,
+                'car_cantidad' => $item['quantity'], 'car_talla' => $item['size'],
+                'car_descuento' => max(0, $discount),
+                'car_promocion' => data_get($item, 'promotion.name', data_get($item, 'promotion.title', '')),
+                'car_seleccionado' => $item['selected'] ? 'SI' : 'NO',
+                'pro_id' => $item['productId'], 'pro_codigo' => $item['sku'],
+                'pro_nombre' => $product->pro_nombre ?? $item['name'],
+                'pro_marca' => $product->pro_marca ?? $product->pro_oc_marca ?? '',
+                'pro_oc_marca' => $product->pro_oc_marca ?? $product->pro_marca ?? '',
+                'pro_thumbs' => $product->pro_thumbs ?? null, 'foto' => $item['imageUrl'],
+                'pro_categoria' => $product->pro_categoria ?? null, 'ppa_precio' => $regular,
+                'disponibilidad' => $item['unavailableReason'] ?? '',
+                'disponibilidadError' => $item['status'] === 'DISPONIBLE' ? 0 : 1,
+            ];
+        })->values()->all();
+        $allItems = collect(data_get($result, 'cart.items', []));
+        $units = $allItems->sum(fn ($item) => (int) $item['quantity']);
+        $selectedUnits = $allItems->where('selected', true)->sum(fn ($item) => (int) $item['quantity']);
+
+        return [
+            'resultado' => true, 'mensaje' => '', 'productos' => $rows,
+            'total' => $units, 'total_tipo' => $units,
+            'monto_tipo' => number_format((float) data_get($result, 'cart.totals.total', 0), 2, '.', ''),
+            'monto_tipo_desc' => number_format((float) data_get($result, 'cart.totals.total', 0), 2, '.', ''),
+            'seleccionados' => $selectedUnits, 'cartVersion' => data_get($result, 'cart.version'),
+            'ENVIO_GRATIS' => false, 'ENVIO_VALOR' => 0, 'ENVIO_VALOR_TXT' => '',
+        ];
+    }
+}
