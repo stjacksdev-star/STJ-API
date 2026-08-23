@@ -160,6 +160,23 @@ class MobileCartController extends Controller
         ]);
     }
 
+    public function validateCheckout(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        $result = $this->carts->validateForCheckout(
+            strtolower((string) $country->pai_codigo), $visitor, $customer, true,
+        );
+
+        return response()->json([
+            ...$this->legacy($result, true),
+            'resultado' => true,
+            'valido' => (bool) ($result['ok'] ?? false),
+            'mensaje' => (string) ($result['message'] ?? 'Carrito validado.'),
+            'validation' => $result['validation'] ?? [],
+        ]);
+    }
+
     public function coupons(Request $request): JsonResponse
     {
         [$customer, $country, $visitor] = $this->context($request);

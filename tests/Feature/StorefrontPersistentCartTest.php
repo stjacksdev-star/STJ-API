@@ -435,6 +435,31 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $itemId, 'cad_estado' => 'SIN_EXISTENCIA', 'cad_seleccionado' => 1]);
     }
 
+    public function test_mobile_checkout_validation_only_checks_selected_lines(): void
+    {
+        $first = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $second = $this->service->add('sv', $this->visitor, null, $this->item('M', 1));
+        $firstId = $first['cart']['items'][0]['id'];
+        $secondId = collect($second['cart']['items'])->firstWhere('size', 'M')['id'];
+        DB::table('stj_carrito_detalles')->where('cad_id', $firstId)->update(['cad_seleccionado' => 0]);
+        $this->checkout->shouldReceive('validate')->once()->withArgs(function ($country, $fulfillment, $items) use ($secondId) {
+            return $country === 'sv' && count($items) === 1 && (int) $items[0]['key'] === (int) $secondId;
+        })->andReturn([
+            'ok' => true,
+            'message' => 'Checkout validado correctamente.',
+            'lines' => [[
+                'key' => (string) $secondId, 'sku' => 'SKU10', 'name' => 'SKU10', 'size' => 'M',
+                'requestedQuantity' => 1, 'availableQuantity' => 2, 'ok' => true, 'message' => 'Stock suficiente.',
+            ]],
+        ]);
+
+        $validation = $this->service->validateForCheckout('sv', $this->visitor, null, true);
+
+        $this->assertTrue($validation['ok']);
+        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $firstId, 'cad_seleccionado' => 0]);
+        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $secondId, 'cad_seleccionado' => 1]);
+    }
+
     public function test_checkout_start_uses_the_same_central_promotion_resolution_as_the_cart(): void
     {
         $this->promotion(103, 'DESCUENTO-SKU');

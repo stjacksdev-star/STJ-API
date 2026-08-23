@@ -223,11 +223,18 @@ class StorefrontCartService
         });
     }
 
-    public function validateForCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
+    public function validateForCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, bool $selectedOnly = false): array
     {
-        return DB::transaction(function () use ($countryCode, $visitor, $customer) {
+        return DB::transaction(function () use ($countryCode, $visitor, $customer, $selectedOnly) {
             $cart = $this->resolveCart($countryCode, $visitor, $customer, true);
-            $lines = $cart->items()->lockForUpdate()->get();
+            $lineQuery = $cart->items();
+            if ($selectedOnly) {
+                $lineQuery->where('cad_seleccionado', true);
+            }
+            $lines = $lineQuery->lockForUpdate()->get();
+            if ($lines->isEmpty()) {
+                throw ValidationException::withMessages(['cart' => 'Selecciona al menos un producto para continuar.']);
+            }
             $validation = $this->checkoutValidation->validate($countryCode, [
                 'method' => $cart->car_tipo === 'TIENDA' ? 'store_pickup' : 'home_delivery',
                 'storeCode' => (string) $cart->car_tienda_codigo_snapshot,
@@ -251,7 +258,11 @@ class StorefrontCartService
                     continue;
                 }
                 $old = $this->auditLine($line);
-                $line->forceFill(['cad_estado' => $status, 'cad_motivo_no_disponible' => $reason, 'cad_seleccionado' => true, 'cad_actualizado_en' => now()])->save();
+                $values = ['cad_estado' => $status, 'cad_motivo_no_disponible' => $reason, 'cad_actualizado_en' => now()];
+                if (! $selectedOnly) {
+                    $values['cad_seleccionado'] = true;
+                }
+                $line->forceFill($values)->save();
                 $this->audit($cart, $line, $visitor, $customer, 'CHECKOUT_SCOPE_VALIDATED', $old, $this->auditLine($line));
                 $changed = true;
             }
