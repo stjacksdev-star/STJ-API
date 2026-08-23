@@ -133,6 +133,37 @@ class MobileProductController extends Controller
         ));
     }
 
+    public function favorites(Request $request)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'codigoTienda' => ['required', 'string', 'max:30'],
+            'idUser' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $authenticated = Auth::guard('sanctum')->user();
+        $userId = $authenticated instanceof StorefrontCustomer
+            ? (int) $authenticated->getKey()
+            : (int) ($data['idUser'] ?? 0);
+
+        if ($userId < 1) {
+            return response()->json([
+                'resultado' => false,
+                'mensaje' => 'Debes iniciar sesion.',
+                'records' => [],
+            ]);
+        }
+
+        return response()->json([
+            'records' => $this->products->favorites(
+                (int) $data['countryId'],
+                $userId,
+                (string) $data['codigoTienda'],
+            ),
+            'resultado' => true,
+        ]);
+    }
+
     public function filter(Request $request)
     {
         $data = $request->validate([

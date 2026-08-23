@@ -415,6 +415,64 @@ class MobileProductEndpointTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('producto');
     }
 
+    public function test_it_lists_new_and_legacy_favorites_with_selected_store_availability(): void
+    {
+        DB::table('stj_favoritos')->insert([
+            'fav_pais' => 1,
+            'fav_visitante' => null,
+            'fav_usuario' => 77,
+            'fav_producto' => 100,
+            'fav_origen' => 'IOS',
+            'fav_created_at' => now(),
+            'fav_updated_at' => now(),
+        ]);
+        DB::table('stj_hearts')->insert([
+            ['hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100, 'hea_estado' => 'ACTIVO'],
+            ['hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 101, 'hea_estado' => 'ACTIVO'],
+            ['hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 102, 'hea_estado' => 'INACTIVO'],
+        ]);
+
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', \Mockery::on(fn (array $products) => collect($products)->pluck('pro_codigo')->all() === ['SKU-1', 'SKU-2']), '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'SKU-1' => ['hasStock' => true, 'availableSizes' => ['4'], 'totalQuantity' => 2],
+                        'SKU-2' => ['hasStock' => false, 'availableSizes' => [], 'totalQuantity' => 0],
+                    ],
+                    'availabilityRows' => [],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/favorites?countryId=1&codigoTienda=019&idUser=77')
+            ->assertOk()
+            ->assertJsonPath('resultado', true)
+            ->assertJsonCount(2, 'records')
+            ->assertJsonPath('records.0.id', 100)
+            ->assertJsonPath('records.0.favorito', true)
+            ->assertJsonPath('records.0.hasStock', true)
+            ->assertJsonPath('records.0.availableSizes.0', '4')
+            ->assertJsonPath('records.1.id', 101)
+            ->assertJsonPath('records.1.hasStock', false);
+    }
+
+    public function test_favorite_list_requires_identity_and_a_store_from_the_country(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/favorites?countryId=1&codigoTienda=019')
+            ->assertOk()
+            ->assertExactJson([
+                'resultado' => false,
+                'mensaje' => 'Debes iniciar sesion.',
+                'records' => [],
+            ]);
+
+        DB::table('stj_tiendas')->where('tie_pais', 1)->delete();
+        $this->getJson('/api/mobile/v1/catalog/favorites?countryId=1&codigoTienda=019&idUser=77')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('codigoTienda');
+    }
+
     public function test_category_products_validate_the_selected_store_and_required_parameters(): void
     {
         $this->getJson('/api/mobile/v1/catalog/products')

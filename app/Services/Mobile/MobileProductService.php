@@ -373,6 +373,56 @@ class MobileProductService
         ];
     }
 
+    public function favorites(int $countryId, int $userId, string $storeCode): array
+    {
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages(['codigoTienda' => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $productIds = collect();
+        if (Schema::hasTable('stj_favoritos')) {
+            $productIds = DB::table('stj_favoritos')
+                ->where('fav_pais', $countryId)
+                ->where('fav_usuario', $userId)
+                ->orderByDesc('fav_updated_at')
+                ->orderByDesc('fav_id')
+                ->pluck('fav_producto');
+        }
+        if (Schema::hasTable('stj_hearts')) {
+            $legacyIds = DB::table('stj_hearts')
+                ->where('hea_pais', $countryId)
+                ->where('hea_usuario', $userId)
+                ->where('hea_estado', 'ACTIVO')
+                ->orderByDesc('hea_id')
+                ->pluck('hea_producto');
+            $productIds = $productIds->concat($legacyIds);
+        }
+        $productIds = $productIds->map(fn ($id) => (int) $id)->filter()->unique()->values();
+        if ($productIds->isEmpty()) {
+            return [];
+        }
+
+        $productsById = $this->getProducts(
+            $this->productQuery($countryId)->whereIn('p.pro_id', $productIds->all())
+        )->keyBy(fn (object $product) => (int) $product->pro_id);
+        $products = $productIds->map(fn (int $id) => $productsById->get($id))->filter()->values();
+        $availability = $this->summarize($country, $products, $storeCode);
+        $bySku = $availability['availabilityBySku'] ?? [];
+
+        return $products->map(function (object $product) use ($bySku): array {
+            $item = $this->legacyProduct($product, $bySku);
+            $item['favorito'] = true;
+
+            return $item;
+        })->all();
+    }
+
     private function availabilityTable(array $availability): string
     {
         $sizes = collect($availability['sizes'] ?? []);
@@ -543,7 +593,7 @@ class MobileProductService
 
         return $query->get([
             'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca',
-            'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
+            'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_sub_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
             'pp.ppa_precio', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre',
             'pp.ppa_promo_logo', 'pp.ppa_tipo_descuento', 'pp.ppa_precio_tienda',
         ]);
@@ -667,6 +717,7 @@ class MobileProductService
             'precioCD' => number_format($discountedPrice, 2, '.', ''),
             'descripcion' => str_replace('-', '<br/>-', (string) $product->pro_descripcion),
             'categoria' => $product->pro_categoria,
+            'subCategoria' => $product->pro_sub_categoria,
             'subCategoriaTxt' => (string) $product->sca_nombre,
             'categoriaTxt' => (string) $product->cat_nombre,
             'foto' => config('mobile.legacy_product_image_url').'/'.$sku.'.jpg?'.(string) $product->pro_nombre,
@@ -676,7 +727,7 @@ class MobileProductService
             'ppa_promo_nombre' => (string) ($product->ppa_promo_nombre ?? ''),
             'pro_tallas_list' => $product->pro_tallas ? explode(',', (string) $product->pro_tallas) : [],
             'availableSizes' => $availabilityBySku[$sku]['availableSizes'] ?? [],
-            'hasStock' => true,
+            'hasStock' => (bool) ($availabilityBySku[$sku]['hasStock'] ?? false),
         ];
     }
 
