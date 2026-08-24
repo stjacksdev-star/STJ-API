@@ -110,7 +110,7 @@ class StorefrontOrderService
                 throw ValidationException::withMessages(['inventory' => $failures->isEmpty() ? $message : $message.' '.$failures->implode('; ').'.']);
             }
             $origin = ($payload['_origin'] ?? 'WEB') === 'APP' ? 'APP' : 'WEB';
-            $trustedPayload = ['country' => $countryCode, 'cartId' => (int) $cart->getKey(), 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType, 'origin' => $origin, 'cashChange' => $payload['_cash_change'] ?? null];
+            $trustedPayload = ['country' => $countryCode, 'cartId' => (int) $cart->getKey(), 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType, 'origin' => $origin, 'platform' => $origin === 'APP' ? ($payload['_platform'] ?? null) : null, 'appVersion' => $origin === 'APP' ? ($payload['_app_version'] ?? null) : null, 'cashChange' => $payload['_cash_change'] ?? null];
             $result = $this->create($trustedPayload);
             if (! ($result['ok'] ?? false)) {
                 throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
@@ -331,7 +331,8 @@ class StorefrontOrderService
                 'ped_a_fecha' => $now,
                 'ped_a_version' => 1,
                 'ped_credito_fiscal' => 'NO',
-                'ped_vapp' => null,
+                'ped_vapp' => $payload['appVersion'] ?? null,
+                'ped_plataforma' => $payload['platform'] ?? null,
                 'ped_suscrito_mailing' => 'NO',
             ]);
 

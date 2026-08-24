@@ -68,6 +68,9 @@ class StorefrontOrderFromCartTest extends TestCase
         $shipping->shouldReceive('quote')->times($allowed ? 1 : 0)->andReturn(['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => $type === 'DOMICILIO' ? ['id' => 11, 'name' => 'SPS', 'stateId' => 2, 'state' => 'Cortes', 'urbanId' => null] : null]);
         $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping);
         $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '9999', 'documentType' => 'DUI', 'document' => 'ID', 'countryId' => $countryId, 'stateId' => 2, 'cityId' => 11, 'address' => 'Residencia'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
+        if ($hasPromotion) {
+            $payload += ['_origin' => 'APP', '_platform' => 'IOS', '_app_version' => '2.2.34'];
+        }
         $destination = $type === 'TIENDA'
             ? ['city_id' => 0, 'state_id' => 0, 'address' => '', 'reference' => '']
             : ['city_id' => 11, 'state_id' => 2, 'address' => 'direccion', 'reference' => ''];
@@ -92,6 +95,7 @@ class StorefrontOrderFromCartTest extends TestCase
         $this->assertDatabaseHas('stj_carritos', ['car_id' => $cart->getKey(), 'car_estado' => 'CONVERTIDO', 'car_pedido_id' => $first['order']['pedidoId']]);
         $this->assertDatabaseHas('stj_pedidos_detalle', ['car_precio' => 25, 'car_cantidad' => 2]);
         if ($hasPromotion) {
+            $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_origen' => 'APP', 'ped_plataforma' => 'IOS', 'ped_vapp' => '2.2.34']);
             $this->assertSame('50.00', $first['order']['baseSubtotal']);
             $this->assertSame('10.00', $first['order']['discount']);
             $this->assertSame('40.00', $first['order']['total']);
@@ -252,7 +256,7 @@ class StorefrontOrderFromCartTest extends TestCase
             $t->bigInteger('ped_id', true);
             foreach (['ped_id_pais', 'ped_user', 'ped_a_version'] as $c) {
                 $t->bigInteger($c)->nullable();
-            } foreach (['ped_origen', 'ped_estatus', 'ped_estatus_productos', 'ped_checkout', 'ped_tienda', 'ped_login', 'ped_sesion', 'ped_nombres', 'ped_apellidos', 'ped_email', 'ped_tipo_identificacion', 'ped_identificacion', 'ped_rtu', 'ped_pais', 'ped_departamento', 'ped_municipio', 'ped_estado', 'ped_ciudad', 'ped_direccion', 'ped_telefono_pais', 'ped_telefono', 'ped_whatsapp_pais', 'ped_whatsapp', 'ped_devolucion_realizada', 'ped_rsp_servicio', 'ped_monto_devolucion', 'ped_correo_enviado', 'ped_a_usuario', 'ped_a_ip', 'ped_a_generales', 'ped_credito_fiscal', 'ped_vapp', 'ped_suscrito_mailing'] as $c) {
+            } foreach (['ped_origen', 'ped_plataforma', 'ped_estatus', 'ped_estatus_productos', 'ped_checkout', 'ped_tienda', 'ped_login', 'ped_sesion', 'ped_nombres', 'ped_apellidos', 'ped_email', 'ped_tipo_identificacion', 'ped_identificacion', 'ped_rtu', 'ped_pais', 'ped_departamento', 'ped_municipio', 'ped_estado', 'ped_ciudad', 'ped_direccion', 'ped_telefono_pais', 'ped_telefono', 'ped_whatsapp_pais', 'ped_whatsapp', 'ped_devolucion_realizada', 'ped_rsp_servicio', 'ped_monto_devolucion', 'ped_correo_enviado', 'ped_a_usuario', 'ped_a_ip', 'ped_a_generales', 'ped_credito_fiscal', 'ped_vapp', 'ped_suscrito_mailing'] as $c) {
                 $t->string($c)->nullable();
             } $t->dateTime('ped_fecha')->nullable();
             $t->dateTime('ped_a_fecha')->nullable();

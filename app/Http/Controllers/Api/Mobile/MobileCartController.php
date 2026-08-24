@@ -184,6 +184,7 @@ class MobileCartController extends Controller
         [$customer, $country, $visitor] = $this->context($request);
         $data = $request->validate([
             'operation_uuid' => ['required', 'uuid'],
+            'app_version' => ['required', 'string', 'max:30', 'regex:/^[A-Za-z0-9._+-]+$/'],
             'customer' => ['required', 'array'],
             'customer.firstName' => ['required', 'string', 'max:30'],
             'customer.lastName' => ['required', 'string', 'max:30'],
@@ -203,6 +204,10 @@ class MobileCartController extends Controller
             'cash_change' => ['required', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
+        $platform = strtoupper((string) $request->input('plataforma'));
+        if (! in_array($platform, ['IOS', 'ANDROID'], true)) {
+            throw ValidationException::withMessages(['plataforma' => 'La plataforma del pedido debe ser IOS o ANDROID.']);
+        }
         $previous = DB::table('stj_carrito_operaciones')
             ->where('cao_uuid', $data['operation_uuid'])
             ->where('cao_tipo', 'ORDER_CREATE')
@@ -243,6 +248,8 @@ class MobileCartController extends Controller
                 'pickup' => $data['pickup'] ?? ['samePerson' => true],
                 'payment_type' => 'EFECTIVO',
                 '_origin' => 'APP',
+                '_platform' => $platform,
+                '_app_version' => $data['app_version'],
                 '_cash_change' => $data['cash_change'],
                 'notes' => $data['notes'] ?? null,
             ]);
