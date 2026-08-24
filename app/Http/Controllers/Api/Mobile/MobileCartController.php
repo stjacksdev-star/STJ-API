@@ -242,7 +242,7 @@ class MobileCartController extends Controller
             throw ValidationException::withMessages(['payment_type' => 'Esta etapa mobile solo permite efectivo con retiro en tienda.']);
         }
 
-        $result = DB::transaction(function () use ($country, $visitor, $customer, $data, $location) {
+        $result = DB::transaction(function () use ($country, $visitor, $customer, $data, $location, $platform) {
             $this->carts->startCheckout(strtolower((string) $country->pai_codigo), $visitor, $customer, [
                 'operation_uuid' => (string) Str::uuid(),
                 'email' => (string) data_get($data, 'customer.email'),

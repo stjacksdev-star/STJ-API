@@ -157,7 +157,12 @@ class StorefrontCartService
                     // El umbral de envio se evalua sobre el subtotal comercial final:
                     // promociones y cupones ya descontados, sin incluir el envio.
                     $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($input, 'delivery.city_id'), number_format($subtotal, 2, '.', ''));
-                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, (string) ($input['email'] ?? ''), (float) $shipping['shipping_amount']);
+                    // Retiro en tienda siempre tiene envio cero. Revalidar otra vez
+                    // las mismas filas de cupon dentro de esta transaccion no cambia
+                    // el resultado y puede provocar SQLSTATE 1020 bajo concurrencia.
+                    if ($cart->car_tipo !== 'TIENDA') {
+                        $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, (string) ($input['email'] ?? ''), (float) $shipping['shipping_amount']);
+                    }
                     $shippingAmount = (float) data_get($couponResolution, 'totals.shipping', $shipping['shipping_amount']);
                     $shipping['shipping_amount'] = number_format($shippingAmount, 2, '.', '');
                     $shipping['display_amount'] = $shippingAmount == 0.0 ? 'GRATIS' : $shipping['display_amount'];
