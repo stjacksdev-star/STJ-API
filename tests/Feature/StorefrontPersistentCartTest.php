@@ -460,6 +460,28 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $secondId, 'cad_seleccionado' => 1]);
     }
 
+    public function test_mobile_checkout_splits_unselected_lines_into_an_active_cart(): void
+    {
+        $first = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $second = $this->service->add('sv', $this->visitor, null, $this->item('M', 2));
+        $firstId = $first['cart']['items'][0]['id'];
+        $secondId = collect($second['cart']['items'])->firstWhere('size', 'M')['id'];
+        DB::table('stj_carrito_detalles')->where('cad_id', $firstId)->update(['cad_seleccionado' => 0]);
+
+        $result = $this->service->startCheckout('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(),
+            '_selected_only' => true,
+        ]);
+
+        $checkoutCartId = $result['cart']['id'];
+        $activeCartId = DB::table('stj_carritos')->where('car_estado', 'ACTIVO')->value('car_id');
+        $this->assertNotSame((int) $checkoutCartId, (int) $activeCartId);
+        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $secondId, 'cad_carrito_id' => $checkoutCartId]);
+        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_id' => $firstId, 'cad_carrito_id' => $activeCartId]);
+        $this->assertCount(1, $result['checkout']['lines']);
+        $this->assertSame((int) $secondId, (int) $result['checkout']['lines'][0]['itemId']);
+    }
+
     public function test_checkout_start_uses_the_same_central_promotion_resolution_as_the_cart(): void
     {
         $this->promotion(103, 'DESCUENTO-SKU');

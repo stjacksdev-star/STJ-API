@@ -45,9 +45,12 @@ class StorefrontCartService
                 if (! $cart->car_tienda_id || ! $cart->car_tienda_codigo_snapshot || ! $cart->car_inventory_source) {
                     throw ValidationException::withMessages(['fulfillment' => 'El carrito no tiene un contexto de entrega completo.']);
                 }
-                // Every line still present in the cart is part of the purchase intent.
-                // Do not silently omit a line previously marked unavailable/unselected:
-                // checkout must revalidate it with the required `checkout` inventory scope.
+                $previousState = (string) $cart->car_estado;
+                if (($input['_selected_only'] ?? false) === true) {
+                    $this->splitUnselectedLines($cart);
+                }
+                // Web purchases include the complete cart. Mobile purchases split
+                // unselected lines into a new active cart before authorization.
                 $lines = $cart->items()->lockForUpdate()->get();
                 if ($lines->isEmpty()) {
                     throw ValidationException::withMessages(['cart' => 'El carrito no tiene lineas para validar.']);
@@ -162,7 +165,6 @@ class StorefrontCartService
                 $total = round($subtotal + $shippingAmount, 2);
                 $taxes = strtoupper((string) $country->pai_codigo) === 'HN' ? round($total * 15 / 115, 2) : 0.0;
                 $destinationHash = $this->destinationHash($cart->car_tipo === 'TIENDA' ? [] : ($input['delivery'] ?? []));
-                $previousState = (string) $cart->car_estado;
                 $cart->forceFill(['car_estado' => 'CHECKOUT', 'car_checkout_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
                 $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito inicio checkout.');
                 $summary = ['service' => $cart->car_tipo, 'store' => $store, 'operationalStoreCode' => (string) $cart->car_tienda_codigo_snapshot, 'lines' => $authorized->all(), 'coupons' => $couponResolution['applications'] ?? [], 'baseSubtotal' => $baseSubtotal, 'discount' => $discount, 'discountPercentage' => $discountPercentage, 'subtotal' => $subtotal, 'shipping' => $shippingAmount, 'shippingDiscount' => (float) data_get($couponResolution, 'totals.shippingDiscount', 0), 'taxes' => $taxes, 'total' => $total, 'currency' => $cart->car_moneda, 'shipping_source' => $shipping['source'], 'shipping_quote' => $shipping, 'destinationHash' => $destinationHash, 'alerts' => [], 'cartVersion' => (int) $cart->car_version];
@@ -172,6 +174,43 @@ class StorefrontCartService
                 return ['ok' => true, 'message' => 'Checkout autorizado.', 'cart' => $this->payload($cart)['cart'], 'checkout' => $summary];
             });
         });
+    }
+
+    private function splitUnselectedLines(StorefrontCart $cart): void
+    {
+        $unselected = $cart->items()->where('cad_seleccionado', false)->lockForUpdate()->get();
+        if ($unselected->isEmpty()) {
+            return;
+        }
+        if (! $cart->items()->where('cad_seleccionado', true)->exists()) {
+            throw ValidationException::withMessages(['cart' => 'Selecciona al menos un producto para continuar.']);
+        }
+
+        // Release the active-cart identity before cloning the remainder. The whole
+        // operation is transactional, so any later validation error restores it.
+        $cart->forceFill([
+            'car_estado' => 'CHECKOUT',
+            'car_checkout_en' => now(),
+            'car_actualizado_en' => now(),
+        ])->save();
+
+        $remainder = $cart->replicate();
+        $remainder->forceFill([
+            'car_uuid' => (string) Str::uuid(),
+            'car_estado' => 'ACTIVO',
+            'car_pedido_id' => null,
+            'car_checkout_en' => null,
+            'car_convertido_en' => null,
+            'car_version' => 1,
+            'car_ultima_actividad_en' => now(),
+            'car_expira_en' => now()->addDays(30),
+            'car_creado_en' => now(),
+            'car_actualizado_en' => now(),
+        ])->save();
+
+        StorefrontCartItem::query()
+            ->whereIn('cad_id', $unselected->modelKeys())
+            ->update(['cad_carrito_id' => $remainder->getKey(), 'cad_actualizado_en' => now()]);
     }
 
     public function previewFulfillment(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array

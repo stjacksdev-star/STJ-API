@@ -9,6 +9,7 @@ use App\Models\StorefrontVisitor;
 use App\Services\StorefrontCartService;
 use App\Services\StorefrontCartCouponService;
 use App\Services\StorefrontShippingService;
+use App\Services\StorefrontOrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,7 @@ class MobileCartController extends Controller
         private StorefrontCartService $carts,
         private StorefrontCartCouponService $coupons,
         private StorefrontShippingService $shipping,
+        private StorefrontOrderService $orders,
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -175,6 +177,92 @@ class MobileCartController extends Controller
             'mensaje' => (string) ($result['message'] ?? 'Carrito validado.'),
             'validation' => $result['validation'] ?? [],
         ]);
+    }
+
+    public function order(Request $request): JsonResponse
+    {
+        [$customer, $country, $visitor] = $this->context($request);
+        $data = $request->validate([
+            'operation_uuid' => ['required', 'uuid'],
+            'customer' => ['required', 'array'],
+            'customer.firstName' => ['required', 'string', 'max:30'],
+            'customer.lastName' => ['required', 'string', 'max:30'],
+            'customer.email' => ['required', 'email', 'max:50'],
+            'customer.phone' => ['required', 'string', 'max:30'],
+            'customer.documentType' => ['required', 'string', 'max:50'],
+            'customer.document' => ['required', 'string', 'max:50'],
+            'customer.countryId' => ['nullable', 'integer'],
+            'customer.stateId' => ['required', 'integer', 'exists:stj_world_states,id'],
+            'customer.cityId' => ['required', 'integer', 'exists:stj_world_cities,id'],
+            'customer.address' => ['required', 'string', 'max:200'],
+            'pickup' => ['nullable', 'array'],
+            'pickup.samePerson' => ['nullable', 'boolean'],
+            'pickup.person' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
+            'pickup.phone' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
+            'pickup.identification' => ['nullable', 'string', 'max:50', 'not_regex:/[<>]/'],
+            'cash_change' => ['required', 'numeric', 'min:0'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+        $previous = DB::table('stj_carrito_operaciones')
+            ->where('cao_uuid', $data['operation_uuid'])
+            ->where('cao_tipo', 'ORDER_CREATE')
+            ->where('cao_usu_id', $customer->getKey())
+            ->first();
+        if ($previous) {
+            return response()->json($this->legacyOrderResponse(
+                json_decode((string) $previous->cao_respuesta, true),
+            ));
+        }
+        $validLocation = DB::table('stj_world_cities as city')
+            ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
+            ->where('city.id', (int) data_get($data, 'customer.cityId'))
+            ->where('state.id', (int) data_get($data, 'customer.stateId'))
+            ->where('state.country_id', (int) $country->pai_id_world)
+            ->exists();
+        if (! $validLocation) {
+            throw ValidationException::withMessages(['customer.cityId' => 'La ubicacion de facturacion no pertenece al pais seleccionado.']);
+        }
+        $cart = $this->cartInCurrentStore($request, $country, $visitor, $customer);
+        if (data_get($cart, 'cart.type') !== 'TIENDA') {
+            throw ValidationException::withMessages(['payment_type' => 'Esta etapa mobile solo permite efectivo con retiro en tienda.']);
+        }
+
+        $result = DB::transaction(function () use ($country, $visitor, $customer, $data) {
+            $this->carts->startCheckout(strtolower((string) $country->pai_codigo), $visitor, $customer, [
+                'operation_uuid' => (string) Str::uuid(),
+                'email' => (string) data_get($data, 'customer.email'),
+                '_selected_only' => true,
+            ]);
+
+            $trustedCustomer = $data['customer'];
+            $trustedCustomer['countryId'] = (int) $country->pai_id_world;
+
+            return $this->orders->createFromCart(strtolower((string) $country->pai_codigo), $visitor, $customer, [
+                'operation_uuid' => $data['operation_uuid'],
+                'customer' => $trustedCustomer,
+                'pickup' => $data['pickup'] ?? ['samePerson' => true],
+                'payment_type' => 'EFECTIVO',
+                '_origin' => 'APP',
+                '_cash_change' => $data['cash_change'],
+                'notes' => $data['notes'] ?? null,
+            ]);
+        });
+
+        return response()->json($this->legacyOrderResponse($result), 201);
+    }
+
+    private function legacyOrderResponse(array $result): array
+    {
+        return [
+            'resultado' => true,
+            'respuesta' => (string) ($result['message'] ?? 'Pedido creado.'),
+            'pedido' => data_get($result, 'order.pedidoId'),
+            'idPago' => data_get($result, 'order.pagoId'),
+            'ppa_ref' => data_get($result, 'order.paymentRef'),
+            'ppa_articulos' => data_get($result, 'order.articleCount'),
+            'ppa_monto' => data_get($result, 'order.total'),
+            'order' => $result['order'] ?? null,
+        ];
     }
 
     public function coupons(Request $request): JsonResponse

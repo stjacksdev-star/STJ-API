@@ -81,6 +81,7 @@ Route::middleware(['auth:sanctum', 'throttle:120,1'])->prefix('mobile/v1/cart')-
     Route::put('/selection', [MobileCartController::class, 'select']);
     Route::post('/shipping-quote', [MobileCartController::class, 'quoteShipping']);
     Route::post('/validate', [MobileCartController::class, 'validateCheckout']);
+    Route::post('/order', [MobileCartController::class, 'order'])->middleware('throttle:10,1');
     Route::get('/coupons', [MobileCartController::class, 'coupons']);
     Route::post('/coupons', [MobileCartController::class, 'storeCoupon']);
     Route::delete('/coupons/{application}', [MobileCartController::class, 'destroyCoupon'])->whereNumber('application');

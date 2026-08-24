@@ -109,7 +109,8 @@ class StorefrontOrderService
                 $message = (string) ($validation['message'] ?? 'El inventario cambio durante checkout.');
                 throw ValidationException::withMessages(['inventory' => $failures->isEmpty() ? $message : $message.' '.$failures->implode('; ').'.']);
             }
-            $trustedPayload = ['country' => $countryCode, 'cartId' => (int) $cart->getKey(), 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType];
+            $origin = ($payload['_origin'] ?? 'WEB') === 'APP' ? 'APP' : 'WEB';
+            $trustedPayload = ['country' => $countryCode, 'cartId' => (int) $cart->getKey(), 'guestCartId' => (string) $cart->car_uuid, 'customerId' => $customer?->getKey(), 'customer' => $payload['customer'], 'fulfillment' => ['method' => $method, 'storeCode' => $storeCode, 'storeName' => (string) $store->tie_nombre, ...($payload['delivery'] ?? [])], 'pickup' => $pickup, 'notes' => $payload['notes'] ?? null, 'items' => $trustedItems, 'paymentType' => $paymentType, 'origin' => $origin, 'cashChange' => $payload['_cash_change'] ?? null];
             $result = $this->create($trustedPayload);
             if (! ($result['ok'] ?? false)) {
                 throw ValidationException::withMessages(['order' => $result['message'] ?? 'No se pudo crear el pedido.']);
@@ -123,8 +124,8 @@ class StorefrontOrderService
             $cart->forceFill(['car_pedido_id' => $orderId, 'car_estado' => 'CONVERTIDO', 'car_convertido_en' => now(), 'car_version' => $cart->car_version + 1, 'car_actualizado_en' => now()])->save();
             $this->pushCancellation()->cancelAllPendingCartDeliveries((int) $cart->getKey(), 'El carrito fue convertido en pedido.');
             $this->pushMeasurements()->recordCartConverted((int) $cart->getKey(), $orderId);
-            DB::table('stj_carrito_auditoria')->insert(['cau_carrito_id' => $cart->getKey(), 'cau_visitante_id' => $visitor->getKey(), 'cau_usu_id' => $customer?->getKey(), 'cau_accion' => 'ORDER_CREATED', 'cau_origen' => 'WEB', 'cau_datos_anteriores' => json_encode(['state' => 'CHECKOUT']), 'cau_datos_nuevos' => json_encode(['state' => 'CONVERTIDO', 'orderId' => $orderId]), 'cau_ocurrido_en' => now()]);
-            CustomerEvent::query()->create(['cev_event_uuid' => $payload['operation_uuid'], 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_pedido_id' => $orderId, 'cev_tipo' => 'ORDER_CREATED', 'cev_valor' => $result['order']['total'], 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
+            DB::table('stj_carrito_auditoria')->insert(['cau_carrito_id' => $cart->getKey(), 'cau_visitante_id' => $visitor->getKey(), 'cau_usu_id' => $customer?->getKey(), 'cau_accion' => 'ORDER_CREATED', 'cau_origen' => $origin, 'cau_datos_anteriores' => json_encode(['state' => 'CHECKOUT']), 'cau_datos_nuevos' => json_encode(['state' => 'CONVERTIDO', 'orderId' => $orderId]), 'cau_ocurrido_en' => now()]);
+            CustomerEvent::query()->create(['cev_event_uuid' => $payload['operation_uuid'], 'cev_visitante_id' => $visitor->getKey(), 'cev_usu_id' => $customer?->getKey(), 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->getKey(), 'cev_pedido_id' => $orderId, 'cev_tipo' => 'ORDER_CREATED', 'cev_valor' => $result['order']['total'], 'cev_moneda' => $cart->car_moneda, 'cev_origen' => $origin, 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
             DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => $payload['operation_uuid'], 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_usu_id' => $customer?->getKey(), 'cao_tipo' => 'ORDER_CREATE', 'cao_payload_hash' => $hash, 'cao_respuesta' => json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION), 'cao_creado_en' => now()]);
             if ($customer && data_get($result, 'order.paymentStatus') === 'APROBADA') {
                 StorefrontRecommendationService::forgetPurchaseHistory((int) $customer->getKey(), (int) $cart->car_pais_id);
@@ -295,7 +296,7 @@ class StorefrontOrderService
 
             $pedidoId = DB::table('stj_pedidos')->insertGetId([
                 'ped_id_pais' => (int) $country->pai_id,
-                'ped_origen' => 'WEB',
+                'ped_origen' => $payload['origin'] ?? 'WEB',
                 'ped_fecha' => $now,
                 'ped_estatus' => $orderStatus,
                 'ped_estatus_productos' => 'COMPLETO',
@@ -392,7 +393,7 @@ class StorefrontOrderService
                 ]);
             }
 
-            $pagoId = DB::table('stj_pedidos_pago')->insertGetId([
+            $paymentRow = [
                 'ppa_tipo' => $paymentType,
                 'ppa_estado' => $paymentType === 'EFECTIVO' ? 'APROBADA' : 'PENDIENTE',
                 'ppa_ref' => $paymentRef,
@@ -410,7 +411,11 @@ class StorefrontOrderService
                 'ppa_a_ip' => request()->ip(),
                 'ppa_a_fecha' => $now,
                 'ppa_a_version' => 1,
-            ]);
+            ];
+            if (Schema::hasColumn('stj_pedidos_pago', 'ppa_cambio')) {
+                $paymentRow['ppa_cambio'] = $paymentType === 'EFECTIVO' ? $payload['cashChange'] : null;
+            }
+            $pagoId = DB::table('stj_pedidos_pago')->insertGetId($paymentRow);
 
             $detailRows = collect($items)->map(function (array $item) use ($country, $checkoutType, $payload, $paymentRef, $now) {
                 $effectivePercentage = $this->cents($item['baseTotal']) > 0
