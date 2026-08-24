@@ -16,6 +16,15 @@ return [
     'timezone' => env('PROMOTIONS_TIMEZONE', 'America/El_Salvador'),
 
     /*
+    | Lista separada por comas o punto y coma. Si queda vacía, el cron no
+    | envía notificaciones operativas del ciclo de vida de promociones.
+    */
+    'notification_recipients' => array_values(array_filter(array_map(
+        'trim',
+        preg_split('/[,;]+/', (string) env('PROMOTIONS_NOTIFICATION_EMAILS', '')) ?: [],
+    ))),
+
+    /*
     | TODO + TODAS is historical data and remains available for both checkout
     | modalities until the commercial migration defines an explicit scope.
     */

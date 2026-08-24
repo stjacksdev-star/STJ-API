@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\PromotionLifecycleService;
+use App\Services\PromotionLifecycleNotificationService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -15,7 +16,10 @@ class UpdatePromotions extends Command
 
     protected $description = 'Actualiza estados y horarios del ciclo de vida de promociones';
 
-    public function handle(PromotionLifecycleService $lifecycle): int
+    public function handle(
+        PromotionLifecycleService $lifecycle,
+        PromotionLifecycleNotificationService $notifications,
+    ): int
     {
         $authority = strtolower(trim((string) config('promotions.lifecycle_authority', 'legacy')));
 
@@ -37,6 +41,17 @@ class UpdatePromotions extends Command
 
         $this->renderSummary($summary);
         Log::info('Ciclo de vida de promociones procesado.', $summary);
+
+        if ($summary['writesEnabled']) {
+            $notificationSummary = $notifications->send($summary['transitions']);
+            $this->line(sprintf(
+                'Notificaciones: %d enviadas, %d omitidas, %d errores',
+                $notificationSummary['sent'],
+                $notificationSummary['skipped'],
+                count($notificationSummary['errors']),
+            ));
+            Log::info('Notificaciones del ciclo de promociones procesadas.', $notificationSummary);
+        }
 
         return $summary['errors'] === [] ? self::SUCCESS : self::FAILURE;
     }
