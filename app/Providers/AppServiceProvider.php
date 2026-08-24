@@ -3,6 +3,9 @@
 namespace App\Providers;
 
 use App\Models\User;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
 
@@ -21,6 +24,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('powertranz-start', function (Request $request) {
+            $visitor = (string) ($request->cookie('stj_visitor') ?: $request->ip());
+            $order = (string) $request->route('order', 'unknown');
+
+            return Limit::perMinute(15)
+                ->by("{$visitor}:{$order}")
+                ->response(fn (Request $request, array $headers) => response()->json([
+                    'ok' => false,
+                    'message' => 'Has realizado varios intentos de pago seguidos. Espera unos segundos e inténtalo nuevamente.',
+                ], 429, $headers));
+        });
+
         Sanctum::authenticateAccessTokensUsing(function ($accessToken, bool $isValid) {
             if ($isValid) {
                 return true;
