@@ -131,7 +131,7 @@ class StorefrontPersistentCartTest extends TestCase
         $retry = $this->service->add('sv', $this->visitor, null, $input);
         $this->assertSame($first, $retry);
         $this->assertDatabaseCount('stj_carrito_detalles', 1);
-        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_cantidad' => 1, 'cad_precio_unitario' => 100, 'cad_descuento_unitario' => 10, 'cad_precio_final_unitario' => 90]);
+        $this->assertDatabaseHas('stj_carrito_detalles', ['cad_cantidad' => 1, 'cad_precio_unitario' => 100, 'cad_descuento_unitario' => 0, 'cad_precio_final_unitario' => 100]);
         $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'ADD_TO_CART', 'cev_usu_id' => null, 'cev_producto_id' => 10]);
         $this->expectException(CartOperationConflict::class);
         $this->service->add('sv', $this->visitor, null, array_merge($input, ['quantity' => 2]));

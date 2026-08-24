@@ -16,9 +16,10 @@ class ProductDetailAvailabilityService
         private readonly ExternalInventoryProvider $externalProvider,
         private readonly LocalInventoryProvider $localProvider,
         private readonly StorefrontProductPricingService $pricing,
+        private readonly ?StorefrontPromotionResolver $promotionResolver = null,
     ) {}
 
-    public function forCountryAndSlug(string $countryCode, string $slug, ?string $storeCode = null, string $scope = 'product_detail'): ?array
+    public function forCountryAndSlug(string $countryCode, string $slug, ?string $storeCode = null, string $scope = 'product_detail', ?string $checkoutType = null): ?array
     {
         $country = $this->resolveCountry($countryCode);
         $productId = $this->extractProductId($slug);
@@ -67,7 +68,7 @@ class ProductDetailAvailabilityService
                     'fallbackTriggered' => false,
                 ],
                 'activeStore' => null,
-                'sizes' => $this->buildEmptySizes((string) $product->pro_tallas, (int) $country->pai_id, (int) $product->pro_id, (string) $product->pro_codigo),
+                'sizes' => $this->buildEmptySizes((string) $product->pro_tallas, (int) $country->pai_id, (int) $product->pro_id, (string) $product->pro_codigo, $checkoutType, null),
                 'message' => 'No hay configuracion de tiendas para este pais.',
             ];
         }
@@ -113,6 +114,7 @@ class ProductDetailAvailabilityService
                 (int) $country->pai_id,
                 (int) $product->pro_id,
                 (string) $product->pro_codigo,
+                $checkoutType,
             ),
             'message' => $providerResult['ok']
                 ? null
@@ -166,7 +168,7 @@ class ProductDetailAvailabilityService
         };
     }
 
-    private function buildSizes(string $declaredSizes, array $rows, string $activeStoreCode, string $countryCode, array $storeNames, int $countryId, int $productId, string $sku): array
+    private function buildSizes(string $declaredSizes, array $rows, string $activeStoreCode, string $countryCode, array $storeNames, int $countryId, int $productId, string $sku, ?string $checkoutType): array
     {
         $orderedSizes = collect(explode(',', $declaredSizes))
             ->map(fn ($size) => trim($size))
@@ -184,7 +186,7 @@ class ProductDetailAvailabilityService
             ->values();
 
         return $sizes
-            ->map(function (string $size) use ($rows, $activeStoreCode, $countryCode, $storeNames, $countryId, $productId, $sku) {
+            ->map(function (string $size) use ($rows, $activeStoreCode, $countryCode, $storeNames, $countryId, $productId, $sku, $checkoutType) {
                 $sizeRows = collect($rows)->filter(fn (array $row) => trim((string) $row['talla']) === $size);
                 $activeRow = $sizeRows->first(fn (array $row) => trim((string) $row['codTienda']) === $activeStoreCode);
                 $activeQuantity = max(0, (int) ($activeRow['existencia'] ?? 0));
@@ -206,14 +208,14 @@ class ProductDetailAvailabilityService
                     'availableElsewhere' => count($alternativeStores) > 0,
                     'alternativeStores' => $alternativeStores,
                     'totalQuantity' => (int) $sizeRows->sum(fn (array $row) => max(0, (int) $row['existencia'])),
-                    'pricing' => $this->pricing->resolve($countryId, $productId, $sku, $size, now()),
+                    'pricing' => $this->commercialPricing($countryId, $productId, $sku, $size, $checkoutType, $activeStoreCode),
                 ];
             })
             ->values()
             ->all();
     }
 
-    private function buildEmptySizes(string $declaredSizes, int $countryId, int $productId, string $sku): array
+    private function buildEmptySizes(string $declaredSizes, int $countryId, int $productId, string $sku, ?string $checkoutType, ?string $storeCode): array
     {
         return collect(explode(',', $declaredSizes))
             ->map(fn ($size) => trim($size))
@@ -226,9 +228,47 @@ class ProductDetailAvailabilityService
                 'availableElsewhere' => false,
                 'alternativeStores' => [],
                 'totalQuantity' => 0,
-                'pricing' => $this->pricing->resolve($countryId, $productId, $sku, $size, now()),
+                'pricing' => $this->commercialPricing($countryId, $productId, $sku, $size, $checkoutType, $storeCode),
             ])
             ->all();
+    }
+
+    private function commercialPricing(int $countryId, int $productId, string $sku, string $size, ?string $checkoutType, ?string $storeCode): array
+    {
+        $pricing = $this->pricing->resolve($countryId, $productId, $sku, $size, now());
+        if (! ($pricing['ok'] ?? false) || ! array_key_exists('precio_regular', $pricing)) {
+            return $pricing;
+        }
+
+        $resolver = $this->promotionResolver ?? app(StorefrontPromotionResolver::class);
+        $resolution = $resolver->resolve([
+            'countryId' => $countryId,
+            'checkoutType' => in_array(strtoupper(trim((string) $checkoutType)), ['T', 'TIENDA'], true) ? 'TIENDA' : 'DOMICILIO',
+            'storeCode' => $storeCode,
+            'at' => now(),
+            'includeUntriggered' => true,
+            'lines' => [[
+                'key' => $size,
+                'productId' => $productId,
+                'quantity' => 1,
+                'unitPrice' => $pricing['precio_regular'],
+            ]],
+        ]);
+        $line = $resolution['lines'][0] ?? null;
+        $promotion = $line['promotion'] ?? null;
+
+        if (! $line || ! $promotion) {
+            return $pricing;
+        }
+
+        return [
+            ...$pricing,
+            'descuento' => (string) ($line['discount'] ?? '0.00'),
+            'descuento_porcentaje' => number_format((float) ($promotion['discountPercentage'] ?? 0), 2, '.', ''),
+            'precio_final' => (string) ($line['finalTotal'] ?? $pricing['precio_regular']),
+            'promocion' => $promotion['displayLabel'] ?? $promotion['commercialName'] ?? $promotion['name'] ?? null,
+            'promotion' => $promotion,
+        ];
     }
 
     private function normalizeProduct(object $product): array

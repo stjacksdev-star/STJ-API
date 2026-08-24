@@ -6,12 +6,14 @@ use App\Support\StorefrontImageUrl;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class StorefrontBestSellerRankingService
 {
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailability,
+        private readonly ?StorefrontPromotionResolver $promotionResolver = null,
     ) {}
 
     public function paginate(string $country, int $days, int $perPage = 15): LengthAwarePaginator
@@ -30,11 +32,13 @@ class StorefrontBestSellerRankingService
             $paginator->getCollection()->all(),
         );
         $availabilityBySku = $availability['availabilityBySku'] ?? [];
+        $commercialByProduct = $this->commercialByProduct($paginator->getCollection(), (int) $countryRow->pai_id);
 
         $paginator->through(fn (object $row) => $this->normalize(
             $row,
             $currency,
             $availabilityBySku[trim((string) $row->pro_codigo)] ?? null,
+            $commercialByProduct->get((int) $row->pro_id),
         ));
 
         return $paginator;
@@ -57,12 +61,14 @@ class StorefrontBestSellerRankingService
             $rows->all(),
         );
         $availabilityBySku = $availability['availabilityBySku'] ?? [];
+        $commercialByProduct = $this->commercialByProduct($rows, (int) $countryRow->pai_id);
 
         return $rows
             ->map(fn (object $row) => $this->normalize(
                 $row,
                 $currency,
                 $availabilityBySku[trim((string) $row->pro_codigo)] ?? null,
+                $commercialByProduct->get((int) $row->pro_id),
             ))
             ->filter(fn (array $product) => $product['hasStock'])
             ->unique('id')
@@ -93,8 +99,6 @@ class StorefrontBestSellerRankingService
                 'product.pro_tallas',
                 'product.pro_thumbs',
                 'country_product.ppa_precio',
-                'country_product.ppa_descuento',
-                'country_product.ppa_promo_nombre',
                 'category.cat_nombre',
                 'metrics.pme_ventas_unidades',
                 'metrics.pme_ventas_pedidos',
@@ -107,10 +111,11 @@ class StorefrontBestSellerRankingService
     /**
      * @return array<string, mixed>
      */
-    private function normalize(object $row, string $currency, ?array $availability = null): array
+    private function normalize(object $row, string $currency, ?array $availability = null, ?array $commercial = null): array
     {
-        $discount = max(0, min(100, (float) ($row->ppa_descuento ?? 0)));
         $regularPrice = (float) $row->ppa_precio;
+        $promotion = $commercial['promotion'] ?? null;
+        $finalPrice = (float) ($commercial['finalTotal'] ?? $regularPrice);
 
         return [
             'id' => (int) $row->pro_id,
@@ -121,10 +126,11 @@ class StorefrontBestSellerRankingService
             'group' => (string) ($row->pro_oc_genero ?? ''),
             'category' => (string) ($row->cat_nombre ?? ''),
             'imageUrl' => StorefrontImageUrl::image((string) $row->pro_thumbs, 'p400'),
-            'price' => round($regularPrice * (1 - $discount / 100), 2),
-            'previousPrice' => $discount > 0 ? $regularPrice : null,
+            'price' => $finalPrice,
+            'previousPrice' => $finalPrice < $regularPrice ? $regularPrice : null,
             'currency' => $currency,
-            'promoName' => (string) ($row->ppa_promo_nombre ?? ''),
+            'promoName' => (string) ($promotion['displayLabel'] ?? ''),
+            'promotion' => $promotion,
             'badge' => '#'.(int) $row->pme_ranking_ventas,
             'availableSizes' => $availability['availableSizes'] ?? [],
             'hasStock' => (bool) ($availability['hasStock'] ?? false),
@@ -137,6 +143,28 @@ class StorefrontBestSellerRankingService
                 'calculatedAt' => (string) $row->pme_fecha_calculo,
             ],
         ];
+    }
+
+    private function commercialByProduct($rows, int $countryId)
+    {
+        if ($rows->isEmpty() || ! Schema::hasTable('stj_promociones') || ! Schema::hasTable('stj_promociones_horario')) {
+            return collect();
+        }
+
+        $resolver = $this->promotionResolver ?? app(StorefrontPromotionResolver::class);
+        $resolution = $resolver->resolve([
+            'countryId' => $countryId,
+            'checkoutType' => 'DOMICILIO',
+            'includeUntriggered' => true,
+            'lines' => $rows->map(fn (object $row) => [
+                'key' => (string) $row->pro_id,
+                'productId' => (int) $row->pro_id,
+                'quantity' => 1,
+                'unitPrice' => (float) $row->ppa_precio,
+            ])->all(),
+        ]);
+
+        return collect($resolution['lines'])->keyBy('productId');
     }
 
     private function country(string $country): object

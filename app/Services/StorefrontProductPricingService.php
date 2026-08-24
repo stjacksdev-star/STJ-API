@@ -13,7 +13,7 @@ class StorefrontProductPricingService
             ->where('p.pro_id', $productId)->where('p.pro_codigo', trim($sku))
             ->where('p.pro_estatus', 'ACTIVO')->where('pp.ppa_estado', 'ACTIVO')
             ->where('pp.ppa_pais', $countryId)
-            ->first(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_tallas', 'pp.ppa_id', 'pp.ppa_precio', 'pp.ppa_precio_talla', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre']);
+            ->first(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_tallas', 'pp.ppa_id', 'pp.ppa_precio', 'pp.ppa_precio_talla']);
 
         if (! $product) {
             return $this->rejected('PRODUCT_UNAVAILABLE', 'Producto/SKU inactivo o no disponible para el pais.');
@@ -44,21 +44,15 @@ class StorefrontProductPricingService
             return $this->rejected('PRICE_INVALID', 'El producto no tiene un precio comercial valido.');
         }
 
-        // Historical storefront rule: WEB/TODO percentage discounts only apply to GENERAL prices.
-        $percentBasisPoints = ! $bySize && in_array($product->ppa_origen_descuento, ['WEB', 'TODO'], true)
-            ? min(10000, max(0, $this->percentageBasisPoints($product->ppa_descuento))) : 0;
-        $discountCents = intdiv(($regularCents * $percentBasisPoints) + 5000, 10000);
-        $finalCents = $regularCents - $discountCents;
-
         return [
             'ok' => true, 'reason' => null, 'alerts' => [],
             'productId' => (int) $product->pro_id, 'sku' => trim((string) $product->pro_codigo),
             'name' => trim((string) $product->pro_nombre), 'size' => $size,
             'precio_regular' => $this->decimal($regularCents), 'origen_precio' => $origin,
-            'precio_registro_id' => $priceId, 'descuento' => $this->decimal($discountCents),
-            'descuento_porcentaje' => $this->decimal($percentBasisPoints, 2),
-            'precio_final' => $this->decimal($finalCents),
-            'promocion' => $percentBasisPoints > 0 ? ($product->ppa_promo_nombre ?: $this->decimal($percentBasisPoints, 2).'% descuento') : null,
+            'precio_registro_id' => $priceId, 'descuento' => '0.00',
+            'descuento_porcentaje' => '0.00',
+            'precio_final' => $this->decimal($regularCents),
+            'promocion' => null,
             'moneda' => $this->currency($countryId),
         ];
     }
@@ -69,11 +63,6 @@ class StorefrontProductPricingService
     }
 
     private function toCents(mixed $value): int
-    {
-        return $this->scaledInteger($value, 2);
-    }
-
-    private function percentageBasisPoints(mixed $value): int
     {
         return $this->scaledInteger($value, 2);
     }
