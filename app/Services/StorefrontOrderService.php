@@ -435,7 +435,10 @@ class StorefrontOrderService
                     'car_precio' => $item['regularPrice'],
                     'car_talla' => $item['size'],
                     'car_cantidad' => $item['quantity'],
-                    'car_descuento' => $promotion['discountPercentage'] ?? $effectivePercentage,
+                    // El pedido debe conservar el porcentaje realmente
+                    // distribuido y cobrado por línea, no el porcentaje
+                    // nominal configurado en una promoción condicionada.
+                    'car_descuento' => $effectivePercentage,
                     'car_promocion' => $promotion ? $this->limit($promotion['commercialName'] ?: $promotion['name'], 250) : null,
                     'car_promocion_id' => $promotion['id'] ?? null,
                     'car_ref' => $paymentRef,
