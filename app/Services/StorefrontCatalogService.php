@@ -20,6 +20,7 @@ class StorefrontCatalogService
 
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailabilityService,
+        private readonly ?StorefrontProductPromotionPresenter $promotionPresenter = null,
     ) {}
 
     public function forCountry(string $countryCode, ?string $query = null, array $filters = []): array
@@ -75,8 +76,6 @@ class StorefrontCatalogService
         }
 
         $this->applyGroupFilter($baseQuery, $activeGroup);
-        $this->applyPromoFilter($baseQuery, $promoOnly);
-
         $productsQuery = clone $baseQuery;
         $this->applyCategoryFilter($productsQuery, $activeCategory);
         $this->applySort($productsQuery, $activeSort);
@@ -92,7 +91,6 @@ class StorefrontCatalogService
                 'p.pro_oc_categoria',
                 'p.pro_tallas',
                 'pp.ppa_precio',
-                'pp.ppa_promo_nombre',
                 'pp.ppa_es_popular',
                 'sc.sca_nombre as subcategoria_nombre',
                 'c.cat_nombre as categoria_nombre',
@@ -108,11 +106,21 @@ class StorefrontCatalogService
             $activeStore !== '' ? $activeStore : null,
         );
 
+        $commercial = ($this->promotionPresenter ?? app(StorefrontProductPromotionPresenter::class))->resolve(
+            $rawProducts,
+            (int) $country->pai_id,
+            (string) $country->pai_codigo,
+            ['checkoutType' => $filters['checkoutType'] ?? 'DOMICILIO', 'storeCode' => $activeStore ?: null],
+        );
         $products = $rawProducts
-            ->map(function ($product) use ($country, $availability) {
+            ->map(function ($product) use ($country, $availability, $commercial) {
                 $category = trim((string) ($product->categoria_nombre ?: $product->pro_oc_categoria ?: 'Catalogo'));
                 $subcategory = trim((string) ($product->subcategoria_nombre ?: ''));
-                $badge = trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible')));
+                $resolved = $commercial->get((int) $product->pro_id);
+                $promotion = $resolved['promotion'] ?? null;
+                $regularPrice = (float) $product->ppa_precio;
+                $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
+                $badge = (string) ($promotion['displayLabel'] ?? ($product->ppa_es_popular ? 'Popular' : 'Disponible'));
                 $description = trim((string) $product->pro_descripcion);
                 $sku = trim((string) $product->pro_codigo);
                 $availabilitySummary = $availability['availabilityBySku'][$sku] ?? null;
@@ -128,7 +136,11 @@ class StorefrontCatalogService
                     'name' => trim((string) $product->pro_nombre),
                     'slug' => Str::slug((string) $product->pro_nombre).'-'.$product->pro_id,
                     'sku' => $sku,
-                    'price' => (float) $product->ppa_precio,
+                    'price' => $finalPrice,
+                    'previousPrice' => $finalPrice < $regularPrice ? $regularPrice : null,
+                    'discountPercentage' => $promotion['discountPercentage'] ?? null,
+                    'promoName' => $promotion['displayLabel'] ?? '',
+                    'promotion' => $promotion,
                     'currency' => $this->currencyForCountry(strtolower((string) $country->pai_codigo)),
                     'badge' => $badge,
                     'category' => $category,
@@ -141,6 +153,7 @@ class StorefrontCatalogService
                     'imageUrl' => StorefrontImageUrl::image((string) $product->pro_thumbs, 'p400'),
                 ];
             })
+            ->when($promoOnly, fn ($items) => $items->filter(fn (array $item) => $item['promotion'] !== null))
             ->values()
             ->all();
 
@@ -255,16 +268,6 @@ class StorefrontCatalogService
         }
 
         $query->where('c.cat_nombre', $category);
-    }
-
-    private function applyPromoFilter($query, bool $promoOnly): void
-    {
-        if (! $promoOnly) {
-            return;
-        }
-
-        $query->whereNotNull('pp.ppa_promo_nombre')
-            ->where('pp.ppa_promo_nombre', '!=', '');
     }
 
     private function applySort($query, string $sort): void

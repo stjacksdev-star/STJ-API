@@ -12,6 +12,7 @@ class StorefrontBrandService
 {
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailabilityService,
+        private readonly ?StorefrontProductPromotionPresenter $promotionPresenter = null,
     ) {}
 
     /**
@@ -194,7 +195,6 @@ class StorefrontBrandService
             'p.pro_oc_categoria',
             'p.pro_tallas',
             'pp.ppa_precio',
-            'pp.ppa_promo_nombre',
             'pp.ppa_es_popular',
             'sc.sca_nombre as subcategoria_nombre',
             'c.cat_nombre as categoria_nombre',
@@ -209,14 +209,23 @@ class StorefrontBrandService
             strtolower((string) $country->pai_codigo),
             $rawProducts->map(fn ($product) => ['pro_codigo' => $product->pro_codigo])->all(),
         );
+        $commercial = ($this->promotionPresenter ?? app(StorefrontProductPromotionPresenter::class))->resolve(
+            $rawProducts,
+            (int) $country->pai_id,
+            (string) $country->pai_codigo,
+        );
 
         return $rawProducts
-            ->map(function ($product) use ($country, $availability, $brandSlug) {
+            ->map(function ($product) use ($country, $availability, $brandSlug, $commercial) {
                 $category = trim((string) ($product->categoria_nombre ?: $product->pro_oc_categoria ?: 'Catalogo'));
                 $subcategory = trim((string) ($product->subcategoria_nombre ?: ''));
                 $description = trim((string) $product->pro_descripcion);
                 $sku = trim((string) $product->pro_codigo);
                 $availabilitySummary = $availability['availabilityBySku'][$sku] ?? null;
+                $resolved = $commercial->get((int) $product->pro_id);
+                $promotion = $resolved['promotion'] ?? null;
+                $regularPrice = (float) $product->ppa_precio;
+                $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
 
                 if ($description === '') {
                     $description = $subcategory !== ''
@@ -229,11 +238,15 @@ class StorefrontBrandService
                     'name' => trim((string) $product->pro_nombre),
                     'slug' => Str::slug((string) $product->pro_nombre).'-'.$product->pro_id,
                     'sku' => $sku,
-                    'price' => (float) $product->ppa_precio,
+                    'price' => $finalPrice,
+                    'previousPrice' => $finalPrice < $regularPrice ? $regularPrice : null,
+                    'discountPercentage' => $promotion['discountPercentage'] ?? null,
+                    'promoName' => $promotion['displayLabel'] ?? '',
+                    'promotion' => $promotion,
                     'currency' => $this->currencyForCountry(strtolower((string) $country->pai_codigo)),
                     'badge' => isset($product->pme_ranking_ventas)
                         ? '#'.(int) $product->pme_ranking_ventas
-                        : trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible'))),
+                        : (string) ($promotion['displayLabel'] ?? ($product->ppa_es_popular ? 'Popular' : 'Disponible')),
                     'category' => $category,
                     'subcategory' => $subcategory,
                     'brand' => StorefrontBrandMap::canonical($brandSlug),

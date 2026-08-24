@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\ProductListAvailabilityService;
 use App\Services\StorefrontProductService;
+use App\Services\StorefrontCatalogService;
 use App\Services\StorefrontPromotionLandingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,33 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertSame(25.0, $result['products'][0]['discountPercentage']);
         $this->assertSame('25% de descuento', $result['products'][0]['badge']);
         $this->assertNotSame('GLOBAL INCORRECTO', $result['products'][0]['promoName']);
+    }
+
+    public function test_catalog_ignores_stale_product_country_promotion_labels(): void
+    {
+        DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_estado' => 'FINALIZADA']);
+        DB::table('stj_promociones_horario')->where('pho_promocion', 10)->update([
+            'pho_fin' => now()->subMinute(),
+            'pho_estado' => 'FINALIZADO',
+        ]);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $result = app(StorefrontCatalogService::class)->forCountry('SV');
+        $product = collect($result['products'])->firstWhere('id', 100);
+
+        $this->assertNotNull($product);
+        $this->assertSame(100.0, $product['price']);
+        $this->assertNull($product['previousPrice']);
+        $this->assertNull($product['promotion']);
+        $this->assertSame('', $product['promoName']);
+        $this->assertNotSame('GLOBAL INCORRECTO', $product['badge']);
     }
 
     public function test_country_wide_fixed_percentage_landing_does_not_order_by_the_percentage_as_a_column(): void

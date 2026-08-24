@@ -10,6 +10,7 @@ class StorefrontCollectionService
 {
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailabilityService,
+        private readonly ?StorefrontProductPromotionPresenter $promotionPresenter = null,
     ) {}
 
     public function find(string $countryCode, int $collectionId): ?array
@@ -62,7 +63,6 @@ class StorefrontCollectionService
                     'product.pro_thumbs',
                     'product.pro_tallas',
                     'country_product.ppa_precio',
-                    'country_product.ppa_promo_nombre',
                     'country_product.ppa_es_popular',
                     'category.cat_nombre as categoria_nombre',
                     'subcategory.sca_nombre as subcategoria_nombre',
@@ -75,14 +75,23 @@ class StorefrontCollectionService
             strtolower((string) $collection->pai_codigo),
             $rows->map(fn ($product) => ['pro_codigo' => $product->pro_codigo])->all(),
         );
+        $commercial = ($this->promotionPresenter ?? app(StorefrontProductPromotionPresenter::class))->resolve(
+            $rows,
+            (int) $collection->pai_id,
+            (string) $collection->pai_codigo,
+        );
 
         $products = $rows
-            ->map(function ($product) use ($collection, $availability) {
+            ->map(function ($product) use ($collection, $availability, $commercial) {
                 $sku = trim((string) $product->pro_codigo);
                 $stock = $availability['availabilityBySku'][$sku] ?? null;
                 $category = trim((string) ($product->categoria_nombre ?: 'Coleccion'));
                 $subcategory = trim((string) ($product->subcategoria_nombre ?: ''));
                 $description = trim((string) $product->pro_descripcion);
+                $resolved = $commercial->get((int) $product->pro_id);
+                $promotion = $resolved['promotion'] ?? null;
+                $regularPrice = (float) $product->ppa_precio;
+                $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
 
                 if ($description === '') {
                     $description = $subcategory !== ''
@@ -95,9 +104,13 @@ class StorefrontCollectionService
                     'name' => trim((string) $product->pro_nombre),
                     'slug' => Str::slug((string) $product->pro_nombre).'-'.$product->pro_id,
                     'sku' => $sku,
-                    'price' => (float) $product->ppa_precio,
+                    'price' => $finalPrice,
+                    'previousPrice' => $finalPrice < $regularPrice ? $regularPrice : null,
+                    'discountPercentage' => $promotion['discountPercentage'] ?? null,
+                    'promoName' => $promotion['displayLabel'] ?? '',
+                    'promotion' => $promotion,
                     'currency' => $this->currencyForCountry(strtolower((string) $collection->pai_codigo)),
-                    'badge' => trim((string) ($product->ppa_promo_nombre ?: ($product->ppa_es_popular ? 'Popular' : 'Disponible'))),
+                    'badge' => (string) ($promotion['displayLabel'] ?? ($product->ppa_es_popular ? 'Popular' : 'Disponible')),
                     'category' => $category,
                     'brand' => trim((string) ($product->pro_marca ?: 'ST JACKS')),
                     'description' => $description,
