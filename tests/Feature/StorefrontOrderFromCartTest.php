@@ -69,7 +69,7 @@ class StorefrontOrderFromCartTest extends TestCase
         $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping);
         $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '9999', 'documentType' => 'DUI', 'document' => 'ID', 'countryId' => $countryId, 'stateId' => 2, 'cityId' => 11, 'address' => 'Residencia'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
         if ($hasPromotion) {
-            $payload += ['_origin' => 'APP', '_platform' => 'IOS', '_app_version' => '2.2.34'];
+            $payload += ['_origin' => 'APP', '_platform' => 'IOS', '_app_build' => 1];
         }
         $destination = $type === 'TIENDA'
             ? ['city_id' => 0, 'state_id' => 0, 'address' => '', 'reference' => '']
@@ -95,7 +95,7 @@ class StorefrontOrderFromCartTest extends TestCase
         $this->assertDatabaseHas('stj_carritos', ['car_id' => $cart->getKey(), 'car_estado' => 'CONVERTIDO', 'car_pedido_id' => $first['order']['pedidoId']]);
         $this->assertDatabaseHas('stj_pedidos_detalle', ['car_precio' => 25, 'car_cantidad' => 2]);
         if ($hasPromotion) {
-            $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_origen' => 'APP', 'ped_plataforma' => 'IOS', 'ped_vapp' => '2.2.34']);
+            $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_origen' => 'APP', 'ped_plataforma' => 'IOS', 'ped_vapp' => 1]);
             $this->assertSame('50.00', $first['order']['baseSubtotal']);
             $this->assertSame('10.00', $first['order']['discount']);
             $this->assertSame('40.00', $first['order']['total']);

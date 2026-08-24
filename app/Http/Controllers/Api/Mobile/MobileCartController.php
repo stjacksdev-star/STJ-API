@@ -184,7 +184,7 @@ class MobileCartController extends Controller
         [$customer, $country, $visitor] = $this->context($request);
         $data = $request->validate([
             'operation_uuid' => ['required', 'uuid'],
-            'app_version' => ['required', 'string', 'max:30', 'regex:/^[A-Za-z0-9._+-]+$/'],
+            'app_build' => ['required', 'integer', 'min:1'],
             'customer' => ['required', 'array'],
             'customer.firstName' => ['required', 'string', 'max:30'],
             'customer.lastName' => ['required', 'string', 'max:30'],
@@ -261,7 +261,7 @@ class MobileCartController extends Controller
                 'payment_type' => 'EFECTIVO',
                 '_origin' => 'APP',
                 '_platform' => $platform,
-                '_app_version' => $data['app_version'],
+                '_app_build' => $data['app_build'],
                 '_cash_change' => $data['cash_change'],
                 'notes' => $data['notes'] ?? null,
             ]);
