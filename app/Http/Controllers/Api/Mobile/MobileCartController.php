@@ -193,8 +193,10 @@ class MobileCartController extends Controller
             'customer.documentType' => ['required', 'string', 'max:50'],
             'customer.document' => ['required', 'string', 'max:50'],
             'customer.countryId' => ['nullable', 'integer'],
-            'customer.stateId' => ['required', 'integer', 'exists:stj_world_states,id'],
-            'customer.cityId' => ['required', 'integer', 'exists:stj_world_cities,id'],
+            'customer.stateId' => ['nullable', 'integer'],
+            'customer.cityId' => ['nullable', 'integer'],
+            'customer.state' => ['required', 'string', 'max:100'],
+            'customer.city' => ['required', 'string', 'max:100'],
             'customer.address' => ['required', 'string', 'max:200'],
             'pickup' => ['nullable', 'array'],
             'pickup.samePerson' => ['nullable', 'boolean'],
@@ -218,13 +220,21 @@ class MobileCartController extends Controller
                 json_decode((string) $previous->cao_respuesta, true),
             ));
         }
-        $validLocation = DB::table('stj_world_cities as city')
+        $location = DB::table('stj_world_cities as city')
             ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
             ->where('city.id', (int) data_get($data, 'customer.cityId'))
             ->where('state.id', (int) data_get($data, 'customer.stateId'))
             ->where('state.country_id', (int) $country->pai_id_world)
-            ->exists();
-        if (! $validLocation) {
+            ->first(['state.id as state_id', 'city.id as city_id']);
+        if (! $location) {
+            $location = DB::table('stj_world_cities as city')
+                ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
+                ->where('state.country_id', (int) $country->pai_id_world)
+                ->whereRaw('LOWER(TRIM(state.name)) = ?', [mb_strtolower(trim((string) data_get($data, 'customer.state')))])
+                ->whereRaw('LOWER(TRIM(city.name)) = ?', [mb_strtolower(trim((string) data_get($data, 'customer.city')))])
+                ->first(['state.id as state_id', 'city.id as city_id']);
+        }
+        if (! $location) {
             throw ValidationException::withMessages(['customer.cityId' => 'La ubicacion de facturacion no pertenece al pais seleccionado.']);
         }
         $cart = $this->cartInCurrentStore($request, $country, $visitor, $customer);
@@ -232,7 +242,7 @@ class MobileCartController extends Controller
             throw ValidationException::withMessages(['payment_type' => 'Esta etapa mobile solo permite efectivo con retiro en tienda.']);
         }
 
-        $result = DB::transaction(function () use ($country, $visitor, $customer, $data) {
+        $result = DB::transaction(function () use ($country, $visitor, $customer, $data, $location) {
             $this->carts->startCheckout(strtolower((string) $country->pai_codigo), $visitor, $customer, [
                 'operation_uuid' => (string) Str::uuid(),
                 'email' => (string) data_get($data, 'customer.email'),
@@ -241,6 +251,8 @@ class MobileCartController extends Controller
 
             $trustedCustomer = $data['customer'];
             $trustedCustomer['countryId'] = (int) $country->pai_id_world;
+            $trustedCustomer['stateId'] = (int) $location->state_id;
+            $trustedCustomer['cityId'] = (int) $location->city_id;
 
             return $this->orders->createFromCart(strtolower((string) $country->pai_codigo), $visitor, $customer, [
                 'operation_uuid' => $data['operation_uuid'],
