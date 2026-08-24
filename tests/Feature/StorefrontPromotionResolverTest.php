@@ -131,8 +131,36 @@ class StorefrontPromotionResolverTest extends TestCase
 
         $this->assertSame('10.00', $result['totals']['discount']);
         $this->assertSame('20.00', $result['totals']['final']);
-        $this->assertNull($result['lines'][0]['promotion']);
+        $this->assertSame('6.67', $result['lines'][0]['discount']);
+        $this->assertSame('13.33', $result['lines'][0]['finalTotal']);
+        $this->assertSame(15, $result['lines'][0]['promotion']['id']);
+        $this->assertSame('3.33', $result['lines'][1]['discount']);
+        $this->assertSame('6.67', $result['lines'][1]['finalTotal']);
         $this->assertSame(15, $result['lines'][1]['promotion']['id']);
+    }
+
+    public function test_two_for_one_preview_keeps_regular_prices_and_only_exposes_the_label(): void
+    {
+        $this->promotion(16, [
+            'prm_tipo_promocion' => 'CONDICION-SKU',
+            'prm_restriccion' => '2x1',
+        ]);
+        $this->product(16, 100);
+        $this->product(16, 101);
+
+        $context = $this->context('DOMICILIO', null, [
+            ['key' => 'first', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 20],
+            ['key' => 'second', 'productId' => 101, 'quantity' => 1, 'unitPrice' => 10],
+        ]);
+        $context['includeUntriggered'] = true;
+        $result = $this->resolver->resolve($context);
+
+        $this->assertSame('0.00', $result['totals']['discount']);
+        $this->assertSame('30.00', $result['totals']['final']);
+        $this->assertSame('20.00', $result['lines'][0]['finalTotal']);
+        $this->assertSame('10.00', $result['lines'][1]['finalTotal']);
+        $this->assertSame('Aplica 2x1', $result['lines'][0]['promotion']['benefitLabel']);
+        $this->assertSame('Aplica 2x1', $result['lines'][1]['promotion']['benefitLabel']);
     }
 
     public function test_conditional_promotions_calculate_quantities(): void

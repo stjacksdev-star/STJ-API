@@ -327,7 +327,11 @@ class StorefrontPromotionResolver
                 $allocations[$line['key']] = max(0, $line['unitPriceCents'] - $promotionalCents) * $line['quantity'];
             }
         } elseif ($promotion['promotionType'] === 'CONDICION-SKU') {
-            $allocations = $this->conditionalAllocations($promotion, $eligibleLines, $allocations);
+            // Cards, landings and PDPs only preview eligibility. Basket
+            // conditions must be calculated exclusively with a real cart.
+            if (! $context['includeUntriggered']) {
+                $allocations = $this->conditionalAllocations($promotion, $eligibleLines, $allocations);
+            }
         }
 
         return [
@@ -367,15 +371,57 @@ class StorefrontPromotionResolver
         };
         $targetCents = $promotion['price'] !== null ? $this->cents($promotion['price']) : 0;
 
+        if ($restriction === '2x1') {
+            return $this->twoForOneAllocations($units, $allocations);
+        }
+
         foreach ($units->take($discountedUnits) as $unit) {
             $benefit = match ($restriction) {
-                '2x1' => $unit['price'],
                 '21/2' => (int) round($unit['price'] / 2, 0, PHP_ROUND_HALF_UP),
                 '2doPrecio' => max(0, $unit['price'] - $targetCents),
                 '2xPP' => max(0, $unit['price'] - (int) round($targetCents / 2, 0, PHP_ROUND_HALF_UP)),
                 default => 0,
             };
             $allocations[$unit['key']] += $benefit;
+        }
+
+        return $allocations;
+    }
+
+    /**
+     * Distributes the value of the cheaper unit proportionally across both
+     * products in each pair. This preserves the 2x1 total without producing
+     * a zero-priced invoice line.
+     *
+     * @param  Collection<int, array{key: string, price: int}>  $units
+     * @param  array<string, int>  $allocations
+     * @return array<string, int>
+     */
+    private function twoForOneAllocations(Collection $units, array $allocations): array
+    {
+        $pairedUnits = $units->values();
+
+        for ($index = 0; $index + 1 < $pairedUnits->count(); $index += 2) {
+            $first = $pairedUnits[$index];
+            $second = $pairedUnits[$index + 1];
+            $pairBase = $first['price'] + $second['price'];
+            $benefit = min($first['price'], $second['price'], max(0, $pairBase - 2));
+
+            if ($benefit < 1 || $pairBase < 2) {
+                continue;
+            }
+
+            $firstBenefit = (int) round($benefit * $first['price'] / $pairBase, 0, PHP_ROUND_HALF_UP);
+            $firstBenefit = min(max(0, $firstBenefit), $first['price'] - 1);
+            $secondBenefit = $benefit - $firstBenefit;
+
+            if ($secondBenefit > $second['price'] - 1) {
+                $secondBenefit = $second['price'] - 1;
+                $firstBenefit = $benefit - $secondBenefit;
+            }
+
+            $allocations[$first['key']] += $firstBenefit;
+            $allocations[$second['key']] += $secondBenefit;
         }
 
         return $allocations;
