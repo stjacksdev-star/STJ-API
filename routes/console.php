@@ -132,7 +132,7 @@ Schedule::command('productos:calcular-metricas')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 Schedule::command('promotions:update')
-    ->everyThirtyMinutes()
+    ->everyFiveMinutes()
     ->withoutOverlapping();
 Schedule::command('coupons:send-pending-emails --limit=25')
     ->everyTenMinutes()
