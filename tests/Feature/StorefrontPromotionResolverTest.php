@@ -43,6 +43,36 @@ class StorefrontPromotionResolverTest extends TestCase
         $this->assertNull($store['lines'][0]['promotion']['scopeLabel']);
     }
 
+    public function test_gift_box_category_is_excluded_from_every_promotion_type(): void
+    {
+        DB::table('stj_productos')->insert([
+            ['pro_id' => 170, 'pro_codigo' => 'BOX-1', 'pro_categoria' => 17],
+            ['pro_id' => 100, 'pro_codigo' => 'SKU-100', 'pro_categoria' => 1],
+        ]);
+        $this->promotion(10, [
+            'prm_tipo' => 'TODO',
+            'prm_tipo_promocion' => 'DESCUENTO',
+            'prm_porcentaje' => 40,
+        ]);
+        $this->promotion(11, [
+            'prm_tipo' => 'SKU',
+            'prm_tipo_promocion' => 'DESCUENTO-SKU',
+            'prm_porcentaje' => 50,
+        ]);
+        $this->product(11, 170, 50);
+
+        $result = $this->resolver->resolve($this->context('DOMICILIO', null, [
+            ['key' => 'box', 'productId' => 170, 'quantity' => 1, 'unitPrice' => 1],
+            ['key' => 'regular', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 10],
+        ]));
+        $lines = collect($result['lines'])->keyBy('key');
+
+        $this->assertNull($lines['box']['promotion']);
+        $this->assertSame('0.00', $lines['box']['discount']);
+        $this->assertNotNull($lines['regular']['promotion']);
+        $this->assertSame('4.00', $lines['regular']['discount']);
+    }
+
     public function test_country_wide_discount_does_not_require_product_relations(): void
     {
         $this->promotion(9, [
@@ -324,6 +354,11 @@ class StorefrontPromotionResolverTest extends TestCase
 
     private function createSchema(): void
     {
+        Schema::create('stj_productos', function (Blueprint $table) {
+            $table->id('pro_id');
+            $table->string('pro_codigo');
+            $table->unsignedBigInteger('pro_categoria')->nullable();
+        });
         Schema::create('stj_promociones', function (Blueprint $table) {
             $table->id('prm_id');
             $table->unsignedBigInteger('prm_pais');

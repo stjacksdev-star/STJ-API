@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -142,6 +143,9 @@ class StorefrontPromotionResolver
         if (collect($lines)->pluck('key')->duplicates()->isNotEmpty()) {
             throw ValidationException::withMessages(['lines' => 'Las llaves de las líneas no pueden repetirse.']);
         }
+        $excludedProductIds = StorefrontProductExclusions::excludedProductIds(
+            collect($lines)->pluck('productId')
+        )->all();
 
         $timezone = (string) config('promotions.timezone', 'America/El_Salvador');
         $at = isset($context['at'])
@@ -156,6 +160,7 @@ class StorefrontPromotionResolver
             'currencySymbol' => (string) ($context['currencySymbol'] ?? '$'),
             'at' => $at,
             'lines' => $lines,
+            'excludedProductIds' => $excludedProductIds,
             'promotionId' => isset($context['promotionId']) ? (int) $context['promotionId'] : null,
             'includeUntriggered' => (bool) ($context['includeUntriggered'] ?? false),
         ];
@@ -297,7 +302,8 @@ class StorefrontPromotionResolver
     private function evaluate(array $promotion, array $context): array
     {
         $eligibleLines = collect($context['lines'])->filter(
-            fn (array $line) => $promotion['type'] === 'TODO' || $promotion['products']->has($line['productId'])
+            fn (array $line) => ! in_array($line['productId'], $context['excludedProductIds'], true)
+                && ($promotion['type'] === 'TODO' || $promotion['products']->has($line['productId']))
         );
         $allocations = [];
 

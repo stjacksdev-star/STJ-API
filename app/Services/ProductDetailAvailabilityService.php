@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontProductExclusions;
 use App\Services\Inventory\ExternalInventoryProvider;
 use App\Services\Inventory\InventorySourceResolver;
 use App\Services\Inventory\LocalInventoryProvider;
@@ -28,12 +29,14 @@ class ProductDetailAvailabilityService
             return null;
         }
 
-        $product = DB::table('stj_producto_pais as pp')
+        $productQuery = DB::table('stj_producto_pais as pp')
             ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
             ->where('pp.ppa_pais', $country->pai_id)
             ->where('pp.ppa_estado', 'ACTIVO')
             ->where('p.pro_estatus', 'ACTIVO')
-            ->where('p.pro_id', $productId)
+            ->where('p.pro_id', $productId);
+        StorefrontProductExclusions::apply($productQuery, 'p');
+        $product = $productQuery
             ->select([
                 'p.pro_id',
                 'p.pro_codigo',

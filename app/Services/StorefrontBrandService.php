@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StorefrontProductExclusions;
 use App\Support\StorefrontBrandMap;
 use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Facades\DB;
@@ -123,13 +124,15 @@ class StorefrontBrandService
 
     private function baseProductQuery(int $countryId)
     {
-        return DB::table('stj_producto_pais as pp')
+        $query = DB::table('stj_producto_pais as pp')
             ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
             ->leftJoin('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
             ->leftJoin('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
             ->where('pp.ppa_pais', $countryId)
             ->where('pp.ppa_estado', 'ACTIVO')
             ->where('p.pro_estatus', 'ACTIVO');
+
+        return StorefrontProductExclusions::apply($query, 'p');
     }
 
     private function applyGroupFilter($query, string $group): void
@@ -279,6 +282,7 @@ class StorefrontBrandService
             ->where('metrics.pme_periodo', $period)
             ->where('pp.ppa_pais', $countryId)
             ->where('pp.ppa_estado', 'ACTIVO');
+        StorefrontProductExclusions::apply($query, 'p');
         StorefrontBrandMap::applyProductBrandFilter($query, $brandSlug);
 
         $rawProducts = $query

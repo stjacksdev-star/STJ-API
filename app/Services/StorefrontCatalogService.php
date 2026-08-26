@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -63,6 +64,7 @@ class StorefrontCatalogService
             ->where('pp.ppa_pais', $country->pai_id)
             ->where('pp.ppa_estado', 'ACTIVO')
             ->where('p.pro_estatus', 'ACTIVO');
+        StorefrontProductExclusions::apply($baseQuery, 'p');
 
         if ($trimmedQuery !== '') {
             $baseQuery->where(function ($subQuery) use ($trimmedQuery) {

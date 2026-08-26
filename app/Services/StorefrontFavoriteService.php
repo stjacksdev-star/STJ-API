@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -29,7 +30,9 @@ class StorefrontFavoriteService
                 $join->on('pp.ppa_producto', '=', 'p.pro_id')->on('pp.ppa_pais', '=', 'f.fav_pais');
             })
             ->leftJoin('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
-            ->where('p.pro_estatus', 'ACTIVO')->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_estatus', 'ACTIVO')->where('pp.ppa_estado', 'ACTIVO');
+        StorefrontProductExclusions::apply($rows, 'p');
+        $rows = $rows
             ->orderByDesc('f.fav_updated_at')->orderByDesc('f.fav_id')
             ->select(['f.fav_id', 'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_marca', 'p.pro_thumbs', 'pp.ppa_precio', 'pp.ppa_precio_talla', 'pp.ppa_descuento', 'c.cat_nombre'])
             ->selectRaw("CASE WHEN pp.ppa_precio_talla = 'SI' THEN COALESCE((SELECT MIN(pta.pta_precio) FROM stj_producto_talla pta WHERE pta.pta_pais = pp.ppa_pais AND pta.pta_producto = p.pro_id AND pta.pta_precio > 0), pp.ppa_precio) ELSE pp.ppa_precio END AS display_price")
@@ -52,7 +55,9 @@ class StorefrontFavoriteService
     {
         $country = $this->country($countryCode);
         $valid = DB::table('stj_productos as p')->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
-            ->where('p.pro_id', $productId)->where('p.pro_estatus', 'ACTIVO')->where('pp.ppa_pais', $country->pai_id)->where('pp.ppa_estado', 'ACTIVO')->exists();
+            ->where('p.pro_id', $productId)->where('p.pro_estatus', 'ACTIVO')->where('pp.ppa_pais', $country->pai_id)->where('pp.ppa_estado', 'ACTIVO');
+        StorefrontProductExclusions::apply($valid, 'p');
+        $valid = $valid->exists();
         if (! $valid) throw ValidationException::withMessages(['product_id' => 'El producto no está disponible en este país.']);
 
         $ownerColumn = $customer ? 'fav_usuario' : 'fav_visitante';

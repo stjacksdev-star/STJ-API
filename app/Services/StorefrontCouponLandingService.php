@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -20,11 +21,13 @@ class StorefrontCouponLandingService
             ->first(['h.che_id', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_descuento', 'h.che_monto', 'h.che_final', 'h.che_tipo_productos', 'p.pai_id', 'p.pai_codigo']);
         if (! $header) return null;
 
-        $rows = DB::table('stj_cupones_producto as cp')->join('stj_productos as product', 'product.pro_id', '=', 'cp.cpr_producto')
+        $rowsQuery = DB::table('stj_cupones_producto as cp')->join('stj_productos as product', 'product.pro_id', '=', 'cp.cpr_producto')
             ->join('stj_producto_pais as country_product', function ($join) use ($header) { $join->on('country_product.ppa_producto', '=', 'product.pro_id')->where('country_product.ppa_pais', (int) $header->pai_id); })
             ->leftJoin('stj_categorias as category', 'category.cat_id', '=', 'product.pro_categoria')
             ->leftJoin('stj_sub_categorias as subcategory', 'subcategory.sca_id', '=', 'product.pro_sub_categoria')
-            ->where('cp.cpr_cupon', $headerId)->where('product.pro_estatus', 'ACTIVO')->where('country_product.ppa_estado', 'ACTIVO')
+            ->where('cp.cpr_cupon', $headerId)->where('product.pro_estatus', 'ACTIVO')->where('country_product.ppa_estado', 'ACTIVO');
+        StorefrontProductExclusions::apply($rowsQuery);
+        $rows = $rowsQuery
             ->orderBy('cp.cpr_id')->get(['product.pro_id', 'product.pro_codigo', 'product.pro_nombre', 'product.pro_descripcion', 'product.pro_marca', 'product.pro_thumbs', 'product.pro_tallas', 'country_product.ppa_precio', 'country_product.ppa_promo_nombre', 'country_product.ppa_es_popular', 'category.cat_nombre as categoria_nombre', 'subcategory.sca_nombre as subcategoria_nombre']);
 
         $stock = $this->availability->summarize(strtolower($header->pai_codigo), $rows->map(fn ($p) => ['pro_codigo' => $p->pro_codigo])->all());

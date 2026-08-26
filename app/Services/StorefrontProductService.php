@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -21,14 +22,16 @@ class StorefrontProductService
             return null;
         }
 
-        $product = DB::table('stj_producto_pais as pp')
+        $productQuery = DB::table('stj_producto_pais as pp')
             ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
             ->leftJoin('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
             ->leftJoin('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
             ->where('pp.ppa_pais', $country->pai_id)
             ->where('pp.ppa_estado', 'ACTIVO')
             ->where('p.pro_estatus', 'ACTIVO')
-            ->where('p.pro_id', $productId)
+            ->where('p.pro_id', $productId);
+        StorefrontProductExclusions::apply($productQuery, 'p');
+        $product = $productQuery
             ->select([
                 'p.pro_id',
                 'p.pro_codigo',
@@ -117,14 +120,17 @@ class StorefrontProductService
             return [];
         }
 
-        return DB::table('stj_producto_pais as pp')
+        $query = DB::table('stj_producto_pais as pp')
             ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
             ->leftJoin('stj_categorias as c', 'c.cat_id', '=', 'p.pro_categoria')
             ->where('pp.ppa_pais', $countryId)
             ->where('pp.ppa_estado', 'ACTIVO')
             ->where('p.pro_estatus', 'ACTIVO')
             ->where('p.pro_id', '!=', $productId)
-            ->where('c.cat_nombre', $category)
+            ->where('c.cat_nombre', $category);
+        StorefrontProductExclusions::apply($query, 'p');
+
+        return $query
             ->select([
                 'p.pro_id',
                 'p.pro_nombre',

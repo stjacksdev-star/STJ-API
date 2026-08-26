@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -41,9 +42,7 @@ class StorefrontCollectionService
             ->unique()
             ->values();
 
-        $rows = $codes->isEmpty()
-            ? collect()
-            : DB::table('stj_productos as product')
+        $productQuery = DB::table('stj_productos as product')
                 ->join('stj_producto_pais as country_product', function ($join) use ($collection) {
                     $join
                         ->on('country_product.ppa_producto', '=', 'product.pro_id')
@@ -53,7 +52,12 @@ class StorefrontCollectionService
                 ->leftJoin('stj_sub_categorias as subcategory', 'subcategory.sca_id', '=', 'product.pro_sub_categoria')
                 ->whereIn('product.pro_codigo', $codes->all())
                 ->where('product.pro_estatus', 'ACTIVO')
-                ->where('country_product.ppa_estado', 'ACTIVO')
+                ->where('country_product.ppa_estado', 'ACTIVO');
+        StorefrontProductExclusions::apply($productQuery);
+
+        $rows = $codes->isEmpty()
+            ? collect()
+            : $productQuery
                 ->select([
                     'product.pro_id',
                     'product.pro_codigo',

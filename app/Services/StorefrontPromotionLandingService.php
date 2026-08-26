@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -281,6 +282,7 @@ class StorefrontPromotionLandingService
             ->where('country_product.ppa_pais', (int) $promotion->pai_id)
             ->where('country_product.ppa_estado', 'ACTIVO')
             ->where('product.pro_estatus', 'ACTIVO');
+        StorefrontProductExclusions::apply($query);
 
         if ((string) $promotion->prm_tipo !== 'TODO') {
             $query
