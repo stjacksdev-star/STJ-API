@@ -93,7 +93,12 @@ class ProductDetailAvailabilityService
             ->all();
         $activeStore = [
             'code' => $activeStoreCode,
-            'name' => $this->normalizeStoreName($countryCode, $activeStoreCode, $storeNames[$activeStoreCode] ?? null),
+            'name' => $this->normalizeStoreName(
+                $countryCode,
+                $activeStoreCode,
+                $storeNames[$activeStoreCode] ?? null,
+                $checkoutType,
+            ),
         ];
 
         return [
@@ -331,11 +336,12 @@ class ProductDetailAvailabilityService
             ->all();
     }
 
-    private function normalizeStoreName(string $countryCode, string $storeCode, ?string $storeName): string
+    private function normalizeStoreName(string $countryCode, string $storeCode, ?string $storeName, ?string $checkoutType = null): string
     {
         $domicilioCode = config("inventory.domicilio_store_by_country.{$countryCode}");
+        $isStorePickup = in_array(strtoupper(trim((string) $checkoutType)), ['T', 'TIENDA'], true);
 
-        if ($domicilioCode && trim($storeCode) === trim((string) $domicilioCode)) {
+        if (! $isStorePickup && $domicilioCode && trim($storeCode) === trim((string) $domicilioCode)) {
             return 'Domicilio';
         }
 

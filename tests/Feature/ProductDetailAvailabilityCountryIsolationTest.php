@@ -65,5 +65,11 @@ class ProductDetailAvailabilityCountryIsolationTest extends TestCase
         $this->assertSame(['002'], array_column($alternatives, 'code'));
         $this->assertSame(['Las Cascadas'], array_column($alternatives, 'name'));
         $this->assertSame(3, $result['sizes'][0]['totalQuantity']);
+
+        $domicilioResult = $service->forCountryAndSlug('sv', 'producto-10', '57', 'product_detail', 'DOMICILIO');
+        $storePickupResult = $service->forCountryAndSlug('sv', 'producto-10', '57', 'product_detail', 'TIENDA');
+
+        $this->assertSame('Domicilio', $domicilioResult['activeStore']['name']);
+        $this->assertSame('Casa Matriz', $storePickupResult['activeStore']['name']);
     }
 }
