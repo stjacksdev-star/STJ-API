@@ -52,6 +52,10 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
 
     public function test_catalog_ignores_stale_product_country_promotion_labels(): void
     {
+        DB::table('stj_producto_pais')
+            ->where('ppa_producto', 100)
+            ->where('ppa_pais', 1)
+            ->update(['ppa_precio' => 22.95]);
         DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_estado' => 'FINALIZADA']);
         DB::table('stj_promociones_horario')->where('pho_promocion', 10)->update([
             'pho_fin' => now()->subMinute(),
@@ -70,7 +74,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $product = collect($result['products'])->firstWhere('id', 100);
 
         $this->assertNotNull($product);
-        $this->assertSame(100.0, $product['price']);
+        $this->assertSame(22.95, $product['price']);
         $this->assertNull($product['previousPrice']);
         $this->assertNull($product['promotion']);
         $this->assertSame('', $product['promoName']);

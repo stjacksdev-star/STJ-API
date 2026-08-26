@@ -224,8 +224,10 @@ class StorefrontBrandService
                 $availabilitySummary = $availability['availabilityBySku'][$sku] ?? null;
                 $resolved = $commercial->get((int) $product->pro_id);
                 $promotion = $resolved['promotion'] ?? null;
-                $regularPrice = (float) $product->ppa_precio;
-                $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
+                $regularPrice = round((float) $product->ppa_precio, 2);
+                $finalPrice = round((float) ($resolved['finalTotal'] ?? $regularPrice), 2);
+                $hasDiscount = $promotion !== null
+                    && (int) round($finalPrice * 100) < (int) round($regularPrice * 100);
 
                 if ($description === '') {
                     $description = $subcategory !== ''
@@ -239,7 +241,7 @@ class StorefrontBrandService
                     'slug' => Str::slug((string) $product->pro_nombre).'-'.$product->pro_id,
                     'sku' => $sku,
                     'price' => $finalPrice,
-                    'previousPrice' => $finalPrice < $regularPrice ? $regularPrice : null,
+                    'previousPrice' => $hasDiscount ? $regularPrice : null,
                     'discountPercentage' => $promotion['discountPercentage'] ?? null,
                     'promoName' => $promotion['displayLabel'] ?? '',
                     'promotion' => $promotion,
