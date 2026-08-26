@@ -120,16 +120,20 @@ class ExternalInventoryProvider
 
     private function resolveUrl(string $countryCode): string
     {
-        return strtolower($countryCode) === 'sv'
-            ? trim((string) config('inventory.external.sv_detail_url', ''))
-            : trim((string) config('inventory.external.generic_detail_url', ''));
+        return match (strtolower($countryCode)) {
+            'sv' => trim((string) config('inventory.external.sv_detail_url', '')),
+            'hn' => trim((string) config('inventory.external.hn_detail_url', '')),
+            default => trim((string) config('inventory.external.generic_detail_url', '')),
+        };
     }
 
     private function resolveProductListUrl(string $countryCode): string
     {
-        return strtolower($countryCode) === 'sv'
-            ? trim((string) config('inventory.external.sv_categories_url', ''))
-            : trim((string) config('inventory.external.generic_categories_url', ''));
+        return match (strtolower($countryCode)) {
+            'sv' => trim((string) config('inventory.external.sv_categories_url', '')),
+            'hn' => trim((string) config('inventory.external.hn_categories_url', '')),
+            default => trim((string) config('inventory.external.generic_categories_url', '')),
+        };
     }
 
     private function normalizeRows(mixed $data, ?string $fallbackStoreCode = null): array

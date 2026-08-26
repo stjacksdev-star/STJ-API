@@ -22,6 +22,8 @@ return [
         'token' => env('INVENTORY_API_TOKEN', env('STJ_API_TOKEN', '')),
         'sv_detail_url' => env('INVENTORY_SV_DETAIL_URL', env('STJ_API_NPOS', '') ? 'https://'.env('STJ_API_NPOS').'/api/existencias/detalle' : ''),
         'sv_categories_url' => env('INVENTORY_SV_CATEGORIES_URL', env('STJ_API_NPOS', '') ? 'https://'.env('STJ_API_NPOS').'/api/existencias/categorias' : ''),
+        'hn_detail_url' => env('INVENTORY_HN_DETAIL_URL', ''),
+        'hn_categories_url' => env('INVENTORY_HN_CATEGORIES_URL', ''),
         'generic_detail_url' => env('INVENTORY_GENERIC_DETAIL_URL', env('STJ_API', '') ? 'http://'.env('STJ_API').'/API-Inventario/api/articulos/existenciaPorTiendaDetalle' : ''),
         'generic_categories_url' => env('INVENTORY_GENERIC_CATEGORIES_URL', env('STJ_API', '') ? 'http://'.env('STJ_API').'/API-Inventario/api/articulos/existenciaPorTiendaDetalle' : ''),
         'timeout_seconds' => (int) env('INVENTORY_API_TIMEOUT_SECONDS', 8),

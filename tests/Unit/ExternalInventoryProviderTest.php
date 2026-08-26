@@ -16,6 +16,10 @@ class ExternalInventoryProviderTest extends TestCase
             'inventory.external.token' => 'test-token',
             'inventory.external.sv_detail_url' => 'https://corepos.test/api/existencias/detalle',
             'inventory.external.sv_categories_url' => 'https://corepos.test/api/existencias/categorias',
+            'inventory.external.hn_detail_url' => 'https://bihoral.test/api/hn/ec/detalle',
+            'inventory.external.hn_categories_url' => 'https://bihoral.test/api/hn/ec/categorias',
+            'inventory.external.generic_detail_url' => 'https://generic.test/api/detalle',
+            'inventory.external.generic_categories_url' => 'https://generic.test/api/categorias',
         ]);
 
     }
@@ -68,5 +72,48 @@ class ExternalInventoryProviderTest extends TestCase
         $this->assertSame('002', $result['rows'][0]['codTienda']);
         $this->assertSame('6X', $result['rows'][0]['talla']);
         $this->assertSame(2, $result['rows'][0]['existencia']);
+    }
+
+    public function test_honduras_uses_its_own_detail_endpoint(): void
+    {
+        Http::fake([
+            'https://bihoral.test/api/hn/ec/detalle' => Http::response([
+                'ok' => true,
+                'registros' => ['existencia' => [[
+                    'estilo' => '2080188202',
+                    'talla' => '04',
+                    'existencia' => 3,
+                    'codTienda' => '001',
+                ]]],
+            ]),
+        ]);
+
+        $result = app(ExternalInventoryProvider::class)
+            ->fetchProductDetailAvailability(7, 'hn', ['001'], '2080188202');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(3, $result['rows'][0]['existencia']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://bihoral.test/api/hn/ec/detalle');
+    }
+
+    public function test_honduras_uses_its_own_categories_endpoint(): void
+    {
+        Http::fake([
+            'https://bihoral.test/api/hn/ec/categorias' => Http::response([
+                'ok' => true,
+                'registros' => ['existencia' => [[
+                    'estilo' => '2080188202',
+                    'talla' => '04',
+                    'existencia' => 4,
+                ]]],
+            ]),
+        ]);
+
+        $result = app(ExternalInventoryProvider::class)
+            ->fetchProductListAvailability(7, 'HN', '001', ['2080188202']);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('001', $result['rows'][0]['codTienda']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://bihoral.test/api/hn/ec/categorias');
     }
 }
