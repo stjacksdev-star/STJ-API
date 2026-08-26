@@ -222,6 +222,7 @@ Route::get('/storefront/orders/{order}/payment-status', [PowerTranzController::c
 Route::post('/storefront/payments/powertranz/return/{country}/{token}', [PowerTranzController::class, 'handleReturn'])->where(['country' => '[A-Za-z]{2}', 'token' => '[A-Za-z0-9]{64}'])->middleware('throttle:30,1')->name('powertranz.return');
 Route::prefix('/storefront/cart/{country}')->where(['country' => '[A-Za-z]{2}'])->group(function () {
     Route::get('/', [StorefrontCartController::class, 'show']);
+    Route::get('/gift-boxes', [StorefrontCartController::class, 'giftBoxes']);
     Route::post('/items', [StorefrontCartController::class, 'storeItem']);
     Route::patch('/items/{item}', [StorefrontCartController::class, 'updateItem'])->whereNumber('item');
     Route::delete('/items/{item}', [StorefrontCartController::class, 'destroyItem'])->whereNumber('item');

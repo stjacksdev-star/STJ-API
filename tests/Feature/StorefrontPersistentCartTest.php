@@ -7,6 +7,7 @@ use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\Inventory\InventorySourceResolver;
 use App\Services\ProductDetailAvailabilityService;
+use App\Services\ProductListAvailabilityService;
 use App\Services\StorefrontCartService;
 use App\Services\StorefrontCheckoutValidationService;
 use App\Services\StorefrontFulfillmentService;
@@ -45,6 +46,8 @@ class StorefrontPersistentCartTest extends TestCase
             $t->string('pro_nombre');
             $t->string('pro_tallas');
             $t->string('pro_estatus');
+            $t->unsignedBigInteger('pro_categoria')->nullable();
+            $t->string('pro_thumbs')->nullable();
         });
         Schema::create('stj_producto_pais', function (Blueprint $t) {
             $t->bigInteger('ppa_id', true);
@@ -115,7 +118,7 @@ class StorefrontPersistentCartTest extends TestCase
         config(['inventory.domicilio_store_by_country.sv' => '57', 'inventory.domicilio_store_by_country.gt' => '2']);
         $this->visitor = StorefrontVisitor::query()->create(['vis_uuid' => (string) Str::uuid(), 'vis_origen' => 'WEB', 'vis_pais_id' => 1, 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
         $availability = Mockery::mock(ProductDetailAvailabilityService::class);
-        $availability->shouldReceive('forCountryAndSlug')->andReturnUsing(fn () => ['sizes' => [['size' => 'S', 'quantityInActiveStore' => 5], ['size' => 'M', 'quantityInActiveStore' => 2]]]);
+        $availability->shouldReceive('forCountryAndSlug')->andReturnUsing(fn () => ['sizes' => [['size' => 'S', 'quantityInActiveStore' => 5], ['size' => 'M', 'quantityInActiveStore' => 2], ['size' => 'TU', 'quantityInActiveStore' => 3]]]);
         $checkout = Mockery::mock(StorefrontCheckoutValidationService::class);
         $checkout->shouldReceive('validate')->byDefault()->andReturn(['ok' => true, 'message' => 'ok']);
         $this->checkout = $checkout;
@@ -135,6 +138,46 @@ class StorefrontPersistentCartTest extends TestCase
         $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'ADD_TO_CART', 'cev_usu_id' => null, 'cev_producto_id' => 10]);
         $this->expectException(CartOperationConflict::class);
         $this->service->add('sv', $this->visitor, null, array_merge($input, ['quantity' => 2]));
+    }
+
+    public function test_gift_boxes_only_returns_category_seventeen_products_with_stock_in_active_store(): void
+    {
+        DB::table('stj_productos')->insert([
+            ['pro_id' => 17, 'pro_codigo' => 'BOX-S', 'pro_nombre' => 'Caja pequeña', 'pro_tallas' => 'TU', 'pro_estatus' => 'ACTIVO', 'pro_categoria' => 17],
+            ['pro_id' => 18, 'pro_codigo' => 'BOX-L', 'pro_nombre' => 'Caja grande', 'pro_tallas' => 'TU', 'pro_estatus' => 'ACTIVO', 'pro_categoria' => 17],
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            ['ppa_pais' => 1, 'ppa_producto' => 17, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => .25, 'ppa_precio_talla' => 'NO'],
+            ['ppa_pais' => 1, 'ppa_producto' => 18, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => .50, 'ppa_precio_talla' => 'NO'],
+        ]);
+        $inventory = Mockery::mock(ProductListAvailabilityService::class);
+        $inventory->shouldReceive('summarize')->once()->with('sv', Mockery::type('array'), '57')->andReturn([
+            'availabilityRows' => [
+                ['estilo' => 'BOX-S', 'talla' => 'TU', 'existencia' => 3],
+            ],
+            'usedSource' => 'local_inventory',
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $inventory);
+
+        $this->service->get('sv', $this->visitor, null);
+        $result = $this->service->giftBoxes('sv', $this->visitor, null);
+
+        $this->assertCount(1, $result['giftBoxes']);
+        $this->assertSame('BOX-S', $result['giftBoxes'][0]['sku']);
+        $this->assertSame(3, $result['giftBoxes'][0]['availableQuantity']);
+        $this->assertSame(0.25, $result['giftBoxes'][0]['price']);
+
+        $cart = $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(),
+            'product_id' => 17,
+            'sku' => 'BOX-S',
+            'size' => 'TU',
+            'quantity' => 2,
+        ]);
+
+        $this->assertSame(0.50, $cart['cart']['totals']['baseSubtotal']);
+        $this->assertSame(0.50, $cart['cart']['totals']['total']);
+        $this->assertEquals(0.0, $cart['cart']['totals']['discount']);
     }
 
     public function test_cart_ignores_global_product_country_discount_without_an_eligible_promotion(): void

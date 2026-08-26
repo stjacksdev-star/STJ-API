@@ -267,6 +267,69 @@ class StorefrontCartService
         });
     }
 
+    public function giftBoxes(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
+    {
+        $cart = $this->resolveCart($countryCode, $visitor, $customer, false);
+        if (! $cart || ! $cart->car_tienda_codigo_snapshot) {
+            return ['giftBoxes' => [], 'fulfillment' => null];
+        }
+
+        $giftBoxCategoryId = (int) config('storefront.gift_box_category_id', 17);
+        $products = DB::table('stj_productos as p')
+            ->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
+            ->where('pp.ppa_pais', (int) $cart->car_pais_id)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_estatus', 'ACTIVO')
+            ->where('p.pro_categoria', $giftBoxCategoryId)
+            ->orderBy('pp.ppa_precio')
+            ->get(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_tallas', 'p.pro_thumbs']);
+
+        if ($products->isEmpty()) {
+            return ['giftBoxes' => [], 'fulfillment' => $this->context($cart)];
+        }
+
+        $country = strtolower((string) DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo'));
+        $availability = app(ProductListAvailabilityService::class)->summarize(
+            $country,
+            $products->map(fn (object $product) => ['pro_codigo' => $product->pro_codigo])->all(),
+            (string) $cart->car_tienda_codigo_snapshot,
+        );
+        $rows = collect($availability['availabilityRows'] ?? []);
+        $boxes = $products->map(function (object $product) use ($rows, $cart, $country) {
+            $sku = trim((string) $product->pro_codigo);
+            $stockRows = $rows->where('estilo', $sku)->filter(fn (array $row) => (int) $row['existencia'] > 0);
+            $declaredSizes = collect(explode(',', (string) $product->pro_tallas))->map(fn ($size) => trim($size))->filter();
+            $size = $declaredSizes->first(fn (string $candidate) => $stockRows->contains('talla', $candidate))
+                ?? $stockRows->pluck('talla')->first();
+            if (! $size) {
+                return null;
+            }
+
+            $pricing = $this->pricing->resolve((int) $cart->car_pais_id, (int) $product->pro_id, $sku, (string) $size, now());
+            if (! ($pricing['ok'] ?? false)) {
+                return null;
+            }
+
+            return [
+                'productId' => (int) $product->pro_id,
+                'sku' => $sku,
+                'name' => trim((string) $product->pro_nombre),
+                'size' => (string) $size,
+                'price' => (float) $pricing['precio_regular'],
+                'currency' => (string) $cart->car_moneda,
+                'imageUrl' => StorefrontImageUrl::image((string) $product->pro_thumbs, 'p100'),
+                'availableQuantity' => (int) $stockRows->where('talla', $size)->sum('existencia'),
+                'countryCode' => $country,
+            ];
+        })->filter()->values()->all();
+
+        return [
+            'giftBoxes' => $boxes,
+            'fulfillment' => $this->context($cart),
+            'inventorySource' => $availability['usedSource'] ?? null,
+        ];
+    }
+
     public function validateForCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, bool $selectedOnly = false): array
     {
         return DB::transaction(function () use ($countryCode, $visitor, $customer, $selectedOnly) {

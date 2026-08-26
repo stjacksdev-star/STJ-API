@@ -52,6 +52,14 @@ class StorefrontCartController extends BaseController
         return $this->success($this->carts->get($country, $this->visitor($request), $this->customer()), 'Carrito recuperado.');
     }
 
+    public function giftBoxes(Request $request, string $country): JsonResponse
+    {
+        return $this->success(
+            $this->carts->giftBoxes($country, $this->visitor($request), $this->customer()),
+            'Cajas de regalo disponibles.',
+        );
+    }
+
     public function storeItem(Request $request, string $country): JsonResponse
     {
         $data = $request->validate($this->itemRules());
