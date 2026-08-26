@@ -11,6 +11,10 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontFavoriteService
 {
+    public function __construct(
+        private readonly StorefrontProductPromotionPresenter $promotionPresenter,
+    ) {}
+
     public function list(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer): array
     {
         $country = $this->country($countryCode);
@@ -31,7 +35,17 @@ class StorefrontFavoriteService
             ->selectRaw("CASE WHEN pp.ppa_precio_talla = 'SI' THEN COALESCE((SELECT MIN(pta.pta_precio) FROM stj_producto_talla pta WHERE pta.pta_pais = pp.ppa_pais AND pta.pta_producto = p.pro_id AND pta.pta_precio > 0), pp.ppa_precio) ELSE pp.ppa_precio END AS display_price")
             ->get();
 
-        return $rows->map(fn ($row) => $this->product($row, (string) $country->pai_codigo))->all();
+        $commercial = $this->promotionPresenter->resolve(
+            $rows,
+            (int) $country->pai_id,
+            (string) $country->pai_codigo,
+        );
+
+        return $rows->map(fn ($row) => $this->product(
+            $row,
+            (string) $country->pai_codigo,
+            $commercial->get((int) $row->pro_id),
+        ))->all();
     }
 
     public function add(string $countryCode, int $productId, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, string $origin = 'WEB'): array
@@ -91,12 +105,15 @@ class StorefrontFavoriteService
         return $country;
     }
 
-    private function product(object $row, string $countryCode): array
+    private function product(object $row, string $countryCode, ?array $commercial = null): array
     {
-        $discount = max(0, min(100, (float) $row->ppa_descuento));
-        $regular = (float) ($row->display_price ?? $row->ppa_precio);
+        $promotion = $commercial['promotion'] ?? null;
+        $regular = round((float) ($row->display_price ?? $row->ppa_precio), 2);
+        $final = round((float) ($commercial['finalTotal'] ?? $regular), 2);
+        $hasDiscount = $promotion !== null
+            && (int) round($final * 100) < (int) round($regular * 100);
         $currency = ['GT' => 'GTQ', 'CR' => 'CRC', 'DO' => 'DOP', 'HN' => 'HNL'][strtoupper($countryCode)] ?? 'USD';
         $image = StorefrontImageUrl::image((string) $row->pro_thumbs, 'p400');
-        return ['favoriteId' => (int) $row->fav_id, 'id' => (int) $row->pro_id, 'product_id' => (int) $row->pro_id, 'slug' => Str::slug($row->pro_nombre).'-'.$row->pro_id, 'sku' => $row->pro_codigo, 'name' => $row->pro_nombre, 'brand' => $row->pro_marca, 'category' => $row->cat_nombre, 'imageUrl' => $image, 'price' => round($regular * (1 - $discount / 100), 2), 'previousPrice' => $discount > 0 ? $regular : null, 'currency' => $currency, 'badge' => $discount > 0 ? 'Oferta' : 'Favorito'];
+        return ['favoriteId' => (int) $row->fav_id, 'id' => (int) $row->pro_id, 'product_id' => (int) $row->pro_id, 'slug' => Str::slug($row->pro_nombre).'-'.$row->pro_id, 'sku' => $row->pro_codigo, 'name' => $row->pro_nombre, 'brand' => $row->pro_marca, 'category' => $row->cat_nombre, 'imageUrl' => $image, 'price' => $final, 'previousPrice' => $hasDiscount ? $regular : null, 'currency' => $currency, 'badge' => $promotion['displayLabel'] ?? 'Favorito', 'promotion' => $promotion];
     }
 }
