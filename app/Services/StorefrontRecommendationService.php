@@ -17,6 +17,7 @@ class StorefrontRecommendationService
 
     public function __construct(
         private readonly ProductListAvailabilityService $productListAvailability,
+        private readonly StorefrontProductPromotionPresenter $promotionPresenter,
     ) {}
 
     public function recommend(string $countryCode, string $placement, StorefrontVisitor $visitor, ?StorefrontCustomer $customer = null, ?int $productId = null, int $limit = 10): array
@@ -99,7 +100,12 @@ class StorefrontRecommendationService
             ->unique('pro_id')
             ->values();
 
-        return $this->available($ranked, $cart, (int) $country->pai_id, strtolower((string) $country->pai_codigo))->take($limit)->values()->map(fn ($row, $i) => $this->normalize($row, $i + 1, (string) $country->pai_codigo))->all();
+        return $this->normalizeRecommendations(
+            $this->available($ranked, $cart, (int) $country->pai_id, strtolower((string) $country->pai_codigo))->take($limit)->values(),
+            $cart,
+            (int) $country->pai_id,
+            (string) $country->pai_codigo,
+        );
     }
 
     public static function forgetPurchaseHistory(int $customerId, int $countryId): void
@@ -203,11 +209,13 @@ class StorefrontRecommendationService
         $rows = $this->baseProducts($countryId)->whereIn('p.pro_id', $ids)->get()->sortBy(fn ($row) => $order[$row->pro_id]);
         $code = (string) DB::table('stj_paises')->where('pai_id', $countryId)->value('pai_codigo');
 
-        return $this->available($rows, $cart, $countryId, strtolower($code))->take($limit)->values()->map(function ($row, $i) use ($code) {
+        $available = $this->available($rows, $cart, $countryId, strtolower($code))->take($limit)->values()->map(function ($row) {
             $row->recommendation_reason = 'RECENTLY_VIEWED';
 
-            return $this->normalize($row, $i + 1, $code);
-        })->all();
+            return $row;
+        });
+
+        return $this->normalizeRecommendations($available, $cart, $countryId, $code);
     }
 
     private function baseProducts(int $countryId)
@@ -259,16 +267,34 @@ class StorefrontRecommendationService
         return DB::table('stj_cliente_eventos')->where('cev_pais_id', $countryId)->whereIn('cev_producto_id', $ids ?: [0])->whereIn('cev_tipo', ['PRODUCT_VIEW', 'ADD_TO_CART', 'PURCHASE'])->where('cev_ocurrido_en', '>=', now()->subDays(30))->groupBy('cev_producto_id')->selectRaw('cev_producto_id, COUNT(*) total')->pluck('total', 'cev_producto_id')->all();
     }
 
-    private function normalize(object $row, int $position, string $countryCode): array
+    private function normalizeRecommendations(Collection $rows, ?StorefrontCart $cart, int $countryId, string $countryCode): array
     {
-        $discount = max(0, min(100, (float) ($row->ppa_descuento ?? 0)));
-        $regular = (float) ($row->display_price ?? $row->ppa_precio);
+        $commercial = $this->promotionPresenter->resolve($rows, $countryId, $countryCode, [
+            'checkoutType' => strtoupper((string) ($cart?->car_tipo ?? 'DOMICILIO')) === 'TIENDA' ? 'TIENDA' : 'DOMICILIO',
+            'storeCode' => $cart?->car_tienda_codigo_snapshot,
+        ]);
+
+        return $rows->values()->map(fn (object $row, int $index) => $this->normalize(
+            $row,
+            $index + 1,
+            $countryCode,
+            $commercial->get((int) $row->pro_id),
+        ))->all();
+    }
+
+    private function normalize(object $row, int $position, string $countryCode, ?array $commercial = null): array
+    {
+        $promotion = $commercial['promotion'] ?? null;
+        $regular = round((float) ($row->display_price ?? $row->ppa_precio), 2);
+        $final = round((float) ($commercial['finalTotal'] ?? $regular), 2);
+        $hasDiscount = $promotion !== null
+            && (int) round($final * 100) < (int) round($regular * 100);
         $currency = ['GT' => 'GTQ', 'CR' => 'CRC', 'DO' => 'DOP', 'HN' => 'HNL'][strtoupper($countryCode)] ?? 'USD';
         $image = StorefrontImageUrl::image((string) $row->pro_thumbs, 'p400');
 
         $source = $row->recommendation_source ?? 'fallback';
 
-        return ['product_id' => (int) $row->pro_id, 'id' => (int) $row->pro_id, 'slug' => Str::slug($row->pro_nombre).'-'.$row->pro_id, 'sku' => $row->pro_codigo, 'nombre' => $row->pro_nombre, 'name' => $row->pro_nombre, 'marca' => $row->pro_marca, 'brand' => $row->pro_marca, 'coleccion' => $row->pro_coleccion, 'category' => $row->cat_nombre, 'image' => $image, 'imageUrl' => $image, 'price' => round($regular * (1 - $discount / 100), 2), 'previousPrice' => $discount > 0 ? $regular : null, 'priceFrom' => strtoupper((string) $row->ppa_precio_talla) === 'SI', 'currency' => $currency, 'available' => true, 'hasStock' => true, 'stockTotal' => (int) ($row->stock_total ?? 0), 'recommendation_reason' => $row->recommendation_reason ?? 'POPULAR', 'recommendation_source' => $source, 'position' => $position, 'badge' => $source === 'purchase_history' ? 'Recomendado para ti' : ($discount > 0 ? 'Oferta' : 'Disponible')];
+        return ['product_id' => (int) $row->pro_id, 'id' => (int) $row->pro_id, 'slug' => Str::slug($row->pro_nombre).'-'.$row->pro_id, 'sku' => $row->pro_codigo, 'nombre' => $row->pro_nombre, 'name' => $row->pro_nombre, 'marca' => $row->pro_marca, 'brand' => $row->pro_marca, 'coleccion' => $row->pro_coleccion, 'category' => $row->cat_nombre, 'image' => $image, 'imageUrl' => $image, 'price' => $final, 'previousPrice' => $hasDiscount ? $regular : null, 'priceFrom' => strtoupper((string) $row->ppa_precio_talla) === 'SI', 'currency' => $currency, 'available' => true, 'hasStock' => true, 'stockTotal' => (int) ($row->stock_total ?? 0), 'recommendation_reason' => $row->recommendation_reason ?? 'POPULAR', 'recommendation_source' => $source, 'position' => $position, 'badge' => $source === 'purchase_history' ? 'Recomendado para ti' : ($promotion['displayLabel'] ?? 'Disponible'), 'promotion' => $promotion];
     }
 
     private function same(mixed $a, mixed $b): bool

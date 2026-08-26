@@ -123,6 +123,23 @@ class StorefrontRecommendationTest extends TestCase
         $this->assertSame([11, 10], array_column($products, 'product_id'));
     }
 
+    public function test_recommendations_ignore_stale_product_country_discount_without_active_promotion(): void
+    {
+        DB::table('stj_producto_pais')->where('ppa_producto', 11)->update([
+            'ppa_precio' => 12.95,
+            'ppa_descuento' => 40,
+        ]);
+        $visitor = DB::table('stj_visitantes')->insertGetId(['vis_uuid' => '66666666-6666-4666-8666-666666666666', 'vis_origen' => 'WEB', 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
+        DB::table('stj_cliente_eventos')->insert(['cev_event_uuid' => '77777777-7777-4777-8777-777777777777', 'cev_visitante_id' => $visitor, 'cev_usu_id' => null, 'cev_pais_id' => 1, 'cev_producto_id' => 11, 'cev_tipo' => 'PRODUCT_VIEW', 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now()]);
+
+        $products = app(StorefrontRecommendationService::class)->recommend('sv', 'RECENTLY_VIEWED', StorefrontVisitor::findOrFail($visitor));
+
+        $this->assertSame(12.95, $products[0]['price']);
+        $this->assertNull($products[0]['previousPrice']);
+        $this->assertSame('Disponible', $products[0]['badge']);
+        $this->assertNull($products[0]['promotion']);
+    }
+
     public function test_authenticated_cart_recommendations_use_approved_orders_by_customer_id_and_country(): void
     {
         $visitor = DB::table('stj_visitantes')->insertGetId(['vis_uuid' => '44444444-4444-4444-8444-444444444444', 'vis_origen' => 'WEB', 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
