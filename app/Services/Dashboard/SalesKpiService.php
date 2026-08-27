@@ -319,8 +319,8 @@ class SalesKpiService
         $dates = $this->dateRange($start, $end);
         $previousDates = $this->dateRange($previousStart, $previousEnd);
 
-        $currentVisits = $this->visitsByDate($start, $end, $countryInfo['visitCountry']);
-        $previousVisits = $this->visitsByDate($previousStart, $previousEnd, $countryInfo['visitCountry']);
+        $currentVisits = $this->visitsByDate($start, $end, $countryInfo);
+        $previousVisits = $this->visitsByDate($previousStart, $previousEnd, $countryInfo);
         $currentOrders = $this->approvedOrdersByDate($start, $end, $countryInfo['countryId']);
         $previousOrders = $this->approvedOrdersByDate($previousStart, $previousEnd, $countryInfo['countryId']);
 
@@ -438,8 +438,8 @@ class SalesKpiService
 
         $dates = $this->dateRange($start, $end);
         $previousDates = $this->dateRange($previousStart, $previousEnd);
-        $currentVisits = $this->visitsByDate($start, $end, $countryInfo['visitCountry']);
-        $previousVisits = $this->visitsByDate($previousStart, $previousEnd, $countryInfo['visitCountry']);
+        $currentVisits = $this->visitsByDate($start, $end, $countryInfo);
+        $previousVisits = $this->visitsByDate($previousStart, $previousEnd, $countryInfo);
 
         $rows = collect($dates)
             ->map(function (string $date, int $index) use ($previousDates, $currentVisits, $previousVisits) {
@@ -998,65 +998,188 @@ class SalesKpiService
         ];
     }
 
-    private function visitsByDate(string $start, string $end, ?string $country): array
+    private function visitsByDate(string $start, string $end, array $countryInfo): array
     {
-        [$startAt, $endBefore] = $this->dateTimeRange($start, $end);
+        $visits = [];
 
-        return DB::table('stj_visitas')
-            ->where('vis_fecha', '>=', $startAt)
-            ->where('vis_fecha', '<', $endBefore)
-            ->when($country !== null, fn ($builder) => $builder->where('vis_pais', $country))
-            ->groupByRaw('DATE(vis_fecha)')
-            ->orderByRaw('DATE(vis_fecha)')
-            ->selectRaw('DATE(vis_fecha) AS date, COUNT(*) AS visits')
-            ->get()
-            ->mapWithKeys(fn ($row) => [(string) $row->date => (int) $row->visits])
-            ->all();
+        if ($range = $this->legacyVisitRange($start, $end)) {
+            [$startAt, $endBefore] = $this->dateTimeRange($range[0], $range[1]);
+            $rows = DB::table('stj_visitas')
+                ->where('vis_fecha', '>=', $startAt)
+                ->where('vis_fecha', '<', $endBefore)
+                ->when($countryInfo['visitCountry'] !== null, fn ($builder) => $builder->where('vis_pais', $countryInfo['visitCountry']))
+                ->groupByRaw('DATE(vis_fecha)')
+                ->selectRaw('DATE(vis_fecha) AS date, COUNT(*) AS visits')
+                ->get();
+
+            foreach ($rows as $row) {
+                $visits[(string) $row->date] = (int) $row->visits;
+            }
+        }
+
+        if ($range = $this->dailyVisitRange($start, $end)) {
+            $rows = DB::table('stj_visitas_diarias')
+                ->whereBetween('vdi_fecha', $range)
+                ->when($countryInfo['countryId'] !== null, fn ($builder) => $builder->where('vdi_pais_id', $countryInfo['countryId']))
+                ->groupBy('vdi_fecha')
+                ->selectRaw('vdi_fecha AS date, COUNT(*) AS visits')
+                ->get();
+
+            foreach ($rows as $row) {
+                $date = (string) $row->date;
+                $visits[$date] = ($visits[$date] ?? 0) + (int) $row->visits;
+            }
+        }
+
+        ksort($visits);
+
+        return $visits;
     }
 
     private function visitsByPlatform(string $start, string $end): array
     {
-        [$startAt, $endBefore] = $this->dateTimeRange($start, $end);
+        $visits = [];
 
-        return DB::table('stj_visitas')
-            ->where('vis_fecha', '>=', $startAt)
-            ->where('vis_fecha', '<', $endBefore)
-            ->groupByRaw('DATE(vis_fecha)')
-            ->orderByRaw('DATE(vis_fecha)')
-            ->selectRaw("
-                DATE(vis_fecha) AS date,
-                IFNULL(SUM(CASE WHEN vis_plataforma = 'WEB' THEN 1 ELSE 0 END), 0) AS web,
-                IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-ANDROID' THEN 1 ELSE 0 END), 0) AS android,
-                IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-IOS' THEN 1 ELSE 0 END), 0) AS ios
-            ")
-            ->get()
-            ->mapWithKeys(fn ($row) => [
-                (string) $row->date => [
-                    'web' => (int) $row->web,
-                    'android' => (int) $row->android,
-                    'ios' => (int) $row->ios,
-                ],
-            ])
-            ->all();
+        if ($range = $this->legacyVisitRange($start, $end)) {
+            [$startAt, $endBefore] = $this->dateTimeRange($range[0], $range[1]);
+            $rows = DB::table('stj_visitas')
+                ->where('vis_fecha', '>=', $startAt)
+                ->where('vis_fecha', '<', $endBefore)
+                ->groupByRaw('DATE(vis_fecha)')
+                ->selectRaw("
+                    DATE(vis_fecha) AS date,
+                    IFNULL(SUM(CASE WHEN vis_plataforma = 'WEB' THEN 1 ELSE 0 END), 0) AS web,
+                    IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-ANDROID' THEN 1 ELSE 0 END), 0) AS android,
+                    IFNULL(SUM(CASE WHEN vis_plataforma = 'APP-IOS' THEN 1 ELSE 0 END), 0) AS ios
+                ")
+                ->get();
+            $this->mergePlatformVisits($visits, $rows);
+        }
+
+        if ($range = $this->dailyVisitRange($start, $end)) {
+            $rows = DB::table('stj_visitas_diarias')
+                ->whereBetween('vdi_fecha', $range)
+                ->groupBy('vdi_fecha')
+                ->selectRaw("
+                    vdi_fecha AS date,
+                    IFNULL(SUM(CASE WHEN vdi_origen = 'WEB' THEN 1 ELSE 0 END), 0) AS web,
+                    IFNULL(SUM(CASE WHEN vdi_origen = 'APP-ANDROID' THEN 1 ELSE 0 END), 0) AS android,
+                    IFNULL(SUM(CASE WHEN vdi_origen = 'APP-IOS' THEN 1 ELSE 0 END), 0) AS ios
+                ")
+                ->get();
+            $this->mergePlatformVisits($visits, $rows);
+        }
+
+        ksort($visits);
+
+        return $visits;
     }
 
     private function visitTotalsByCountry(string $start, string $end): array
     {
-        [$startAt, $endBefore] = $this->dateTimeRange($start, $end);
+        $totals = [];
 
-        return DB::table('stj_visitas')
-            ->where('vis_fecha', '>=', $startAt)
-            ->where('vis_fecha', '<', $endBefore)
-            ->groupBy('vis_pais')
-            ->orderByDesc('visits')
-            ->selectRaw("COALESCE(NULLIF(vis_pais, ''), 'N/D') AS country, COUNT(*) AS visits")
-            ->get()
-            ->map(fn ($row) => [
-                'country' => (string) $row->country,
-                'visits' => (int) $row->visits,
-            ])
+        if ($range = $this->legacyVisitRange($start, $end)) {
+            [$startAt, $endBefore] = $this->dateTimeRange($range[0], $range[1]);
+            $rows = DB::table('stj_visitas')
+                ->where('vis_fecha', '>=', $startAt)
+                ->where('vis_fecha', '<', $endBefore)
+                ->groupBy('vis_pais')
+                ->selectRaw("COALESCE(NULLIF(vis_pais, ''), 'N/D') AS country, COUNT(*) AS visits")
+                ->get();
+
+            foreach ($rows as $row) {
+                $country = $this->legacyVisitCountry((string) $row->country);
+                $totals[$country] = ($totals[$country] ?? 0) + (int) $row->visits;
+            }
+        }
+
+        if ($range = $this->dailyVisitRange($start, $end)) {
+            $rows = DB::table('stj_visitas_diarias AS visits')
+                ->join('stj_paises AS countries', 'countries.pai_id', '=', 'visits.vdi_pais_id')
+                ->whereBetween('visits.vdi_fecha', $range)
+                ->groupBy('countries.pai_codigo', 'countries.pai_nombre')
+                ->selectRaw('countries.pai_codigo AS code, countries.pai_nombre AS country, COUNT(*) AS visits')
+                ->get();
+
+            foreach ($rows as $row) {
+                $country = $this->dailyVisitCountry((string) $row->code, (string) $row->country);
+                $totals[$country] = ($totals[$country] ?? 0) + (int) $row->visits;
+            }
+        }
+
+        arsort($totals);
+
+        return collect($totals)
+            ->map(fn (int $visits, string $country) => compact('country', 'visits'))
             ->values()
             ->all();
+    }
+
+    private function mergePlatformVisits(array &$visits, iterable $rows): void
+    {
+        foreach ($rows as $row) {
+            $date = (string) $row->date;
+            $visits[$date] ??= ['web' => 0, 'android' => 0, 'ios' => 0];
+            $visits[$date]['web'] += (int) $row->web;
+            $visits[$date]['android'] += (int) $row->android;
+            $visits[$date]['ios'] += (int) $row->ios;
+        }
+    }
+
+    /** @return array{0: string, 1: string}|null */
+    private function legacyVisitRange(string $start, string $end): ?array
+    {
+        $cutoff = $this->dailyVisitsCutoffDate();
+        $legacyEnd = $cutoff ? min($end, Carbon::parse($cutoff)->subDay()->toDateString()) : $end;
+
+        return $start <= $legacyEnd ? [$start, $legacyEnd] : null;
+    }
+
+    /** @return array{0: string, 1: string}|null */
+    private function dailyVisitRange(string $start, string $end): ?array
+    {
+        $cutoff = $this->dailyVisitsCutoffDate();
+        if (! $cutoff) {
+            return null;
+        }
+
+        $dailyStart = max($start, $cutoff);
+
+        return $dailyStart <= $end ? [$dailyStart, $end] : null;
+    }
+
+    private function dailyVisitsCutoffDate(): ?string
+    {
+        $cutoff = trim((string) config('analytics.daily_visits_cutoff_date', ''));
+
+        return $cutoff === '' ? null : Carbon::createFromFormat('Y-m-d', $cutoff)->toDateString();
+    }
+
+    private function legacyVisitCountry(string $country): string
+    {
+        $normalized = strtolower(str_replace([' ', '-', '_'], '', trim($country)));
+
+        return match ($normalized) {
+            'elsalvador', 'sv', 'es' => 'ElSalvador',
+            'guatemala', 'gt' => 'Guatemala',
+            'costarica', 'cr' => 'CostaRica',
+            'honduras', 'hn' => 'Honduras',
+            'venezuela', 've' => 'Venezuela',
+            default => trim($country) !== '' ? $country : 'N/D',
+        };
+    }
+
+    private function dailyVisitCountry(string $code, string $name): string
+    {
+        return match (strtoupper(trim($code))) {
+            'SV', 'ES' => 'ElSalvador',
+            'GT' => 'Guatemala',
+            'CR' => 'CostaRica',
+            'HN' => 'Honduras',
+            'VE' => 'Venezuela',
+            default => trim($name) !== '' ? $name : 'N/D',
+        };
     }
 
     /**
