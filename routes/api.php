@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProd
 use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProductMasterController;
 use App\Http\Controllers\Api\Dashboard\ProductPerformanceReportController as DashboardProductPerformanceReportController;
 use App\Http\Controllers\Api\Dashboard\PromotionAssetController as DashboardPromotionAssetController;
+use App\Http\Controllers\Api\Dashboard\StandaloneAssetController as DashboardStandaloneAssetController;
 use App\Http\Controllers\Api\Dashboard\PromotionController as DashboardPromotionController;
 use App\Http\Controllers\Api\Dashboard\PushNotificationController as DashboardPushNotificationController;
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
@@ -282,6 +283,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'update']);
         Route::delete('/promotions/assets/{asset}', [DashboardPromotionAssetController::class, 'destroy']);
         Route::post('/promotions/{promotion}/header', [DashboardPromotionAssetController::class, 'updateHeader']);
+        Route::get('/standalone-assets', [DashboardStandaloneAssetController::class, 'index']);
+        Route::post('/standalone-assets', [DashboardStandaloneAssetController::class, 'store']);
+        Route::post('/standalone-assets/{asset}', [DashboardStandaloneAssetController::class, 'update']);
         Route::get('/product-categories', [DashboardProductCategoryController::class, 'index']);
         Route::post('/product-categories', [DashboardProductCategoryController::class, 'store']);
         Route::post('/product-categories/{category}', [DashboardProductCategoryController::class, 'update']);
