@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontContactController;
 use App\Http\Controllers\Api\StorefrontCouponLandingController;
 use App\Http\Controllers\Api\StorefrontDailyVisitController;
+use App\Http\Controllers\Api\StorefrontDenimController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontFavoriteController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -183,6 +184,8 @@ Route::post('/storefront/orders/{country}/track', [StorefrontOrderTrackingContro
     ->where('country', '[A-Za-z]{2}')
     ->middleware('throttle:10,1');
 Route::get('/storefront/catalog/{country}', [StorefrontCatalogController::class, 'index'])
+    ->where('country', '[A-Za-z]{2}');
+Route::get('/storefront/denim/{country}', [StorefrontDenimController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/collections/{country}/{collection}', [StorefrontCollectionController::class, 'show'])
     ->where('country', '[A-Za-z]{2}')
