@@ -42,6 +42,7 @@ use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
 use App\Http\Controllers\Api\StorefrontContactController;
 use App\Http\Controllers\Api\StorefrontCouponLandingController;
+use App\Http\Controllers\Api\StorefrontDailyVisitController;
 use App\Http\Controllers\Api\StorefrontEventController;
 use App\Http\Controllers\Api\StorefrontFavoriteController;
 use App\Http\Controllers\Api\StorefrontHomeController;
@@ -160,6 +161,9 @@ Route::get('/storefront/home/{country}', [StorefrontHomeController::class, 'show
 Route::post('/storefront/contact/{country}', [StorefrontContactController::class, 'store'])
     ->where('country', '[A-Za-z]{2}')
     ->middleware('throttle:3,1');
+Route::post('/storefront/visits/{country}', StorefrontDailyVisitController::class)
+    ->where('country', '[A-Za-z]{2}')
+    ->middleware('throttle:30,1');
 Route::get('/storefront/assets/{country}', [StorefrontAssetController::class, 'show'])
     ->where('country', '[A-Za-z]{2}');
 Route::get('/storefront/best-sellers/{country}', [StorefrontBestSellerController::class, 'index'])
