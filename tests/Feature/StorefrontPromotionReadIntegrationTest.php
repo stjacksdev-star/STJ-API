@@ -81,6 +81,52 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertNotSame('GLOBAL INCORRECTO', $product['badge']);
     }
 
+    public function test_catalog_container_category_includes_configured_subcategories_and_uses_its_header(): void
+    {
+        DB::table('stj_categorias')->insert([
+            'cat_id' => 18,
+            'cat_nombre' => 'Denim',
+            'cat_header' => 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/marcas/denim/banner.jpg',
+            'cat_descripcion' => 'Encuentra tu fit',
+            'cat_orden' => 18,
+            'cat_si_sub_otras' => 1,
+            'cat_sub_otras' => '81, 82',
+        ]);
+        DB::table('stj_sub_categorias')->insert(['sca_id' => 81, 'sca_nombre' => 'Wide leg']);
+        DB::table('stj_productos')->insert([
+            'pro_id' => 1800,
+            'pro_codigo' => 'DENIM-001',
+            'pro_nombre' => 'Pantalon wide leg',
+            'pro_marca' => 'ST JACKS',
+            'pro_oc_categoria' => 'Pantalones',
+            'pro_categoria' => 1,
+            'pro_sub_categoria' => 81,
+            'pro_estatus' => 'ACTIVO',
+            'pro_registro' => now(),
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            'ppa_id' => 1800,
+            'ppa_pais' => 1,
+            'ppa_producto' => 1800,
+            'ppa_estado' => 'ACTIVO',
+            'ppa_precio' => 29.95,
+        ]);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $result = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'Denim']);
+
+        $this->assertSame([1800], collect($result['products'])->pluck('id')->all());
+        $this->assertSame('Denim', $result['categoryHero']['title']);
+        $this->assertSame('https://stj-assets.sfo3.cdn.digitaloceanspaces.com/marcas/denim/banner.jpg', $result['categoryHero']['image']);
+    }
+
     public function test_country_wide_fixed_percentage_landing_does_not_order_by_the_percentage_as_a_column(): void
     {
         DB::table('stj_promociones')->insert([
@@ -339,6 +385,11 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         Schema::create('stj_categorias', function (Blueprint $table) {
             $table->id('cat_id');
             $table->string('cat_nombre');
+            $table->string('cat_header')->nullable();
+            $table->text('cat_descripcion')->nullable();
+            $table->integer('cat_orden')->nullable();
+            $table->boolean('cat_si_sub_otras')->default(false);
+            $table->text('cat_sub_otras')->nullable();
         });
         Schema::create('stj_sub_categorias', function (Blueprint $table) {
             $table->id('sca_id');

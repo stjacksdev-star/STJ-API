@@ -194,7 +194,7 @@ class StorefrontCatalogService
                 ],
             ],
             'products' => $products,
-            'categoryHero' => $this->categoryHero($activeGroup),
+            'categoryHero' => $this->categoryHero($activeGroup, $activeCategory),
             'search' => [
                 'query' => $trimmedQuery,
                 'total' => count($products),
@@ -271,7 +271,15 @@ class StorefrontCatalogService
             return;
         }
 
-        $query->where('c.cat_nombre', $category);
+        $additionalSubcategoryIds = $this->additionalSubcategoryIds([$category]);
+
+        $query->where(function ($scope) use ($category, $additionalSubcategoryIds) {
+            $scope->where('c.cat_nombre', $category);
+
+            if ($additionalSubcategoryIds !== []) {
+                $scope->orWhereIn('p.pro_sub_categoria', $additionalSubcategoryIds);
+            }
+        });
     }
 
     private function applySort($query, string $sort): void
@@ -286,9 +294,11 @@ class StorefrontCatalogService
         };
     }
 
-    private function categoryHero(string $group): ?array
+    private function categoryHero(string $group, string $activeCategory = ''): ?array
     {
-        $categories = self::GROUP_MAPPINGS[$group] ?? null;
+        $categories = $activeCategory !== ''
+            ? [$activeCategory]
+            : (self::GROUP_MAPPINGS[$group] ?? null);
 
         if (! $categories) {
             return null;
