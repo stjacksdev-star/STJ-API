@@ -140,13 +140,14 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         ]);
         DB::table('stj_sub_categorias')->insert(['sca_id' => 81, 'sca_nombre' => 'Denim']);
 
-        foreach ([[1901, 3], [1902, 5], [2001, 4], [2002, 6]] as [$productId, $categoryId]) {
+        foreach ([[1901, 3, 'Wideleg'], [1902, 5, 'Cargo'], [2001, 4, 'Cargo'], [2002, 6, 'Jogger']] as [$productId, $categoryId, $fit]) {
             DB::table('stj_productos')->insert([
                 'pro_id' => $productId,
                 'pro_codigo' => "DENIM-{$productId}",
                 'pro_nombre' => "Producto {$productId}",
                 'pro_categoria' => $categoryId,
                 'pro_sub_categoria' => 81,
+                'pro_denim_fit' => $fit,
                 'pro_estatus' => 'ACTIVO',
                 'pro_registro' => now(),
             ]);
@@ -160,18 +161,23 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         }
 
         $availability = Mockery::mock(ProductListAvailabilityService::class);
-        $availability->shouldReceive('summarize')->twice()->andReturn([
+        $availability->shouldReceive('summarize')->times(4)->andReturn([
             'availabilityBySku' => [], 'activeStoreCode' => null, 'usedSource' => null,
         ]);
         $this->app->instance(ProductListAvailabilityService::class, $availability);
 
         $girls = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'DenimNinas']);
         $boys = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'DenimNinos']);
+        $widelegGirls = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'DenimNinas', 'fit' => 'Wideleg']);
+        $joggerBoys = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'DenimNinos', 'fit' => 'Jogger']);
 
         $this->assertEqualsCanonicalizing([1901, 1902], collect($girls['products'])->pluck('id')->all());
         $this->assertSame('https://cdn.test/denim-ninas.jpg', $girls['categoryHero']['image']);
         $this->assertEqualsCanonicalizing([2001, 2002], collect($boys['products'])->pluck('id')->all());
         $this->assertSame('https://cdn.test/denim-ninos.jpg', $boys['categoryHero']['image']);
+        $this->assertSame([1901], collect($widelegGirls['products'])->pluck('id')->all());
+        $this->assertSame('Wideleg', $widelegGirls['filters']['active']['fit']);
+        $this->assertSame([2002], collect($joggerBoys['products'])->pluck('id')->all());
     }
 
     public function test_country_wide_fixed_percentage_landing_does_not_order_by_the_percentage_as_a_column(): void
@@ -458,6 +464,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
             $table->string('pro_thumbs')->nullable();
             $table->unsignedBigInteger('pro_categoria')->nullable();
             $table->unsignedBigInteger('pro_sub_categoria')->nullable();
+            $table->string('pro_denim_fit')->nullable();
             $table->string('pro_estatus');
             $table->dateTime('pro_registro')->nullable();
         });

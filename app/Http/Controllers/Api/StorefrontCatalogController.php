@@ -17,6 +17,7 @@ class StorefrontCatalogController extends BaseController
             $this->storefrontCatalogService->forCountry($country, $request->string('q')->toString(), [
                 'group' => $request->string('group')->toString(),
                 'category' => $request->string('category')->toString(),
+                'fit' => $request->string('fit')->toString(),
                 'sort' => $request->string('sort')->toString(),
                 'promo' => $request->boolean('promo'),
                 'store' => $request->string('store')->toString(),

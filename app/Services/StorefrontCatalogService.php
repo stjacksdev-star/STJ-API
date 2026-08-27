@@ -35,6 +35,7 @@ class StorefrontCatalogService
         $trimmedQuery = trim((string) $query);
         $activeGroup = trim((string) ($filters['group'] ?? ''));
         $activeCategory = trim((string) ($filters['category'] ?? ''));
+        $activeFit = trim((string) ($filters['fit'] ?? ''));
         $activeSort = trim((string) ($filters['sort'] ?? 'featured'));
         $activeStore = trim((string) ($filters['store'] ?? ''));
         $promoOnly = filter_var($filters['promo'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -49,6 +50,7 @@ class StorefrontCatalogService
                     'active' => [
                         'group' => $activeGroup,
                         'category' => $activeCategory,
+                        'fit' => $activeFit,
                         'sort' => $activeSort,
                         'promo' => $promoOnly,
                     ],
@@ -85,6 +87,7 @@ class StorefrontCatalogService
         $this->applyGroupFilter($baseQuery, $activeGroup);
         $productsQuery = clone $baseQuery;
         $this->applyCategoryFilter($productsQuery, $activeCategory);
+        $this->applyDenimFitFilter($productsQuery, $activeFit);
         $this->applySort($productsQuery, $activeSort);
 
         $rawProducts = $productsQuery
@@ -194,6 +197,7 @@ class StorefrontCatalogService
                 'active' => [
                     'group' => $activeGroup,
                     'category' => $activeCategory,
+                    'fit' => $activeFit,
                     'sort' => $activeSort,
                     'promo' => $promoOnly,
                 ],
@@ -314,6 +318,17 @@ class StorefrontCatalogService
                 ->orderByDesc('pp.ppa_es_popular')
                 ->orderByDesc('p.pro_registro'),
         };
+    }
+
+    private function applyDenimFitFilter($query, string $fit): void
+    {
+        if ($fit === '') {
+            return;
+        }
+
+        $query->whereNotNull('p.pro_denim_fit')
+            ->whereRaw("TRIM(p.pro_denim_fit) <> ''")
+            ->where('p.pro_denim_fit', $fit);
     }
 
     private function categoryHero(string $group, string $activeCategory = ''): ?array
