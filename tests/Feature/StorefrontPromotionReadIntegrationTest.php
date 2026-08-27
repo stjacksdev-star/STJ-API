@@ -85,6 +85,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
     {
         DB::table('stj_categorias')->insert([
             'cat_id' => 18,
+            'cat_codigo' => 'Denim',
             'cat_nombre' => 'Denim',
             'cat_header' => 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/marcas/denim/banner.jpg',
             'cat_descripcion' => 'Encuentra tu fit',
@@ -125,6 +126,52 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertSame([1800], collect($result['products'])->pluck('id')->all());
         $this->assertSame('Denim', $result['categoryHero']['title']);
         $this->assertSame('https://stj-assets.sfo3.cdn.digitaloceanspaces.com/marcas/denim/banner.jpg', $result['categoryHero']['image']);
+    }
+
+    public function test_gendered_denim_container_limits_shared_subcategories_to_its_parent_categories(): void
+    {
+        DB::table('stj_categorias')->insert([
+            ['cat_id' => 3, 'cat_codigo' => 'ToddlerNinas', 'cat_nombre' => 'Toddler Niñas', 'cat_header' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 4, 'cat_codigo' => 'ToddlerNinos', 'cat_nombre' => 'Toddler Niños', 'cat_header' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 5, 'cat_codigo' => 'Ninas', 'cat_nombre' => 'Niñas', 'cat_header' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 6, 'cat_codigo' => 'Ninos', 'cat_nombre' => 'Niños', 'cat_header' => null, 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 19, 'cat_codigo' => 'DenimNinas', 'cat_nombre' => 'Denim Niñas', 'cat_header' => 'https://cdn.test/denim-ninas.jpg', 'cat_si_sub_otras' => 1, 'cat_sub_otras' => '81'],
+            ['cat_id' => 20, 'cat_codigo' => 'DenimNinos', 'cat_nombre' => 'Denim Niños', 'cat_header' => 'https://cdn.test/denim-ninos.jpg', 'cat_si_sub_otras' => 1, 'cat_sub_otras' => '81'],
+        ]);
+        DB::table('stj_sub_categorias')->insert(['sca_id' => 81, 'sca_nombre' => 'Denim']);
+
+        foreach ([[1901, 3], [1902, 5], [2001, 4], [2002, 6]] as [$productId, $categoryId]) {
+            DB::table('stj_productos')->insert([
+                'pro_id' => $productId,
+                'pro_codigo' => "DENIM-{$productId}",
+                'pro_nombre' => "Producto {$productId}",
+                'pro_categoria' => $categoryId,
+                'pro_sub_categoria' => 81,
+                'pro_estatus' => 'ACTIVO',
+                'pro_registro' => now(),
+            ]);
+            DB::table('stj_producto_pais')->insert([
+                'ppa_id' => $productId,
+                'ppa_pais' => 1,
+                'ppa_producto' => $productId,
+                'ppa_estado' => 'ACTIVO',
+                'ppa_precio' => 29.95,
+            ]);
+        }
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->twice()->andReturn([
+            'availabilityBySku' => [], 'activeStoreCode' => null, 'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $girls = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'DenimNinas']);
+        $boys = app(StorefrontCatalogService::class)->forCountry('SV', null, ['category' => 'DenimNinos']);
+
+        $this->assertEqualsCanonicalizing([1901, 1902], collect($girls['products'])->pluck('id')->all());
+        $this->assertSame('https://cdn.test/denim-ninas.jpg', $girls['categoryHero']['image']);
+        $this->assertEqualsCanonicalizing([2001, 2002], collect($boys['products'])->pluck('id')->all());
+        $this->assertSame('https://cdn.test/denim-ninos.jpg', $boys['categoryHero']['image']);
     }
 
     public function test_country_wide_fixed_percentage_landing_does_not_order_by_the_percentage_as_a_column(): void
@@ -384,6 +431,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         });
         Schema::create('stj_categorias', function (Blueprint $table) {
             $table->id('cat_id');
+            $table->string('cat_codigo')->nullable();
             $table->string('cat_nombre');
             $table->string('cat_header')->nullable();
             $table->text('cat_descripcion')->nullable();

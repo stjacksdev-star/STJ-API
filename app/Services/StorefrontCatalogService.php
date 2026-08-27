@@ -9,6 +9,11 @@ use Illuminate\Support\Str;
 
 class StorefrontCatalogService
 {
+    private const CONTAINER_PARENT_CATEGORY_IDS = [
+        19 => [3, 5],
+        20 => [4, 6],
+    ];
+
     private const GROUP_MAPPINGS = [
         'girls' => ['Niñas'],
         'boys' => ['Niños'],
@@ -271,13 +276,30 @@ class StorefrontCatalogService
             return;
         }
 
-        $additionalSubcategoryIds = $this->additionalSubcategoryIds([$category]);
+        $definition = $this->categoryDefinition($category);
 
-        $query->where(function ($scope) use ($category, $additionalSubcategoryIds) {
-            $scope->where('c.cat_nombre', $category);
+        if (! $definition) {
+            $query->where('c.cat_nombre', $category);
+
+            return;
+        }
+
+        $additionalSubcategoryIds = $definition->cat_si_sub_otras
+            ? $this->parseSubcategoryIds($definition->cat_sub_otras)
+            : [];
+        $parentCategoryIds = self::CONTAINER_PARENT_CATEGORY_IDS[(int) $definition->cat_id] ?? [];
+
+        $query->where(function ($scope) use ($definition, $additionalSubcategoryIds, $parentCategoryIds) {
+            $scope->where('p.pro_categoria', (int) $definition->cat_id);
 
             if ($additionalSubcategoryIds !== []) {
-                $scope->orWhereIn('p.pro_sub_categoria', $additionalSubcategoryIds);
+                $scope->orWhere(function ($additionalScope) use ($additionalSubcategoryIds, $parentCategoryIds) {
+                    $additionalScope->whereIn('p.pro_sub_categoria', $additionalSubcategoryIds);
+
+                    if ($parentCategoryIds !== []) {
+                        $additionalScope->whereIn('p.pro_categoria', $parentCategoryIds);
+                    }
+                });
             }
         });
     }
@@ -296,11 +318,9 @@ class StorefrontCatalogService
 
     private function categoryHero(string $group, string $activeCategory = ''): ?array
     {
-        $categories = $activeCategory !== ''
-            ? [$activeCategory]
-            : (self::GROUP_MAPPINGS[$group] ?? null);
+        $categories = self::GROUP_MAPPINGS[$group] ?? null;
 
-        if (! $categories) {
+        if ($activeCategory === '' && ! $categories) {
             return null;
         }
 
@@ -311,7 +331,14 @@ class StorefrontCatalogService
                 'cat_descripcion',
                 'cat_orden',
             ])
-            ->whereIn('cat_nombre', $categories)
+            ->when(
+                $activeCategory !== '',
+                fn ($query) => $query->where(function ($scope) use ($activeCategory) {
+                    $scope->where('cat_codigo', $activeCategory)
+                        ->orWhere('cat_nombre', $activeCategory);
+                }),
+                fn ($query) => $query->whereIn('cat_nombre', $categories),
+            )
             ->orderByRaw("TRIM(COALESCE(cat_header, '')) = ''")
             ->orderByRaw("TRIM(COALESCE(cat_descripcion, '')) = ''")
             ->orderByRaw('cat_orden IS NULL')
@@ -328,6 +355,26 @@ class StorefrontCatalogService
             'description' => trim((string) $category->cat_descripcion),
             'image' => $this->categoryAsset($category->cat_header),
         ];
+    }
+
+    private function categoryDefinition(string $category): ?object
+    {
+        return DB::table('stj_categorias')
+            ->where(function ($query) use ($category) {
+                $query->where('cat_codigo', $category)
+                    ->orWhere('cat_nombre', $category);
+            })
+            ->first(['cat_id', 'cat_si_sub_otras', 'cat_sub_otras']);
+    }
+
+    private function parseSubcategoryIds(mixed $value): array
+    {
+        return collect(preg_split('/\s*,\s*/', trim((string) $value), -1, PREG_SPLIT_NO_EMPTY) ?: [])
+            ->filter(fn ($id) => ctype_digit((string) $id) && (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function groupFilters(): array
