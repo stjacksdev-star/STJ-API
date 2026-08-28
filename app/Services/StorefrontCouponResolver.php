@@ -166,6 +166,7 @@ class StorefrontCouponResolver
             'couponIds' => $couponIds,
             'at' => Carbon::parse($context['at'] ?? now(), config('app.timezone')),
             'hasApprovedOrder' => (bool) ($context['hasApprovedOrder'] ?? false),
+            'usedNonMultipleCouponIds' => collect($context['usedNonMultipleCouponIds'] ?? [])->map(fn ($id) => (int) $id)->all(),
             'lines' => $lines,
             'subtotalCents' => collect($lines)->sum('baseTotalCents'),
             'shippingCents' => $shipping,
@@ -259,6 +260,9 @@ class StorefrontCouponResolver
         }
         if ($coupon['generic'] !== 'SI' && $coupon['email'] !== $context['email']) {
             return $invalid('CORREO_NO_COINCIDE', 'El cupón no pertenece al correo del checkout.');
+        }
+        if ($coupon['multiple'] !== 'SI' && in_array($coupon['id'], $context['usedNonMultipleCouponIds'], true)) {
+            return $invalid('CUPON_YA_UTILIZADO', 'Este cupón ya fue utilizado por este correo en un pedido aprobado.');
         }
         if ($coupon['firstPurchaseOnly'] === 'SI' && $context['hasApprovedOrder']) {
             return $invalid('PRIMERA_COMPRA_REQUERIDA', 'El cupón es exclusivo para la primera compra.');

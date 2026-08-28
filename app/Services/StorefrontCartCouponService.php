@@ -38,11 +38,11 @@ class StorefrontCartCouponService
             if (! $coupon) {
                 throw ValidationException::withMessages(['code' => 'El cupón no existe o no aplica para este país.']);
             }
-            if (($coupon->che_generico ?? 'NO') !== 'SI' && ($coupon->che_multiple ?? 'NO') !== 'SI' && DB::table('stj_pedido_cupones_aplicados')
-                ->where('pca_cupon_id', $coupon->cup_id)
-                ->where('pca_estado', 'CONSUMIDO')
-                ->exists()) {
-                throw ValidationException::withMessages(['code' => 'El cupón ya fue utilizado en un pedido aprobado.']);
+            $email = $this->email((string) ($input['email'] ?? $customer?->usu_correo ?? ''));
+            if (($coupon->che_multiple ?? 'NO') !== 'SI'
+                && $email !== ''
+                && in_array((int) $coupon->cup_id, $this->usedCouponIds($email, [(int) $coupon->cup_id]), true)) {
+                throw ValidationException::withMessages(['code' => 'Este cupón ya fue utilizado por este correo en un pedido aprobado.']);
             }
 
             $operation = StorefrontCartCoupon::query()->where('ccu_operation_uuid', $input['operation_uuid'])->first();
@@ -222,6 +222,10 @@ class StorefrontCartCouponService
             'couponIds' => $applications->pluck('ccu_cupon_id')->all(),
             'shipping' => $shipping,
             'hasApprovedOrder' => $this->hasApprovedOrder($email !== '' ? $email : (string) $applications->first()->ccu_correo_snapshot),
+            'usedNonMultipleCouponIds' => $this->usedCouponIds(
+                $email !== '' ? $email : (string) $applications->first()->ccu_correo_snapshot,
+                $applications->pluck('ccu_cupon_id')->map(fn ($id) => (int) $id)->all(),
+            ),
             'lines' => $items->map(function ($item) use ($promoted) {
                 $line = $promoted->get((string) $item->getKey());
 
@@ -339,5 +343,30 @@ class StorefrontCartCouponService
             ->whereRaw('LOWER(TRIM(p.ped_email)) = ?', [$email])
             ->where('pay.ppa_estado', 'APROBADA')
             ->exists();
+    }
+
+    /** @param array<int, int> $couponIds @return array<int, int> */
+    private function usedCouponIds(string $email, array $couponIds): array
+    {
+        $email = $this->email($email);
+        if ($email === '' || $couponIds === [] || ! Schema::hasTable('stj_pedido_cupones_aplicados')) {
+            return [];
+        }
+
+        $query = DB::table('stj_pedido_cupones_aplicados as applied')
+            ->whereIn('applied.pca_cupon_id', $couponIds)
+            ->where('applied.pca_estado', 'CONSUMIDO');
+        if (Schema::hasTable('stj_pedidos') && Schema::hasColumn('stj_pedido_cupones_aplicados', 'pca_pedido_id')) {
+            return $query->join('stj_pedidos as orders', 'orders.ped_id', '=', 'applied.pca_pedido_id')
+                ->whereRaw('LOWER(TRIM(orders.ped_email)) = ?', [$email])
+                ->pluck('applied.pca_cupon_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+        }
+        if (! Schema::hasColumn('stj_pedido_cupones_aplicados', 'pca_aplicacion_snapshot')) {
+            return [];
+        }
+
+        return $query->get(['applied.pca_cupon_id', 'applied.pca_aplicacion_snapshot'])
+            ->filter(fn ($row) => $this->email((string) data_get(json_decode((string) $row->pca_aplicacion_snapshot, true), 'email')) === $email)
+            ->pluck('pca_cupon_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
     }
 }

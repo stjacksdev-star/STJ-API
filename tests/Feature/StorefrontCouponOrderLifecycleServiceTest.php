@@ -59,6 +59,26 @@ class StorefrontCouponOrderLifecycleServiceTest extends TestCase
         $this->assertDatabaseHas('stj_cupones', ['cup_estado' => 'ACTIVO']);
     }
 
+    public function test_generic_non_multiple_coupon_cannot_be_consumed_twice_by_same_email(): void
+    {
+        $this->seedCoupon('NO');
+        DB::table('stj_cupones_header')->where('che_id', 2)->update(['che_generico' => 'SI']);
+        DB::table('stj_pedidos_pago')->insert(['ppa_pedido' => 50, 'ppa_estado' => 'APROBADA']);
+        $this->service->snapshot(10, 50);
+        $this->service->consumeApprovedOrder(50);
+
+        DB::table('stj_carrito_cupones')->insert([
+            'ccu_id' => 6, 'ccu_carrito_id' => 11, 'ccu_cupon_id' => 1, 'ccu_codigo' => 'CODE', 'ccu_estado' => 'APLICADO',
+            'ccu_carrito_version' => 1, 'ccu_correo_snapshot' => 'CLIENT@example.com', 'ccu_checkout_snapshot' => 'TIENDA',
+            'ccu_descuento_productos' => 3, 'ccu_descuento_envio' => 0, 'ccu_actualizado_en' => now(),
+        ]);
+        DB::table('stj_pedidos_pago')->insert(['ppa_pedido' => 51, 'ppa_estado' => 'APROBADA']);
+        $this->service->snapshot(11, 51);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->service->consumeApprovedOrder(51);
+    }
+
     public function test_failed_payment_reverses_application_without_consuming_code(): void
     {
         $this->seedCoupon('NO');

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 
 class StorefrontCouponOrderLifecycleService
 {
@@ -71,6 +72,12 @@ class StorefrontCouponOrderLifecycleService
 
         $rows = DB::table('stj_pedido_cupones_aplicados')->where('pca_pedido_id', $orderId)->lockForUpdate()->get();
         foreach ($rows as $row) {
+            $rule = DB::table('stj_cupones as c')->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
+                ->where('c.cup_id', $row->pca_cupon_id)->lockForUpdate()->first(['c.cup_id', 'h.che_multiple', 'h.che_generico']);
+            $email = mb_strtolower(trim((string) data_get(json_decode((string) $row->pca_aplicacion_snapshot, true), 'email')));
+            if (($rule->che_multiple ?? 'NO') !== 'SI' && $email !== '' && $this->consumedByEmail((int) $row->pca_cupon_id, $email, $orderId)) {
+                throw ValidationException::withMessages(['coupon' => 'Este cupón ya fue utilizado por este correo en un pedido aprobado.']);
+            }
             DB::table('stj_pedido_cupones_aplicados')->where('pca_id', $row->pca_id)->update([
                 'pca_estado' => 'CONSUMIDO', 'pca_consumido_en' => $row->pca_consumido_en ?: now(), 'pca_reversado_en' => null,
             ]);
@@ -79,14 +86,22 @@ class StorefrontCouponOrderLifecycleService
                     'ccu_estado' => 'CONSUMIDO', 'ccu_consumido_en' => now(), 'ccu_actualizado_en' => now(),
                 ]);
             }
-            $rule = DB::table('stj_cupones as c')->join('stj_cupones_header as h', 'h.che_id', '=', 'c.cup_header')
-                ->where('c.cup_id', $row->pca_cupon_id)->first(['h.che_multiple', 'h.che_generico']);
             if (($rule->che_generico ?? 'NO') !== 'SI' && ($rule->che_multiple ?? 'NO') !== 'SI') {
                 DB::table('stj_cupones')->where('cup_id', $row->pca_cupon_id)->update([
                     'cup_estado' => 'USADO', 'cup_fecha_utilizado' => now(), 'cup_disponible' => 0,
                 ]);
             }
         }
+    }
+
+    private function consumedByEmail(int $couponId, string $email, int $exceptOrderId): bool
+    {
+        return DB::table('stj_pedido_cupones_aplicados')
+            ->where('pca_cupon_id', $couponId)
+            ->where('pca_estado', 'CONSUMIDO')
+            ->where('pca_pedido_id', '<>', $exceptOrderId)
+            ->get(['pca_aplicacion_snapshot'])
+            ->contains(fn ($row) => mb_strtolower(trim((string) data_get(json_decode((string) $row->pca_aplicacion_snapshot, true), 'email'))) === $email);
     }
 
     public function closeUnapprovedOrder(int $orderId, string $paymentStatus): void

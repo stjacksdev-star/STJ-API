@@ -89,12 +89,56 @@ class StorefrontCartCouponServiceTest extends TestCase
 
     public function test_consumed_non_multiple_coupon_is_rejected(): void
     {
-        DB::table('stj_pedido_cupones_aplicados')->insert(['pca_cupon_id' => 1, 'pca_estado' => 'CONSUMIDO']);
+        DB::table('stj_pedido_cupones_aplicados')->insert([
+            'pca_cupon_id' => 1, 'pca_estado' => 'CONSUMIDO',
+            'pca_aplicacion_snapshot' => json_encode(['email' => 'client@example.com']),
+        ]);
 
         $this->expectException(ValidationException::class);
         $this->service->add('sv', $this->visitor, null, [
             'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'client@example.com',
         ]);
+    }
+
+    public function test_consumed_generic_non_multiple_coupon_is_rejected_only_for_same_email(): void
+    {
+        DB::table('stj_cupones_header')->where('che_id', 1)->update(['che_generico' => 'SI']);
+        DB::table('stj_pedido_cupones_aplicados')->insert([
+            'pca_cupon_id' => 1, 'pca_estado' => 'CONSUMIDO',
+            'pca_aplicacion_snapshot' => json_encode(['email' => 'client@example.com']),
+        ]);
+
+        try {
+            $this->service->add('sv', $this->visitor, null, [
+                'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'CLIENT@example.com',
+            ]);
+            $this->fail('El mismo correo no debe reutilizar un cupón genérico no múltiple.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('ya fue utilizado', $exception->getMessage());
+        }
+
+        $result = $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'other@example.com',
+        ]);
+        $this->assertSame('APLICADO', $result['applications'][0]['status']);
+    }
+
+    public function test_revalidation_removes_a_non_multiple_coupon_consumed_after_it_was_added(): void
+    {
+        DB::table('stj_cupones_header')->where('che_id', 1)->update(['che_generico' => 'SI']);
+        $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'client@example.com',
+        ]);
+        DB::table('stj_pedido_cupones_aplicados')->insert([
+            'pca_cupon_id' => 1, 'pca_estado' => 'CONSUMIDO',
+            'pca_aplicacion_snapshot' => json_encode(['email' => 'CLIENT@example.com']),
+        ]);
+
+        $result = $this->service->revalidateForIdentity('sv', $this->visitor, null, 'client@example.com');
+
+        $this->assertSame('NO_APLICABLE', $result['applications'][0]['status']);
+        $this->assertSame('CUPON_YA_UTILIZADO', $result['applications'][0]['reasonCode']);
+        $this->assertSame('0.00', $result['totals']['couponDiscount']);
     }
 
     public function test_inactive_coupon_cannot_be_added_by_code(): void
@@ -236,6 +280,7 @@ class StorefrontCartCouponServiceTest extends TestCase
             $t->id('pca_id');
             $t->unsignedBigInteger('pca_cupon_id');
             $t->string('pca_estado');
+            $t->json('pca_aplicacion_snapshot')->nullable();
         });
         Schema::create('stj_promociones', function (Blueprint $t) {
             $t->id('prm_id');
