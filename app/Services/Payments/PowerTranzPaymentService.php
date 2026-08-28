@@ -68,8 +68,8 @@ class PowerTranzPaymentService
             unset($storedResult['redirectData']);
             DB::table('stj_powertranz_operaciones')->insert(['pto_uuid' => $input['operation_uuid'], 'pto_pago_id' => $payment->ppa_id, 'pto_return_token_hash' => hash('sha256', $returnToken), 'pto_payload_hash' => $fingerprint, 'pto_estado' => $result['status'], 'pto_respuesta_segura' => Crypt::encryptString(json_encode($storedResult, JSON_UNESCAPED_SLASHES)), 'pto_creado_en' => now(), 'pto_actualizado_en' => now()]);
             DB::table('stj_pedidos_pago')->where('ppa_id', $payment->ppa_id)->update(['ppa_transactionidentifier' => $input['operation_uuid'], 'ppa_estado' => $result['status'] === 'DENEGADA' ? 'DENEGADA' : 'PENDIENTE', 'ppa_fecha_procesado' => now()]);
-            if ($result['status'] === 'APROBADA') {
-                $this->events->record((int) $payment->ppa_id, 'APROBADA', (string) Str::uuid(), ['provider' => 'POWERTRANZ']);
+            if (in_array($result['status'], ['APROBADA', 'DENEGADA'], true)) {
+                $this->events->record((int) $payment->ppa_id, $result['status'], (string) Str::uuid(), ['provider' => 'POWERTRANZ']);
             }
 
             return $result;

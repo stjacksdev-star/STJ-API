@@ -18,7 +18,7 @@ class PowerTranzPayloadFactory
             'TotalAmount' => $total,
             'CurrencyCode' => $currency,
             'ThreeDSecure' => true,
-            'Source' => ['CardPresent' => false, 'CardEmvFallback' => false, 'ManualEntry' => false, 'Debit' => false, 'Contactless' => false, 'CardPan' => preg_replace('/\s+/', '', (string) $card['pan']), 'CardCvv' => (string) $card['cvv'], 'CardExpiration' => (string) $card['expiration'], 'CardholderName' => trim(Str::ascii((string) $card['holder']))],
+            'Source' => ['CardPresent' => false, 'CardEmvFallback' => false, 'ManualEntry' => false, 'Debit' => false, 'Contactless' => false, 'CardPan' => preg_replace('/\s+/', '', (string) $card['pan']), 'CardCvv' => (string) $card['cvv'], 'CardExpiration' => $this->expiration((string) $card['expiration']), 'CardholderName' => trim(Str::ascii((string) $card['holder']))],
             'OrderIdentifier' => (string) $payment->ppa_ref,
             'BillingAddress' => ['FirstName' => trim(Str::ascii((string) $order->ped_nombres)), 'LastName' => trim(Str::ascii((string) $order->ped_apellidos)), 'Line1' => '', 'Line2' => '', 'City' => '', 'State' => '', 'PostalCode' => '', 'CountryCode' => '', 'EmailAddress' => trim((string) $order->ped_email), 'PhoneNumber' => $this->phoneNumber($order)],
             'AddressMatch' => false,
@@ -47,6 +47,25 @@ class PowerTranzPayloadFactory
         }
 
         return $countryCode.$phone;
+    }
+
+    private function expiration(string $value): string
+    {
+        $digits = preg_replace('/\D+/', '', $value);
+        if (strlen($digits) !== 4) {
+            throw ValidationException::withMessages(['card.expiration' => 'La fecha de vencimiento debe tener formato MM/YY.']);
+        }
+
+        $first = (int) substr($digits, 0, 2);
+        $last = (int) substr($digits, 2, 2);
+        if ($first >= 1 && $first <= 12) {
+            return substr($digits, 2, 2).substr($digits, 0, 2);
+        }
+        if ($last >= 1 && $last <= 12) {
+            return $digits;
+        }
+
+        throw ValidationException::withMessages(['card.expiration' => 'La fecha de vencimiento no contiene un mes válido.']);
     }
 
     private function cents(string $value): int

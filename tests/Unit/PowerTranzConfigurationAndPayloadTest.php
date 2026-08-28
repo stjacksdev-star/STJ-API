@@ -87,6 +87,17 @@ class PowerTranzConfigurationAndPayloadTest extends TestCase
         $this->assertSame('50377042525', $payload['BillingAddress']['PhoneNumber']);
     }
 
+    public function test_expiration_from_checkout_is_converted_from_month_year_to_powertranz_year_month(): void
+    {
+        $order = (object) ['ped_pais' => 'SV', 'ped_nombres' => 'Ana', 'ped_apellidos' => 'Lopez', 'ped_email' => 'ana@example.test', 'ped_telefono_pais' => '503', 'ped_telefono' => '7000-0000'];
+        $payment = (object) ['ppa_monto' => '10.00', 'ppa_ref' => 'STJ-EXPIRATION'];
+        $payload = (new PowerTranzPayloadFactory)->sale($order, $payment, [
+            'pan' => '4012000000020006', 'cvv' => '123', 'expiration' => '12/30', 'holder' => 'Ana Lopez',
+        ], '840', 'operation-id', 'https://api.example.test/return');
+
+        $this->assertSame('3012', $payload['Source']['CardExpiration']);
+    }
+
     public function test_sv_public_payload_preflight_uses_persisted_authority_and_opaque_return(): void
     {
         config(['powertranz.return_base_url' => 'https://test-api.stjacks.com/api/storefront/payments/powertranz/return']);

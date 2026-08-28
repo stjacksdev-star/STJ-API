@@ -28,6 +28,7 @@ class StorefrontPaymentEventService
                 return ['paymentId' => $paymentId, 'orderId' => (int) $payment->ppa_pedido, 'status' => 'APROBADA', 'purchaseCreated' => false];
             }
             DB::table('stj_pedidos_pago')->where('ppa_id', $paymentId)->update(['ppa_estado' => $status, 'ppa_fecha_procesado' => now()]);
+            $orderOrigin = strtoupper((string) DB::table('stj_pedidos')->where('ped_id', $payment->ppa_pedido)->value('ped_origen'));
             $purchaseCreated = false;
             if ($status === 'APROBADA') {
                 DB::table('stj_pedidos')
@@ -57,11 +58,68 @@ class StorefrontPaymentEventService
                             'car_convertido_en' => null,
                             'car_actualizado_en' => now(),
                         ]);
+                    if ($orderOrigin === 'APP') {
+                        $this->restoreMobileCart((int) $payment->ppa_pedido);
+                    }
                 }
                 ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->closeUnapprovedOrder((int) $payment->ppa_pedido, $status);
             }
 
             return ['paymentId' => $paymentId, 'orderId' => (int) $payment->ppa_pedido, 'status' => $status, 'purchaseCreated' => $purchaseCreated];
         });
+    }
+
+    private function restoreMobileCart(int $orderId): void
+    {
+        $target = DB::table('stj_carritos')->where('car_pedido_id', $orderId)->lockForUpdate()->first();
+        if (! $target) {
+            return;
+        }
+
+        $others = DB::table('stj_carritos')
+            ->where('car_id', '!=', $target->car_id)
+            ->where('car_pais_id', $target->car_pais_id)
+            ->where('car_estado', 'ACTIVO')
+            ->when($target->car_usu_id, fn ($query) => $query->where('car_usu_id', $target->car_usu_id), fn ($query) => $query->whereNull('car_usu_id')->where('car_visitante_id', $target->car_visitante_id))
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($others as $source) {
+            $lines = DB::table('stj_carrito_detalles')->where('cad_carrito_id', $source->car_id)->lockForUpdate()->get();
+            foreach ($lines as $line) {
+                $existing = DB::table('stj_carrito_detalles')
+                    ->where('cad_carrito_id', $target->car_id)
+                    ->where('cad_ref', $line->cad_ref)
+                    ->where('cad_talla', $line->cad_talla)
+                    ->lockForUpdate()
+                    ->first();
+                if ($existing) {
+                    DB::table('stj_carrito_detalles')->where('cad_id', $existing->cad_id)->update([
+                        'cad_cantidad' => min(99, (int) $existing->cad_cantidad + (int) $line->cad_cantidad),
+                        'cad_seleccionado' => (bool) $existing->cad_seleccionado || (bool) $line->cad_seleccionado,
+                        'cad_actualizado_en' => now(),
+                    ]);
+                    DB::table('stj_carrito_detalles')->where('cad_id', $line->cad_id)->delete();
+                } else {
+                    DB::table('stj_carrito_detalles')->where('cad_id', $line->cad_id)->update([
+                        'cad_carrito_id' => $target->car_id,
+                        'cad_actualizado_en' => now(),
+                    ]);
+                }
+            }
+            DB::table('stj_carritos')->where('car_id', $source->car_id)->update([
+                'car_estado' => 'MERGED',
+                'car_actualizado_en' => now(),
+            ]);
+        }
+
+        DB::table('stj_carritos')->where('car_id', $target->car_id)->update([
+            'car_pedido_id' => null,
+            'car_estado' => 'ACTIVO',
+            'car_checkout_en' => null,
+            'car_convertido_en' => null,
+            'car_version' => (int) $target->car_version + 1,
+            'car_actualizado_en' => now(),
+        ]);
     }
 }
