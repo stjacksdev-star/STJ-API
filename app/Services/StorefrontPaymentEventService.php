@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CustomerEvent;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class StorefrontPaymentEventService
@@ -35,18 +36,7 @@ class StorefrontPaymentEventService
                     ->where('ped_id', $payment->ppa_pedido)
                     ->where('ped_estatus', 'PENDIENTE_PAGO')
                     ->update(['ped_estatus' => 'RECIBIDO']);
-                $cart = DB::table('stj_carritos')->where('car_pedido_id', $payment->ppa_pedido)->first();
-                if ($cart?->car_usu_id) {
-                    StorefrontRecommendationService::forgetPurchaseHistory((int) $cart->car_usu_id, (int) $cart->car_pais_id);
-                }
-                if ($cart && ! DB::table('stj_cliente_eventos')->where('cev_pedido_id', $payment->ppa_pedido)->where('cev_tipo', 'PURCHASE')->exists()) {
-                    CustomerEvent::query()->create(['cev_event_uuid' => $eventUuid, 'cev_visitante_id' => $cart->car_visitante_id, 'cev_usu_id' => $cart->car_usu_id, 'cev_pais_id' => $cart->car_pais_id, 'cev_carrito_id' => $cart->car_id, 'cev_pedido_id' => $payment->ppa_pedido, 'cev_tipo' => 'PURCHASE', 'cev_valor' => $payment->ppa_monto, 'cev_moneda' => $cart->car_moneda, 'cev_origen' => 'WEB', 'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(), 'cev_metadata' => $metadata + ['paymentId' => $paymentId]]);
-                    $purchaseCreated = true;
-                }
-                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder((int) $payment->ppa_pedido);
-                if ($purchaseCreated) {
-                    ($this->postPurchase ?? app(StorefrontPostPurchaseService::class))->schedule((int) $payment->ppa_pedido, $paymentId);
-                }
+                $this->afterApprovedCommit($payment, $eventUuid, $metadata, $orderOrigin);
             } elseif (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR', 'ANULADO', 'REVERSION', 'DEVOLUCION'], true)) {
                 if (in_array($status, ['DENEGADA', 'TIMEOUT', 'ERROR'], true)) {
                     DB::table('stj_carritos')
@@ -62,10 +52,71 @@ class StorefrontPaymentEventService
                         $this->restoreMobileCart((int) $payment->ppa_pedido);
                     }
                 }
-                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->closeUnapprovedOrder((int) $payment->ppa_pedido, $status);
+                $this->afterRejectedCommit((int) $payment->ppa_pedido, $status);
             }
 
             return ['paymentId' => $paymentId, 'orderId' => (int) $payment->ppa_pedido, 'status' => $status, 'purchaseCreated' => $purchaseCreated];
+        });
+    }
+
+    private function afterApprovedCommit(object $payment, string $eventUuid, array $metadata, string $orderOrigin): void
+    {
+        DB::afterCommit(function () use ($payment, $eventUuid, $metadata, $orderOrigin) {
+            $cart = DB::table('stj_carritos')->where('car_pedido_id', $payment->ppa_pedido)->first();
+            if ($cart?->car_usu_id) {
+                StorefrontRecommendationService::forgetPurchaseHistory((int) $cart->car_usu_id, (int) $cart->car_pais_id);
+            }
+
+            $purchaseCreated = false;
+            if ($cart && ! DB::table('stj_cliente_eventos')->where('cev_pedido_id', $payment->ppa_pedido)->where('cev_tipo', 'PURCHASE')->exists()) {
+                try {
+                    CustomerEvent::query()->create([
+                        'cev_event_uuid' => $eventUuid, 'cev_visitante_id' => $cart->car_visitante_id,
+                        'cev_usu_id' => $cart->car_usu_id, 'cev_pais_id' => $cart->car_pais_id,
+                        'cev_carrito_id' => $cart->car_id, 'cev_pedido_id' => $payment->ppa_pedido,
+                        'cev_tipo' => 'PURCHASE', 'cev_valor' => $payment->ppa_monto,
+                        'cev_moneda' => $cart->car_moneda, 'cev_origen' => $orderOrigin === 'APP' ? 'APP' : 'WEB',
+                        'cev_ocurrido_en' => now(), 'cev_recibido_en' => now(),
+                        'cev_metadata' => $metadata + ['paymentId' => $payment->ppa_id],
+                    ]);
+                    $purchaseCreated = true;
+                } catch (\Throwable $exception) {
+                    Log::error('El pago fue aprobado, pero no se pudo registrar el evento PURCHASE.', [
+                        'order_id' => $payment->ppa_pedido,
+                        'payment_id' => $payment->ppa_id,
+                        'exception' => $exception->getMessage(),
+                    ]);
+                }
+            }
+
+            try {
+                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->consumeApprovedOrder((int) $payment->ppa_pedido);
+            } catch (\Throwable $exception) {
+                Log::error('El pago fue aprobado, pero no se pudieron consumir sus cupones.', [
+                    'order_id' => $payment->ppa_pedido,
+                    'payment_id' => $payment->ppa_id,
+                    'exception' => $exception->getMessage(),
+                ]);
+            }
+
+            if ($purchaseCreated) {
+                ($this->postPurchase ?? app(StorefrontPostPurchaseService::class))->schedule((int) $payment->ppa_pedido, (int) $payment->ppa_id);
+            }
+        });
+    }
+
+    private function afterRejectedCommit(int $orderId, string $status): void
+    {
+        DB::afterCommit(function () use ($orderId, $status) {
+            try {
+                ($this->couponLifecycle ?? app(StorefrontCouponOrderLifecycleService::class))->closeUnapprovedOrder($orderId, $status);
+            } catch (\Throwable $exception) {
+                Log::error('No se pudo cerrar el ciclo de cupones de un pago no aprobado.', [
+                    'order_id' => $orderId,
+                    'payment_status' => $status,
+                    'exception' => $exception->getMessage(),
+                ]);
+            }
         });
     }
 
