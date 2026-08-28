@@ -12,10 +12,12 @@ use App\Services\CheckoutEventService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PowerTranzController extends Controller
 {
@@ -60,7 +62,7 @@ class PowerTranzController extends Controller
         ]);
     }
 
-    public function handleReturn(Request $request, string $country, string $token, PowerTranzPaymentService $service, PowerTranzUrlFactory $urls, CheckoutEventService $events): JsonResponse|RedirectResponse
+    public function handleReturn(Request $request, string $country, string $token, PowerTranzPaymentService $service, PowerTranzUrlFactory $urls, CheckoutEventService $events): JsonResponse|RedirectResponse|Response
     {
         $data = $request->validate(['SpiToken' => ['required', 'string', 'max:10000'], 'TransactionIdentifier' => ['required', 'string', 'max:255'], 'Response' => ['required', 'string', 'max:10000']]);
         $event = ['country' => $country, 'flow' => 'PAYMENT', 'stage' => 'POWERTRANZ_RETURN', 'event' => 'POWERTRANZ_RETURN_RECEIVED', 'result' => 'STARTED', 'provider' => 'POWERTRANZ', 'operation_uuid' => $data['TransactionIdentifier']];
@@ -72,6 +74,22 @@ class PowerTranzController extends Controller
         }
         $payment = DB::table('stj_pedidos_pago')->where('ppa_id', $result['paymentId'])->first(['ppa_rsp_codigo', 'ppa_rsp_mensaje', 'ppa_monto']);
         $events->record($request, array_merge($event, ['event' => $result['status'] === 'APROBADA' ? 'POWERTRANZ_APPROVED' : 'POWERTRANZ_DENIED', 'result' => $result['status'] === 'APROBADA' ? 'SUCCESS' : 'REJECTED', 'severity' => $result['status'] === 'APROBADA' ? 'INFO' : 'WARNING', 'order_id' => $result['orderId'], 'payment_id' => $result['paymentId'], 'amount' => $payment?->ppa_monto, 'provider_code' => $payment?->ppa_rsp_codigo, 'provider_message' => $payment?->ppa_rsp_mensaje]));
+        $origin = DB::table('stj_pedidos')->where('ped_id', $result['orderId'])->value('ped_origen');
+        if (strtoupper((string) $origin) === 'APP') {
+            $approved = $result['status'] === 'APROBADA';
+            $title = $approved ? 'Pago confirmado' : 'Pago no aprobado';
+            $message = $approved
+                ? 'Tu pago fue confirmado. Estamos preparando el resumen de tu compra.'
+                : 'No fue posible aprobar el pago. Regresa a la app para revisar el resultado.';
+            $color = $approved ? '#16864b' : '#b42318';
+
+            return response("<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{$title}</title></head><body style=\"margin:0;min-height:100vh;display:grid;place-items:center;background:#f5fbff;font-family:Arial,sans-serif;color:#17202a\"><main style=\"max-width:520px;padding:32px;text-align:center\"><div style=\"font-size:52px;color:{$color}\">".($approved ? '&#10003;' : '!')."</div><h1>{$title}</h1><p style=\"line-height:1.6\">{$message}</p></main></body></html>", 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+                'Cache-Control' => 'no-store, private',
+                'Pragma' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
         $frontend = trim((string) config('powertranz.frontend_result_url'));
         if ($frontend !== '') {
             return redirect()->away($urls->frontendResultUrl($country, $result['status']))->withHeaders(['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache']);
@@ -93,6 +111,30 @@ class PowerTranzController extends Controller
 
     private function visitor(Request $request): StorefrontVisitor
     {
+        $customer = $this->customer();
+        if ($customer?->tokenCan('mobile:account')) {
+            $countryId = (int) $request->query('countryId');
+            if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {
+                throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+            }
+
+            $tokenId = (string) ($customer->currentAccessToken()?->getKey() ?? 'customer');
+            $hex = substr(hash('sha256', "stj-mobile:{$customer->getKey()}:{$tokenId}"), 0, 32);
+            $uuid = substr($hex, 0, 8).'-'.substr($hex, 8, 4).'-'.substr($hex, 12, 4).'-'.substr($hex, 16, 4).'-'.substr($hex, 20);
+            $now = now();
+            $visitor = StorefrontVisitor::query()->firstOrCreate(['vis_uuid' => $uuid], [
+                'vis_origen' => 'MOBILE', 'vis_pais_id' => $countryId,
+                'vis_primera_visita' => $now, 'vis_ultima_visita' => $now,
+                'vis_expira_en' => $now->copy()->addYear(), 'vis_creado_en' => $now, 'vis_actualizado_en' => $now,
+            ]);
+            $visitor->forceFill([
+                'vis_pais_id' => $countryId, 'vis_ultima_visita' => $now,
+                'vis_expira_en' => $now->copy()->addYear(), 'vis_actualizado_en' => $now,
+            ])->save();
+
+            return $visitor;
+        }
+
         return $request->attributes->get('storefrontVisitor');
     }
 

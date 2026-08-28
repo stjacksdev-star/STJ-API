@@ -203,7 +203,15 @@ class MobileCartController extends Controller
             'pickup.person' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
             'pickup.phone' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
             'pickup.identification' => ['nullable', 'string', 'max:50', 'not_regex:/[<>]/'],
-            'cash_change' => ['required', 'numeric', 'min:0'],
+            'delivery' => ['nullable', 'array'],
+            'delivery.city_id' => ['nullable', 'integer'],
+            'delivery.state_id' => ['nullable', 'integer'],
+            'delivery.city' => ['nullable', 'string', 'max:100'],
+            'delivery.state' => ['nullable', 'string', 'max:100'],
+            'delivery.addressLine1' => ['nullable', 'string', 'max:200'],
+            'delivery.reference' => ['nullable', 'string', 'max:500'],
+            'payment_type' => ['required', 'string', 'in:EFECTIVO,TARJETA'],
+            'cash_change' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
         $platform = strtoupper((string) $request->input('plataforma'));
@@ -238,11 +246,12 @@ class MobileCartController extends Controller
             throw ValidationException::withMessages(['customer.cityId' => 'La ubicacion de facturacion no pertenece al pais seleccionado.']);
         }
         $cart = $this->cartInCurrentStore($request, $country, $visitor, $customer);
-        if (data_get($cart, 'cart.type') !== 'TIENDA') {
-            throw ValidationException::withMessages(['payment_type' => 'Esta etapa mobile solo permite efectivo con retiro en tienda.']);
+        $paymentType = strtoupper((string) $data['payment_type']);
+        if ($paymentType === 'EFECTIVO' && data_get($cart, 'cart.type') !== 'TIENDA') {
+            throw ValidationException::withMessages(['payment_type' => 'El pago en efectivo solo esta disponible para retiro en tienda.']);
         }
 
-        $result = DB::transaction(function () use ($country, $visitor, $customer, $data, $location, $platform) {
+        $result = DB::transaction(function () use ($country, $visitor, $customer, $data, $location, $platform, $paymentType) {
             $this->carts->startCheckout(strtolower((string) $country->pai_codigo), $visitor, $customer, [
                 'operation_uuid' => (string) Str::uuid(),
                 'email' => (string) data_get($data, 'customer.email'),
@@ -258,11 +267,12 @@ class MobileCartController extends Controller
                 'operation_uuid' => $data['operation_uuid'],
                 'customer' => $trustedCustomer,
                 'pickup' => $data['pickup'] ?? ['samePerson' => true],
-                'payment_type' => 'EFECTIVO',
+                'delivery' => $data['delivery'] ?? [],
+                'payment_type' => $paymentType,
                 '_origin' => 'APP',
                 '_platform' => $platform,
                 '_app_build' => $data['app_build'],
-                '_cash_change' => $data['cash_change'],
+                '_cash_change' => $paymentType === 'EFECTIVO' ? ($data['cash_change'] ?? 0) : null,
                 'notes' => $data['notes'] ?? null,
             ]);
         });
