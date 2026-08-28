@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\Mobile\MobileAddressController;
 use App\Http\Controllers\Api\Mobile\MobileAuthController;
 use App\Http\Controllers\Api\Mobile\MobileCategoryController;
 use App\Http\Controllers\Api\Mobile\MobileCartController;
+use App\Http\Controllers\Api\Mobile\MobileCollectionController;
 use App\Http\Controllers\Api\Mobile\MobileDailyVisitController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
 use App\Http\Controllers\Api\Mobile\MobileStoreController;
@@ -107,6 +108,9 @@ Route::get('/mobile/v1/catalog/categories/{category}', [MobileCategoryController
     ->whereNumber('category')
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/collections/{collection}', [MobileCollectionController::class, 'show'])
+    ->whereNumber('collection')
     ->middleware('throttle:120,1');
 Route::post('/mobile/v1/catalog/favorites', [MobileProductController::class, 'setFavorite'])
     ->middleware('throttle:60,1');

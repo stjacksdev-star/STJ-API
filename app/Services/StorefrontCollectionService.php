@@ -14,7 +14,7 @@ class StorefrontCollectionService
         private readonly ?StorefrontProductPromotionPresenter $promotionPresenter = null,
     ) {}
 
-    public function find(string $countryCode, int $collectionId): ?array
+    public function find(string $countryCode, int $collectionId, ?string $storeCode = null): ?array
     {
         $collection = DB::table('stj_coleccion as collection')
             ->join('stj_paises as country', 'country.pai_id', '=', 'collection.col_pais')
@@ -78,6 +78,7 @@ class StorefrontCollectionService
         $availability = $this->productListAvailabilityService->summarize(
             strtolower((string) $collection->pai_codigo),
             $rows->map(fn ($product) => ['pro_codigo' => $product->pro_codigo])->all(),
+            $storeCode,
         );
         $commercial = ($this->promotionPresenter ?? app(StorefrontProductPromotionPresenter::class))->resolve(
             $rows,
