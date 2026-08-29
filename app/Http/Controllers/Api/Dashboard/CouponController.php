@@ -15,6 +15,7 @@ class CouponController extends BaseController
     public function index(Request $request)
     {
         abort_unless($request->user()?->tokenCan('dashboard'), 403);
+
         return $this->success($this->coupons->index(
             $request->string('country')->toString() ?: null,
             $request->string('status')->toString() ?: null,
@@ -23,7 +24,13 @@ class CouponController extends BaseController
             $request->integer('perPage', 20),
         ));
     }
-    public function catalogs(Request $request) { abort_unless($request->user()?->tokenCan('dashboard'), 403); return $this->success($this->coupons->catalogs($request->string('country')->toString())); }
+
+    public function catalogs(Request $request)
+    {
+        abort_unless($request->user()?->tokenCan('dashboard'), 403);
+
+        return $this->success($this->coupons->catalogs($request->string('country')->toString()));
+    }
 
     public function usageReport(Request $request, CouponUsageReportService $report)
     {
@@ -40,8 +47,15 @@ class CouponController extends BaseController
         return $this->success($report->report($data['country'], $data['startDate'], $data['endDate'], $data['search'] ?? null, (int) ($data['page'] ?? 1), (int) ($data['perPage'] ?? 20)));
     }
 
-    public function store(Request $request) { return $this->persist($request); }
-    public function update(Request $request, int $coupon) { return $this->persist($request, $coupon); }
+    public function store(Request $request)
+    {
+        return $this->persist($request);
+    }
+
+    public function update(Request $request, int $coupon)
+    {
+        return $this->persist($request, $coupon);
+    }
 
     public function status(Request $request, int $coupon)
     {
@@ -70,7 +84,14 @@ class CouponController extends BaseController
             'discount' => ['nullable', 'required_if:type,DESCUENTO', 'numeric', 'min:0.01', 'lt:100'],
             'minimumEnabled' => ['required', Rule::in(['SI', 'NO'])], 'minimumAmount' => ['nullable', 'required_if:minimumEnabled,SI', 'numeric', 'min:0'],
             'extraDiscount' => ['required', Rule::in(['SI', 'NO'])], 'multiple' => ['required', Rule::in(['SI', 'NO'])],
-            'promotionRule' => ['required', Rule::in(['TODOS', 'REGULAR', 'PROMO'])],
+            'promotionRule' => [
+                'required', Rule::in(['TODOS', 'REGULAR', 'PROMO']),
+                function (string $attribute, mixed $value, \Closure $fail) use ($request): void {
+                    if ($request->input('extraDiscount') === 'SI' && $value === 'REGULAR') {
+                        $fail('Un descuento extra debe aplicar a todos los productos o a productos con promocion.');
+                    }
+                },
+            ],
             'firstPurchaseOnly' => ['required', Rule::in(['SI', 'NO'])], 'startAt' => ['required', 'date'],
             'endAt' => ['required', 'date', 'after:startAt'], 'status' => ['required', Rule::in(['ACTIVO', 'INACTIVO'])],
             'audience' => ['required', Rule::in(['NA', 'VIP', 'PLA'])],
@@ -81,6 +102,7 @@ class CouponController extends BaseController
             'productsFile' => ['nullable', ...($coupon ? [] : ['required_if:productScope,PLA']), 'file', 'mimes:xlsx,csv,txt', 'max:5120'],
             'customersFile' => ['nullable', ...($coupon ? [] : ['required_if:audience,PLA']), 'file', 'mimes:xlsx,csv,txt', 'max:5120'],
         ]);
+
         return $this->success($this->coupons->save($data, $coupon, $request->file('productsFile'), $request->file('customersFile')), $coupon ? 'Cupón actualizado.' : 'Cupón creado.');
     }
 }

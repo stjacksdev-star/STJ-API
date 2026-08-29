@@ -73,18 +73,34 @@ class StorefrontCouponResolverTest extends TestCase
         $this->assertSame('75.00', $result['lines'][1]['finalTotal']);
     }
 
-    public function test_all_products_coupon_accumulates_after_the_promotion(): void
+    public function test_non_extra_coupon_replaces_the_promotion_on_eligible_products(): void
     {
         $this->coupon(1, ['che_aplica_promo' => 'TODOS'], ['cup_descuento' => 20]);
-        $this->coupon(2, ['che_aplica_promo' => 'TODOS'], ['cup_descuento' => 10]);
 
-        $result = $this->resolve([1, 2], [[
-            'productId' => 100, 'quantity' => 1, 'unitPrice' => 100, 'promotionDiscount' => 20,
+        $result = $this->resolve([1], [[
+            'productId' => 100, 'quantity' => 1, 'unitPrice' => 100, 'promotionDiscount' => 30,
         ]]);
 
-        $this->assertSame('24.00', $result['lines'][0]['couponDiscount']);
-        $this->assertSame('56.00', $result['lines'][0]['finalTotal']);
-        $this->assertSame(44.0, $result['lines'][0]['effectiveDiscountPercentage']);
+        $this->assertSame('0.00', $result['lines'][0]['promotionDiscount']);
+        $this->assertSame('20.00', $result['lines'][0]['couponDiscount']);
+        $this->assertSame('80.00', $result['lines'][0]['finalTotal']);
+        $this->assertSame(20.0, $result['lines'][0]['effectiveDiscountPercentage']);
+    }
+
+    public function test_extra_coupon_adds_its_percentage_points_to_the_promotion(): void
+    {
+        $this->coupon(1, [
+            'che_aplica_promo' => 'TODOS', 'che_descuento_extra' => 'SI',
+        ], ['cup_descuento' => 20]);
+
+        $result = $this->resolve([1], [[
+            'productId' => 100, 'quantity' => 1, 'unitPrice' => 100, 'promotionDiscount' => 30,
+        ]]);
+
+        $this->assertSame('30.00', $result['lines'][0]['promotionDiscount']);
+        $this->assertSame('20.00', $result['lines'][0]['couponDiscount']);
+        $this->assertSame('50.00', $result['lines'][0]['finalTotal']);
+        $this->assertSame(50.0, $result['lines'][0]['effectiveDiscountPercentage']);
     }
 
     public function test_discounts_can_never_reach_one_hundred_percent(): void
@@ -174,6 +190,7 @@ class StorefrontCouponResolverTest extends TestCase
                 'che_checkout' => 'TODO', 'che_generico' => 'SI', 'che_pais' => 1,
                 'che_inicio' => '2026-08-01 00:00:00', 'che_final' => '2026-08-31 23:59:59',
                 'che_monto' => 0, 'che_descuento' => 0, 'che_aplica_monto_minimo' => 'NO', 'che_monto_minimo' => 0,
+                'che_descuento_extra' => 'NO',
                 'che_multiple' => 'NO', 'che_aplica_promo' => 'TODOS', 'che_solo_primera_compra' => 'NO',
                 'che_estado' => 'ACTIVO', 'che_tipo_productos' => 'NA',
             ],
@@ -204,6 +221,7 @@ class StorefrontCouponResolverTest extends TestCase
             $table->decimal('che_descuento')->nullable();
             $table->string('che_aplica_monto_minimo')->nullable();
             $table->decimal('che_monto_minimo')->nullable();
+            $table->string('che_descuento_extra')->nullable();
             $table->string('che_multiple')->nullable();
             $table->string('che_aplica_promo')->nullable();
             $table->string('che_solo_primera_compra')->nullable();

@@ -181,7 +181,7 @@ class StorefrontCartCouponServiceTest extends TestCase
             'che_id' => 1, 'che_nombre' => 'Bienvenida', 'che_tipo' => 'DESCUENTO', 'che_aplica' => 'WEB',
             'che_checkout' => 'TODO', 'che_generico' => 'NO', 'che_pais' => 1, 'che_inicio' => '2026-01-01',
             'che_final' => '2027-01-01', 'che_monto' => 0, 'che_descuento' => 10, 'che_aplica_monto_minimo' => 'NO',
-            'che_monto_minimo' => 0, 'che_multiple' => 'NO', 'che_aplica_promo' => 'REGULAR',
+            'che_monto_minimo' => 0, 'che_descuento_extra' => 'NO', 'che_multiple' => 'NO', 'che_aplica_promo' => 'REGULAR',
             'che_solo_primera_compra' => 'NO', 'che_estado' => 'ACTIVO', 'che_tipo_productos' => 'NA',
         ]);
         DB::table('stj_cupones')->insert([
@@ -228,6 +228,7 @@ class StorefrontCartCouponServiceTest extends TestCase
             $t->decimal('che_descuento')->nullable();
             $t->string('che_aplica_monto_minimo')->nullable();
             $t->decimal('che_monto_minimo')->nullable();
+            $t->string('che_descuento_extra')->nullable();
             $t->string('che_multiple')->nullable();
             $t->string('che_aplica_promo')->nullable();
             $t->string('che_solo_primera_compra')->nullable();

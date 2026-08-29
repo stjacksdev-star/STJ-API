@@ -45,6 +45,13 @@ class StorefrontCouponResolver
                         continue;
                     }
 
+                    // A non-extra coupon becomes the only commercial discount on an eligible line.
+                    // An extra coupon preserves the promotion and adds its benefit over regular price.
+                    if ($coupon['extraDiscount'] !== 'SI' && $line['promotionDiscountCents'] > 0) {
+                        $line['promotionDiscountCents'] = 0;
+                        $line['currentTotalCents'] = $line['baseTotalCents'] - $line['couponDiscountCents'];
+                    }
+
                     $lineBenefit = $this->lineBenefit($coupon, $line, $productRules->get($line['productId']));
                     if ($lineBenefit < 1) {
                         continue;
@@ -147,7 +154,6 @@ class StorefrontCouponResolver
                 'promotionDiscountCents' => $promotionDiscount,
                 'couponDiscountCents' => 0,
                 'currentTotalCents' => $base - $promotionDiscount,
-                'couponPercentageBaseCents' => $base - $promotionDiscount,
                 'hasPromotion' => $promotionDiscount > 0 || ! empty($line['promotion']),
                 'coupons' => [],
             ];
@@ -184,7 +190,7 @@ class StorefrontCouponResolver
                 'c.cup_id', 'c.cup_header', 'c.cup_codigo', 'c.cup_estado', 'c.cup_monto', 'c.cup_descuento', 'c.cup_correo',
                 'h.che_nombre', 'h.che_tipo', 'h.che_aplica', 'h.che_checkout', 'h.che_generico', 'h.che_pais',
                 'h.che_inicio', 'h.che_final', 'h.che_monto', 'h.che_descuento', 'h.che_aplica_monto_minimo',
-                'h.che_monto_minimo', 'h.che_multiple', 'h.che_aplica_promo', 'h.che_solo_primera_compra',
+                'h.che_monto_minimo', 'h.che_descuento_extra', 'h.che_multiple', 'h.che_aplica_promo', 'h.che_solo_primera_compra',
                 'h.che_estado', 'h.che_tipo_productos',
             ]);
         $products = DB::table('stj_cupones_producto')
@@ -219,6 +225,7 @@ class StorefrontCouponResolver
                 'email' => mb_strtolower(trim((string) $row->cup_correo)),
                 'minimumEnabled' => (string) $row->che_aplica_monto_minimo,
                 'minimumAmount' => $row->che_monto_minimo,
+                'extraDiscount' => strtoupper(trim((string) ($row->che_descuento_extra ?? 'NO'))),
                 'multiple' => (string) ($row->che_multiple ?? 'NO'),
                 'promotionRule' => (string) ($row->che_aplica_promo ?? 'TODOS'),
                 'firstPurchaseOnly' => (string) ($row->che_solo_primera_compra ?? 'NO'),
@@ -305,9 +312,9 @@ class StorefrontCouponResolver
                 return 0;
             }
 
-            // Percentage coupons accumulate additively over the same post-promotion base.
-            // Example: 20% + 10% = 30%, instead of applying the second coupon to the remaining balance (28%).
-            return min($maximumBenefit, (int) round($line['couponPercentageBaseCents'] * $percentage / 100, 0, PHP_ROUND_HALF_UP));
+            // Coupon percentages always describe points over regular price. Whether the active
+            // promotion is preserved or replaced is controlled by che_descuento_extra.
+            return min($maximumBenefit, (int) round($line['baseTotalCents'] * $percentage / 100, 0, PHP_ROUND_HALF_UP));
         }
 
         $targetUnit = $this->cents($productRule?->cpr_precio ?? $coupon['detailAmount'] ?? $coupon['headerAmount'] ?? 0);
