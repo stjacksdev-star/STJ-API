@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\Mobile\MobileCartController;
 use App\Http\Controllers\Api\Mobile\MobileCollectionController;
 use App\Http\Controllers\Api\Mobile\MobileDailyVisitController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
+use App\Http\Controllers\Api\Mobile\MobilePromotionController;
 use App\Http\Controllers\Api\Mobile\MobileStoreController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\PowerTranzController;
@@ -111,6 +112,11 @@ Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/collections/{collection}', [MobileCollectionController::class, 'show'])
     ->whereNumber('collection')
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/promotions', [MobilePromotionController::class, 'index'])
+    ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/promotions/{promotion}', [MobilePromotionController::class, 'show'])
+    ->whereNumber('promotion')
     ->middleware('throttle:120,1');
 Route::post('/mobile/v1/catalog/favorites', [MobileProductController::class, 'setFavorite'])
     ->middleware('throttle:60,1');
