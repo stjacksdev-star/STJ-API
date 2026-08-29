@@ -97,7 +97,9 @@ class StorefrontPromotionLandingService
                 'product.pro_thumbs',
                 'product.pro_registro',
                 'country_product.ppa_precio',
+                'category.cat_id',
                 'category.cat_nombre',
+                'subcategory.sca_id',
                 'subcategory.sca_nombre',
             ])
             ->paginate($perPage, ['*'], 'page', $page);
@@ -154,6 +156,9 @@ class StorefrontPromotionLandingService
                     'brand' => trim((string) ($product->pro_marca ?: 'ST JACKS')),
                     'group' => trim((string) $product->pro_oc_genero),
                     'category' => $category,
+                    'categoryId' => (int) $product->cat_id,
+                    'subcategoryId' => (int) $product->sca_id,
+                    'subcategory' => trim((string) $product->sca_nombre),
                     'description' => $description,
                     'sizes' => trim((string) $product->pro_tallas),
                     'imageUrl' => StorefrontImageUrl::image((string) $product->pro_thumbs, 'p400'),

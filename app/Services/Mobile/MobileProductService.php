@@ -83,7 +83,10 @@ class MobileProductService
             ->where('p.pro_id', $productId)
             ->where('pp.ppa_pais', $countryId)
             ->where('pp.ppa_estado', 'ACTIVO')
-            ->first(['p.pro_id', 'p.pro_nombre', 'p.pro_descripcion', 'pp.ppa_precio']);
+            ->first([
+                'p.pro_id', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_categoria',
+                'p.pro_sub_categoria', 'c.cat_nombre', 'sc.sca_nombre', 'pp.ppa_precio',
+            ]);
 
         if (! $product) {
             throw ValidationException::withMessages(['product' => 'Producto no encontrado para el pais seleccionado.']);
@@ -94,6 +97,10 @@ class MobileProductService
             'nombre' => mb_convert_case(mb_strtolower((string) $product->pro_nombre, 'UTF-8'), MB_CASE_TITLE, 'UTF-8'),
             'preciov2' => number_format((float) $product->ppa_precio, 2),
             'descripcion' => str_replace('-', '<br/>-', (string) $product->pro_descripcion),
+            'categoria' => (int) $product->pro_categoria,
+            'subCategoria' => (int) $product->pro_sub_categoria,
+            'categoriaTxt' => (string) $product->cat_nombre,
+            'subCategoriaTxt' => (string) $product->sca_nombre,
             'Domicilio' => true,
             'Tienda' => true,
         ];
