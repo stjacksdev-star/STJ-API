@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use App\Services\AbandonedCartReportService;
 use App\Services\CouponAudienceEmailService;
 use App\Services\Dashboard\AssetPublicationService;
 use App\Services\PushNotificationService;
@@ -134,6 +135,19 @@ Artisan::command('customers:update-vip', function (VipCustomerService $customers
     return self::SUCCESS;
 })->purpose('Recalcula clientes VIP por compras aprobadas en los últimos seis meses');
 
+Artisan::command('reports:abandoned-carts', function (AbandonedCartReportService $report) {
+    if (! config('abandoned_carts.enabled')) {
+        $this->warn('El reporte de carritos abandonados esta deshabilitado.');
+
+        return self::SUCCESS;
+    }
+
+    $summary = $report->send();
+    $this->info("Reporte enviado. Pagos abandonados: {$summary['payment_abandoned']} | Carritos sin pedido: {$summary['cart_abandoned']}");
+
+    return self::SUCCESS;
+})->purpose('Envia el reporte diario de carritos y pagos abandonados');
+
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 Schedule::command('push:send-pending')->hourly();
 Schedule::command('productos:calcular-metricas')
@@ -149,6 +163,10 @@ Schedule::command('customers:update-vip')
     ->dailyAt('01:15')
     ->timezone('America/El_Salvador')
     ->withoutOverlapping(30);
+Schedule::command('reports:abandoned-carts')
+    ->dailyAt('08:00')
+    ->timezone((string) config('abandoned_carts.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(60);
 Schedule::command('inventory:sync')
     ->everyFiveMinutes()
     ->between('08:00', '21:00')
