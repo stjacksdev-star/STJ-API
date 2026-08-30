@@ -27,6 +27,11 @@ class CouponAudienceEmailService
             ->where('c.cup_correo_enviado', 0)->whereNotNull('c.cup_correo')->where('c.cup_correo', '<>', '')
             ->where(fn ($q) => $q->whereNull('h.che_inicio')->orWhere('h.che_inicio', '<=', now()))
             ->where(fn ($q) => $q->whereNull('h.che_final')->orWhere('h.che_final', '>=', now()))
+            ->when(Schema::hasTable('correos_rebotados'), fn ($query) => $query->whereNotExists(function ($bounced) {
+                $bounced->selectRaw('1')
+                    ->from('correos_rebotados as bounced')
+                    ->whereRaw('LOWER(TRIM(bounced.correo)) = LOWER(TRIM(c.cup_correo))');
+            }))
             ->orderBy('c.cup_id')->limit(max(1, min($limit, 25)))
             ->get(['c.cup_id', 'c.cup_codigo', 'c.cup_correo', 'c.cup_descuento', 'c.cup_monto', 'h.che_id as headerId', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_descuento', 'h.che_monto', 'h.che_final', 'h.che_aplica as channel', 'h.che_checkout as checkout', 'h.che_aplica_promo as promotionRule', 'h.che_aplica_monto_minimo as minimumEnabled', 'h.che_monto_minimo as minimumAmount', 'h.che_solo_primera_compra as firstPurchaseOnly', 'h.che_tipo_productos as productScope', 'h.che_multiple as multiple', 'h.che_coleccion as collectionId', 'category.cat_nombre as categoryName', 'collection.col_nombre as collectionName', 'p.pai_codigo']);
 

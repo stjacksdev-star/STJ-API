@@ -4,6 +4,7 @@ use App\Models\User;
 use App\Services\CouponAudienceEmailService;
 use App\Services\Dashboard\AssetPublicationService;
 use App\Services\PushNotificationService;
+use App\Services\VipCustomerService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -126,6 +127,13 @@ Artisan::command('coupons:send-pending-emails {--limit=25 : Máximo de correos p
     return $summary['failed'] > 0 ? self::FAILURE : self::SUCCESS;
 })->purpose('Envía correos pendientes de cupones personales VIP y cargados por archivo');
 
+Artisan::command('customers:update-vip', function (VipCustomerService $customers) {
+    $summary = $customers->refresh();
+    $this->info("VIP recalculados desde {$summary['since']}: {$summary['qualified']} | Reiniciados: {$summary['reset']} | Marcados: {$summary['marked']}");
+
+    return self::SUCCESS;
+})->purpose('Recalcula clientes VIP por compras aprobadas en los últimos seis meses');
+
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 Schedule::command('push:send-pending')->hourly();
 Schedule::command('productos:calcular-metricas')
@@ -137,6 +145,10 @@ Schedule::command('promotions:update')
 Schedule::command('coupons:send-pending-emails --limit=25')
     ->everyTenMinutes()
     ->withoutOverlapping(15);
+Schedule::command('customers:update-vip')
+    ->dailyAt('01:15')
+    ->timezone('America/El_Salvador')
+    ->withoutOverlapping(30);
 Schedule::command('inventory:sync')
     ->everyFiveMinutes()
     ->between('08:00', '21:00')

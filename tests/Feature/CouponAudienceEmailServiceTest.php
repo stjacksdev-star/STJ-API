@@ -19,6 +19,7 @@ class CouponAudienceEmailServiceTest extends TestCase
         Schema::create('stj_categorias', fn (Blueprint $t) => [$t->id('cat_id'), $t->string('cat_nombre')]);
         Schema::create('stj_coleccion', fn (Blueprint $t) => [$t->id('col_id'), $t->string('col_nombre')]);
         Schema::create('stj_cupones', function (Blueprint $t) { $t->id('cup_id'); $t->unsignedBigInteger('cup_header'); $t->string('cup_codigo'); $t->string('cup_correo')->nullable(); $t->string('cup_estado'); $t->decimal('cup_descuento')->nullable(); $t->decimal('cup_monto')->nullable(); $t->unsignedTinyInteger('cup_correo_enviado')->default(0); });
+        Schema::create('correos_rebotados', function (Blueprint $t) { $t->id(); $t->string('correo'); });
         config()->set('services.smtp2go.url', 'https://smtp.test/send'); config()->set('services.smtp2go.key', 'key'); config()->set('services.smtp2go.sender', 'test@example.com');
         config()->set('services.fcm.web_home_url', 'http://localhost/stj-ecommerce/public/sv');
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
@@ -43,5 +44,22 @@ class CouponAudienceEmailServiceTest extends TestCase
         $summary = app(CouponAudienceEmailService::class)->sendPending();
         $this->assertSame(1, $summary['failed']);
         $this->assertDatabaseHas('stj_cupones', ['cup_id' => 1, 'cup_correo_enviado' => 0]);
+    }
+
+    public function test_bounced_addresses_are_excluded_before_the_batch_limit(): void
+    {
+        DB::table('correos_rebotados')->insert(['correo' => ' VIP@EXAMPLE.COM ']);
+        DB::table('stj_cupones')->insert([
+            'cup_id' => 2, 'cup_header' => 1, 'cup_codigo' => 'VIP21', 'cup_correo' => 'valid@example.com',
+            'cup_estado' => 'ACTIVO', 'cup_descuento' => 20, 'cup_monto' => 0, 'cup_correo_enviado' => 0,
+        ]);
+        Http::fake(['*' => Http::response(['data' => ['failed' => 0, 'succeeded' => 1]])]);
+
+        $summary = app(CouponAudienceEmailService::class)->sendPending(1);
+
+        $this->assertSame(1, $summary['sent']);
+        $this->assertDatabaseHas('stj_cupones', ['cup_id' => 1, 'cup_correo_enviado' => 0]);
+        $this->assertDatabaseHas('stj_cupones', ['cup_id' => 2, 'cup_correo_enviado' => 1]);
+        Http::assertSent(fn ($request) => str_contains($request['to'][0], 'valid@example.com'));
     }
 }
