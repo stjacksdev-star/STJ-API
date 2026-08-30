@@ -73,6 +73,8 @@ Route::post('/mobile/v1/visits', MobileDailyVisitController::class)
     ->middleware('throttle:30,1');
 Route::get('/mobile/v1/assets/lifestyle', [MobileAssetController::class, 'lifestyle'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/assets/banners', [MobileAssetController::class, 'banners'])
+    ->middleware('throttle:120,1');
 Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
     Route::get('/session', [MobileAuthController::class, 'session']);
     Route::post('/logout', [MobileAuthController::class, 'logout']);

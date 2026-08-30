@@ -70,6 +70,34 @@ class MobileLifestyleAssetEndpointTest extends TestCase
         ]);
     }
 
+    public function test_it_returns_active_app_banners_with_action_type_and_legacy_records_wrapper(): void
+    {
+        DB::table('stj_assets')->insert([
+            [...$this->asset(20, 1, 'APP', 2, '/banner-two.jpg', 6, 0, 'Jack and Co'), 'ast_tipo' => 'BANNER'],
+            [...$this->asset(21, 1, 'TODO', 1, 'https://cdn.example.com/banner-one.jpg', 1, 700, 'Promocion'), 'ast_tipo' => 'BANNER'],
+            [...$this->asset(22, 1, 'WEB', 0, '/web-banner.jpg', 1, 800, 'Solo web'), 'ast_tipo' => 'BANNER'],
+        ]);
+
+        $response = $this->getJson('/api/mobile/v1/assets/banners?countryId=1&plataforma=IOS');
+
+        $response->assertOk()->assertExactJson([
+            'records' => [
+                [
+                    'banner' => 'https://cdn.example.com/banner-one.jpg', 'accion' => true,
+                    'tipoAccion' => 1, 'imgHeader' => 'https://cdn.example.com/banner-one.jpg',
+                    'title' => 'Promocion', 'descripcion' => '', 'promocion' => 700,
+                    'categoria' => null, 'scategoria' => null, 'URL' => null,
+                ],
+                [
+                    'banner' => 'https://stjacks.com/banner-two.jpg', 'accion' => true,
+                    'tipoAccion' => 6, 'imgHeader' => 'https://stjacks.com/banner-two.jpg',
+                    'title' => 'Jack and Co', 'descripcion' => '', 'promocion' => 0,
+                    'categoria' => null, 'scategoria' => null, 'URL' => null,
+                ],
+            ],
+        ]);
+    }
+
     /** @return array<string, mixed> */
     private function asset(int $id, int $country, string $platform, int $order, string $image, int $action, int $promotion, string $title): array
     {
