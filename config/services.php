@@ -42,6 +42,10 @@ return [
         'contact_to' => env('STOREFRONT_CONTACT_TO', 'servicioalcliente@stjacks.com'),
     ],
 
+    'mobile_assets' => [
+        'base_url' => env('MOBILE_ASSET_BASE_URL', 'https://stjacks.com'),
+    ],
+
     'fcm' => [
         'url' => env('FCM_API_URL', 'https://fcm.googleapis.com/v1'),
         'server_key' => env('FCM_SERVER_KEY'),

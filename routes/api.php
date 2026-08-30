@@ -15,17 +15,18 @@ use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProd
 use App\Http\Controllers\Api\Dashboard\ProductMasterController as DashboardProductMasterController;
 use App\Http\Controllers\Api\Dashboard\ProductPerformanceReportController as DashboardProductPerformanceReportController;
 use App\Http\Controllers\Api\Dashboard\PromotionAssetController as DashboardPromotionAssetController;
-use App\Http\Controllers\Api\Dashboard\StandaloneAssetController as DashboardStandaloneAssetController;
 use App\Http\Controllers\Api\Dashboard\PromotionController as DashboardPromotionController;
 use App\Http\Controllers\Api\Dashboard\PushNotificationController as DashboardPushNotificationController;
 use App\Http\Controllers\Api\Dashboard\SalesKpiController as DashboardSalesKpiController;
+use App\Http\Controllers\Api\Dashboard\StandaloneAssetController as DashboardStandaloneAssetController;
 use App\Http\Controllers\Api\Dashboard\StoreReportController as DashboardStoreReportController;
 use App\Http\Controllers\Api\Dashboard\SubscriberController as DashboardSubscriberController;
 use App\Http\Controllers\Api\Dashboard\UserCountryAccessController as DashboardUserCountryAccessController;
 use App\Http\Controllers\Api\Mobile\MobileAddressController;
+use App\Http\Controllers\Api\Mobile\MobileAssetController;
 use App\Http\Controllers\Api\Mobile\MobileAuthController;
-use App\Http\Controllers\Api\Mobile\MobileCategoryController;
 use App\Http\Controllers\Api\Mobile\MobileCartController;
+use App\Http\Controllers\Api\Mobile\MobileCategoryController;
 use App\Http\Controllers\Api\Mobile\MobileCollectionController;
 use App\Http\Controllers\Api\Mobile\MobileDailyVisitController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
@@ -70,6 +71,8 @@ Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
     ->middleware('throttle:10,1');
 Route::post('/mobile/v1/visits', MobileDailyVisitController::class)
     ->middleware('throttle:30,1');
+Route::get('/mobile/v1/assets/lifestyle', [MobileAssetController::class, 'lifestyle'])
+    ->middleware('throttle:120,1');
 Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
     Route::get('/session', [MobileAuthController::class, 'session']);
     Route::post('/logout', [MobileAuthController::class, 'logout']);
