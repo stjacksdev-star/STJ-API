@@ -75,6 +75,8 @@ Route::get('/mobile/v1/assets/lifestyle', [MobileAssetController::class, 'lifest
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/assets/banners', [MobileAssetController::class, 'banners'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/assets/new-arrivals', [MobileAssetController::class, 'newArrivals'])
+    ->middleware('throttle:120,1');
 Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
     Route::get('/session', [MobileAuthController::class, 'session']);
     Route::post('/logout', [MobileAuthController::class, 'logout']);

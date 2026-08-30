@@ -24,6 +24,7 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             $table->string('ast_tipo');
             $table->string('ast_estado');
             $table->string('ast_plataforma');
+            $table->string('ast_posicion')->nullable();
             $table->integer('ast_orden')->nullable();
             $table->string('ast_imagen')->nullable();
             $table->string('ast_imagen_movil')->nullable();
@@ -32,6 +33,19 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             $table->string('ast_titulo')->nullable();
             $table->dateTime('ast_inicio')->nullable();
             $table->dateTime('ast_fin')->nullable();
+        });
+        Schema::create('stj_promociones', function (Blueprint $table) {
+            $table->id('prm_id');
+            $table->unsignedBigInteger('prm_pais');
+            $table->string('prm_estado');
+            $table->string('prm_nombre');
+            $table->string('prm_encabezado')->nullable();
+        });
+        Schema::create('stj_coleccion', function (Blueprint $table) {
+            $table->id('col_id');
+            $table->unsignedBigInteger('col_pais');
+            $table->string('col_nombre');
+            $table->string('col_header')->nullable();
         });
 
         DB::table('stj_paises')->insert([['pai_id' => 1], ['pai_id' => 2]]);
@@ -98,6 +112,33 @@ class MobileLifestyleAssetEndpointTest extends TestCase
         ]);
     }
 
+    public function test_it_combines_left_center_and_right_new_arrivals_in_one_endpoint(): void
+    {
+        DB::table('stj_promociones')->insert([
+            ['prm_id' => 700, 'prm_pais' => 1, 'prm_estado' => 'EN-PROCESO', 'prm_nombre' => 'Promocion activa', 'prm_encabezado' => '/promo-header.jpg'],
+            ['prm_id' => 701, 'prm_pais' => 1, 'prm_estado' => 'FINALIZADO', 'prm_nombre' => 'Promocion finalizada', 'prm_encabezado' => null],
+        ]);
+        DB::table('stj_coleccion')->insert(['col_id' => 900, 'col_pais' => 1, 'col_nombre' => 'Spider Man', 'col_header' => '/collection-header.jpg']);
+        DB::table('stj_assets')->insert([
+            [...$this->asset(30, 1, 'APP', 1, '/left.jpg', 1, 700, 'Fallback'), 'ast_tipo' => 'LO-MAS-NUEVO', 'ast_posicion' => 'IZQUIERDA'],
+            [...$this->asset(31, 1, 'TODO', 1, '/center.jpg', 7, 900, 'Fallback'), 'ast_tipo' => 'LO-MAS-NUEVO', 'ast_posicion' => 'CENTRO'],
+            [...$this->asset(32, 1, 'APP', 1, '/right.jpg', 7, 900, 'Fallback'), 'ast_tipo' => 'LO-MAS-NUEVO', 'ast_posicion' => 'DERECHA'],
+            [...$this->asset(33, 1, 'APP', 2, '/finished.jpg', 1, 701, 'No mostrar'), 'ast_tipo' => 'LO-MAS-NUEVO', 'ast_posicion' => 'IZQUIERDA'],
+        ]);
+
+        $response = $this->getJson('/api/mobile/v1/assets/new-arrivals?countryId=1&plataforma=IOS');
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'left')
+            ->assertJsonCount(1, 'center')
+            ->assertJsonCount(1, 'right')
+            ->assertJsonPath('left.0.tipoAccion', 1)
+            ->assertJsonPath('left.0.title', 'Promocion activa')
+            ->assertJsonPath('center.0.tipoAccion', 7)
+            ->assertJsonPath('center.0.title', 'Spider Man')
+            ->assertJsonPath('right.0.promocion', 900);
+    }
+
     /** @return array<string, mixed> */
     private function asset(int $id, int $country, string $platform, int $order, string $image, int $action, int $promotion, string $title): array
     {
@@ -105,7 +146,8 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             'ast_id' => $id, 'ast_pais' => $country, 'ast_tipo' => 'SLIDER', 'ast_estado' => 'ACTIVO',
             'ast_plataforma' => $platform, 'ast_orden' => $order, 'ast_imagen' => '/desktop.jpg',
             'ast_imagen_movil' => $image, 'ast_tipo_accion' => $action, 'ast_idpromocion' => $promotion,
-            'ast_titulo' => $title, 'ast_inicio' => '2026-08-01 00:00:00', 'ast_fin' => '2026-08-31 23:59:59',
+            'ast_titulo' => $title, 'ast_posicion' => null,
+            'ast_inicio' => '2026-08-01 00:00:00', 'ast_fin' => '2026-08-31 23:59:59',
         ];
     }
 }
