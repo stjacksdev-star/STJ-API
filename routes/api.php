@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\Mobile\MobileCollectionController;
 use App\Http\Controllers\Api\Mobile\MobileDailyVisitController;
 use App\Http\Controllers\Api\Mobile\MobileProductController;
 use App\Http\Controllers\Api\Mobile\MobilePromotionController;
+use App\Http\Controllers\Api\Mobile\MobilePushSubscriptionController;
 use App\Http\Controllers\Api\Mobile\MobileStoreController;
 use App\Http\Controllers\Api\PedidoController;
 use App\Http\Controllers\Api\PowerTranzController;
@@ -71,6 +72,8 @@ Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
     ->middleware('throttle:10,1');
 Route::post('/mobile/v1/visits', MobileDailyVisitController::class)
     ->middleware('throttle:30,1');
+Route::post('/mobile/v1/push/subscriptions', [MobilePushSubscriptionController::class, 'store'])
+    ->middleware('throttle:20,1');
 Route::get('/mobile/v1/assets/lifestyle', [MobileAssetController::class, 'lifestyle'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/assets/banners', [MobileAssetController::class, 'banners'])

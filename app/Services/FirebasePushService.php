@@ -119,6 +119,27 @@ class FirebasePushService
     }
 
     /**
+     * Envia a todas las suscripciones activas de un cliente, sin confiar en un usu_id recibido del frontend.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{sent: int, failed: int, results: array<int, array{token: string, ok: bool, result: string}>}
+     */
+    public function sendToUser(int $userId, string $title, string $body, array $data = []): array
+    {
+        $tokens = DB::table('stj_push_suscripciones')
+            ->where('psu_usu_id', $userId)
+            ->where('psu_estado', 'ACTIVA')
+            ->where('psu_permiso', 'GRANTED')
+            ->whereNotNull('psu_token')
+            ->where('psu_token', '<>', '')
+            ->distinct()
+            ->pluck('psu_token')
+            ->all();
+
+        return $this->sendToTokens($tokens, $title, $body, $data);
+    }
+
+    /**
      * @param  array<string, mixed>  $message
      */
     public function sendMessage(array $message): string
@@ -145,14 +166,30 @@ class FirebasePushService
 
         $topics = $this->topicVariants($topic);
 
-        return DB::table('stj_tokens')
-            ->whereIn('tok_tipo', $platforms)
-            ->whereNotNull('tok_token')
-            ->where('tok_token', '<>', '-')
-            ->where('tok_token', '<>', '')
-            ->when($topics !== [], fn ($query) => $query->whereIn('tok_topic', $topics))
+        return DB::table('stj_push_suscripciones as s')
+            ->whereIn('s.psu_plataforma', $platforms)
+            ->where('s.psu_estado', 'ACTIVA')
+            ->where('s.psu_permiso', 'GRANTED')
+            ->whereNotNull('s.psu_token')
+            ->where('s.psu_token', '<>', '')
+            ->when($topics !== [], function ($query) use ($topics) {
+                $normalized = collect($topics)
+                    ->map(fn ($topic) => strtolower($this->normalizeTopic((string) $topic)))
+                    ->unique()->values()->all();
+                $query->whereExists(function ($subquery) use ($normalized) {
+                    $subquery->selectRaw('1')
+                        ->from('stj_push_suscripcion_topics as st')
+                        ->join('stj_push_topics as t', 't.pto_id', '=', 'st.pst_topic_id')
+                        ->whereColumn('st.pst_suscripcion_id', 's.psu_id')
+                        ->where('t.pto_estado', 'ACTIVO')
+                        ->whereIn('t.pto_codigo', $normalized)
+                        ->where(function ($active) {
+                            $active->whereNull('st.pst_expira_en')->orWhere('st.pst_expira_en', '>', now());
+                        });
+                });
+            })
             ->distinct()
-            ->pluck('tok_token')
+            ->pluck('s.psu_token')
             ->map(fn ($token) => trim((string) $token))
             ->filter(fn (string $token) => $token !== '' && $token !== '-')
             ->values()
@@ -404,9 +441,10 @@ class FirebasePushService
     private function platforms(string $platform): array
     {
         return match (strtolower(trim($platform))) {
-            'todo', 'all' => ['Android', 'Ios'],
-            'ios' => ['Ios'],
-            default => ['Android'],
+            'todo', 'all' => ['ANDROID', 'IOS', 'WEB'],
+            'ios' => ['IOS'],
+            'web' => ['WEB'],
+            default => ['ANDROID'],
         };
     }
 

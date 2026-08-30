@@ -17,6 +17,9 @@ class WebPushSubscription extends Model
     protected $hidden = ['psu_token', 'psu_token_hash'];
 
     protected $casts = [
+        'psu_usu_id' => 'integer',
+        'psu_pais_id' => 'integer',
+        'psu_sesion_id' => 'integer',
         'psu_ultima_actividad_en' => 'datetime',
         'psu_token_actualizado_en' => 'datetime',
         'psu_revocado_en' => 'datetime',

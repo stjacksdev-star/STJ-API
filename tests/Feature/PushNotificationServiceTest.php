@@ -34,13 +34,22 @@ class PushNotificationServiceTest extends TestCase
             npu_promocion INTEGER NULL
         )');
 
-        DB::statement('CREATE TABLE stj_tokens (
-            tok_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tok_token TEXT NULL,
-            tok_session TEXT NULL,
-            tok_tipo TEXT NULL,
-            tok_fecha TEXT NULL,
-            tok_topic TEXT NULL
+        DB::statement('CREATE TABLE stj_push_suscripciones (
+            psu_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            psu_token TEXT NULL,
+            psu_plataforma TEXT NOT NULL,
+            psu_estado TEXT NOT NULL,
+            psu_permiso TEXT NOT NULL
+        )');
+        DB::statement('CREATE TABLE stj_push_topics (
+            pto_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pto_codigo TEXT NOT NULL,
+            pto_estado TEXT NOT NULL
+        )');
+        DB::statement('CREATE TABLE stj_push_suscripcion_topics (
+            pst_suscripcion_id INTEGER NOT NULL,
+            pst_topic_id INTEGER NOT NULL,
+            pst_expira_en TEXT NULL
         )');
 
         DB::statement('CREATE TABLE stj_promociones (
@@ -83,13 +92,18 @@ class PushNotificationServiceTest extends TestCase
             ], 200),
         ]);
 
+        DB::table('stj_push_topics')->insert(['pto_id' => 10, 'pto_codigo' => 'country.sv', 'pto_estado' => 'ACTIVO']);
+        DB::table('stj_push_suscripciones')->insert([
+            'psu_id' => 10, 'psu_token' => 'web-token-1', 'psu_plataforma' => 'WEB', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED',
+        ]);
+        DB::table('stj_push_suscripcion_topics')->insert(['pst_suscripcion_id' => 10, 'pst_topic_id' => 10]);
         DB::table('stj_notificaciones_push')->insert([
             'npu_id' => 100,
             'npu_titulo' => 'Nueva promo',
             'npu_cuerpo' => 'Tenemos descuentos',
             'npu_imagen' => '/images/promo.jpg',
             'npu_action' => 'https://stjacks.com/promo',
-            'npu_para' => '/topics/sv',
+            'npu_para' => 'country.sv',
             'npu_plataforma' => 'WEB',
             'npu_promocion' => null,
         ]);
@@ -106,7 +120,7 @@ class PushNotificationServiceTest extends TestCase
 
         $this->assertSame(['pending' => 1, 'sent' => 1, 'failed' => 0], $summary);
         $this->assertSame('ENVIADO', DB::table('stj_notificaciones_push_envios')->value('npe_estado'));
-        $this->assertSame('{"name":"projects\/stj-test\/messages\/123"}', DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
+        $this->assertStringContainsString('"sent":1', DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
 
         Http::assertSent(function ($request) {
             if ($request->url() !== 'https://oauth2.test/token') {
@@ -128,7 +142,7 @@ class PushNotificationServiceTest extends TestCase
             $message = $payload['message'] ?? [];
 
             return $request->hasHeader('Authorization', 'Bearer test-access-token')
-                && $message['topic'] === 'sv'
+                && $message['token'] === 'web-token-1'
                 && $message['notification']['title'] === 'Nueva promo'
                 && $message['notification']['body'] === 'Tenemos descuentos'
                 && $message['notification']['image'] === 'https://stjacks.com/images/promo.jpg'
@@ -182,11 +196,19 @@ class PushNotificationServiceTest extends TestCase
             ], 200),
         ]);
 
-        DB::table('stj_tokens')->insert([
-            ['tok_token' => 'android-token-1', 'tok_tipo' => 'Android', 'tok_topic' => 'androidsv'],
-            ['tok_token' => 'android-token-2', 'tok_tipo' => 'Android', 'tok_topic' => '/topics/androidsv'],
-            ['tok_token' => 'ios-token-1', 'tok_tipo' => 'Ios', 'tok_topic' => 'androidsv'],
-            ['tok_token' => '-', 'tok_tipo' => 'Android', 'tok_topic' => 'androidsv'],
+        DB::table('stj_push_topics')->insert([
+            'pto_id' => 1, 'pto_codigo' => 'country.sv', 'pto_estado' => 'ACTIVO',
+        ]);
+        DB::table('stj_push_suscripciones')->insert([
+            ['psu_id' => 1, 'psu_token' => 'android-token-1', 'psu_plataforma' => 'ANDROID', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 2, 'psu_token' => 'android-token-2', 'psu_plataforma' => 'ANDROID', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 3, 'psu_token' => 'ios-token-1', 'psu_plataforma' => 'IOS', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 4, 'psu_token' => '', 'psu_plataforma' => 'ANDROID', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+        ]);
+        DB::table('stj_push_suscripcion_topics')->insert([
+            ['pst_suscripcion_id' => 1, 'pst_topic_id' => 1],
+            ['pst_suscripcion_id' => 2, 'pst_topic_id' => 1],
+            ['pst_suscripcion_id' => 3, 'pst_topic_id' => 1],
         ]);
 
         DB::table('stj_notificaciones_push')->insert([
@@ -195,7 +217,7 @@ class PushNotificationServiceTest extends TestCase
             'npu_cuerpo' => 'Solo Android',
             'npu_imagen' => '/images/promo.jpg',
             'npu_action' => 'https://stjacks.com/android',
-            'npu_para' => '/topics/androidsv',
+            'npu_para' => 'country.sv',
             'npu_plataforma' => 'Android',
             'npu_promocion' => null,
         ]);

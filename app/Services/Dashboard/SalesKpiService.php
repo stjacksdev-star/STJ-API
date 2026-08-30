@@ -22,7 +22,7 @@ class SalesKpiService
     ];
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      */
     public function orders(array $filters): array
     {
@@ -864,14 +864,15 @@ class SalesKpiService
     {
         $selectedYear = $year ?: now()->year;
 
-        $rows = DB::table('stj_tokens')
-            ->whereYear('tok_fecha', $selectedYear)
-            ->groupByRaw('MONTH(tok_fecha)')
-            ->orderByRaw('MONTH(tok_fecha) ASC')
+        $rows = DB::table('stj_push_suscripciones')
+            ->whereIn('psu_plataforma', ['IOS', 'ANDROID'])
+            ->whereYear('psu_creado_en', $selectedYear)
+            ->groupByRaw('MONTH(psu_creado_en)')
+            ->orderByRaw('MONTH(psu_creado_en) ASC')
             ->selectRaw("
-                MONTH(tok_fecha) AS month,
-                COUNT(DISTINCT CASE WHEN tok_tipo = 'Android' THEN tok_token END) AS android,
-                COUNT(DISTINCT CASE WHEN tok_tipo = 'Ios' THEN tok_token END) AS ios
+                MONTH(psu_creado_en) AS month,
+                COUNT(DISTINCT CASE WHEN psu_plataforma = 'ANDROID' THEN psu_instalacion_uuid END) AS android,
+                COUNT(DISTINCT CASE WHEN psu_plataforma = 'IOS' THEN psu_instalacion_uuid END) AS ios
             ")
             ->get()
             ->map(fn (object $row) => [
@@ -888,9 +889,10 @@ class SalesKpiService
             'ios' => (int) array_sum(array_column($rows, 'ios')),
         ];
 
-        $years = DB::table('stj_tokens')
-            ->selectRaw('DISTINCT YEAR(tok_fecha) AS year')
-            ->whereNotNull('tok_fecha')
+        $years = DB::table('stj_push_suscripciones')
+            ->selectRaw('DISTINCT YEAR(psu_creado_en) AS year')
+            ->whereIn('psu_plataforma', ['IOS', 'ANDROID'])
+            ->whereNotNull('psu_creado_en')
             ->orderByDesc('year')
             ->pluck('year')
             ->map(fn ($year) => (int) $year)
@@ -1460,7 +1462,7 @@ class SalesKpiService
     }
 
     /**
-     * @param array{code: ?string, id: ?int, name: ?string}|null $store
+     * @param  array{code: ?string, id: ?int, name: ?string}|null  $store
      */
     private function pendingOrderDetails(int $countryId, ?array $store, ?string $start, ?string $end): array
     {
@@ -1492,8 +1494,8 @@ class SalesKpiService
     }
 
     /**
-     * @param array{code: ?string, id: ?int, name: ?string}|null $store
-     * @param array<int, string> $statuses
+     * @param  array{code: ?string, id: ?int, name: ?string}|null  $store
+     * @param  array<int, string>  $statuses
      */
     private function orderDetailsByStatuses(int $countryId, ?array $store, ?string $start, ?string $end, array $statuses): array
     {
@@ -1643,7 +1645,7 @@ class SalesKpiService
     }
 
     /**
-     * @param array<string, mixed> $definition
+     * @param  array<string, mixed>  $definition
      */
     private function otifRows(array $definition)
     {
@@ -1670,7 +1672,7 @@ class SalesKpiService
         }
 
         return $query
-            ->selectRaw($definition['select'].",
+            ->selectRaw($definition['select'].',
                 COALESCE(
                     (
                         IFNULL(SUM(CASE WHEN DATE(pay.ppa_fecha_entregado) <= DATE(DATE_ADD(pay.ppa_fecha, INTERVAL 7 DAY)) THEN pay.ppa_articulos_final END), 0)
@@ -1678,7 +1680,7 @@ class SalesKpiService
                     ) * 100,
                     0
                 ) AS otif
-            ")
+            ')
             ->get();
     }
 
@@ -1698,7 +1700,7 @@ class SalesKpiService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $segments
+     * @param  array<int, array<string, mixed>>  $segments
      * @return array<int, array<string, mixed>>
      */
     private function segmentMatrix(array $segments): array
@@ -1729,7 +1731,7 @@ class SalesKpiService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $segments
+     * @param  array<int, array<string, mixed>>  $segments
      * @return array<int, array<string, mixed>>
      */
     private function segmentTicketMatrix(array $segments): array
@@ -1755,7 +1757,7 @@ class SalesKpiService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<string, mixed>
      */
     private function segmentTotals(array $rows): array
@@ -1780,7 +1782,7 @@ class SalesKpiService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
     private function paymentFormMatrix(array $rows, string $checkout): array

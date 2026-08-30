@@ -10,18 +10,25 @@ use Illuminate\Validation\ValidationException;
 
 class WebPushSubscriptionService
 {
-    public function __construct(private readonly FirebasePushService $firebase) {}
+    public function __construct(
+        private readonly FirebasePushService $firebase,
+        private readonly PushTopicService $topics,
+    ) {}
 
     /** @param array<string, mixed> $data */
     public function register(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $data, string $userAgent): array
     {
-        $countryId = $this->countryId($countryCode);
+        $requestedCountryId = $this->countryId($countryCode);
         $token = trim((string) $data['token']);
         $hash = hash('sha256', $token);
         $now = now();
 
-        $subscription = DB::transaction(function () use ($countryId, $visitor, $customer, $data, $userAgent, $token, $hash, $now) {
+        $subscription = DB::transaction(function () use ($requestedCountryId, $visitor, $customer, $data, $userAgent, $token, $hash, $now) {
             $subscription = WebPushSubscription::query()->where('psu_token_hash', $hash)->lockForUpdate()->first();
+            $countryId = $subscription ? (int) $subscription->psu_pais_id : $requestedCountryId;
+            if ($customer && filled($customer->usu_pais_registro)) {
+                $countryId = (int) $customer->usu_pais_registro;
+            }
             $values = [
                 'psu_visitante_id' => $visitor->getKey(),
                 'psu_usu_id' => $customer?->getKey(),
@@ -45,11 +52,13 @@ class WebPushSubscriptionService
 
             if ($subscription) {
                 $subscription->forceFill($values)->save();
-
-                return $subscription;
+            } else {
+                $subscription = WebPushSubscription::query()->create($values + ['psu_creado_en' => $now]);
             }
 
-            return WebPushSubscription::query()->create($values + ['psu_creado_en' => $now]);
+            $this->topics->syncAutomatic($subscription);
+
+            return $subscription;
         });
 
         return $this->payload($subscription);

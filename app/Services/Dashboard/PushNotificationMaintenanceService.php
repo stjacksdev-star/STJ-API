@@ -85,7 +85,7 @@ class PushNotificationMaintenanceService
                 'topics' => $this->topics(),
                 'platforms' => $this->platforms(),
                 'defaultPlatform' => 'Todo',
-                'defaultTopic' => '/topics/all',
+                'defaultTopic' => '',
             ],
             'notifications' => $notifications,
         ];
@@ -248,14 +248,17 @@ class PushNotificationMaintenanceService
     private function topics(): array
     {
         return [
-            ['value' => '/topics/all', 'label' => 'All'],
-            ['value' => '/topics/ios', 'label' => 'IOS'],
-            ['value' => '/topics/android', 'label' => 'Android'],
-            ['value' => '/topics/androidcr', 'label' => 'Android CR'],
-            ['value' => '/topics/androidgt', 'label' => 'Android GT'],
-            ['value' => '/topics/androidhn', 'label' => 'Android HN'],
-            ['value' => '/topics/androidsv', 'label' => 'Android SV'],
-            ['value' => '/topics/generalWEB', 'label' => 'General WEB'],
+            ['value' => '', 'label' => 'Todas las suscripciones activas'],
+            ['value' => 'platform.ios', 'label' => 'Plataforma · IOS'],
+            ['value' => 'platform.android', 'label' => 'Plataforma · Android'],
+            ['value' => 'platform.web', 'label' => 'Plataforma · Web'],
+            ['value' => 'country.sv', 'label' => 'Pais de registro · El Salvador'],
+            ['value' => 'country.gt', 'label' => 'Pais de registro · Guatemala'],
+            ['value' => 'country.hn', 'label' => 'Pais de registro · Honduras'],
+            ['value' => 'country.cr', 'label' => 'Pais de registro · Costa Rica'],
+            ['value' => 'customer.registered', 'label' => 'Clientes registrados'],
+            ['value' => 'customer.guest', 'label' => 'Visitantes'],
+            ['value' => 'journey.checkout', 'label' => 'Checkout activo'],
         ];
     }
 
@@ -268,6 +271,7 @@ class PushNotificationMaintenanceService
             ['value' => 'Todo', 'label' => 'Todo'],
             ['value' => 'Android', 'label' => 'Android'],
             ['value' => 'Ios', 'label' => 'Ios'],
+            ['value' => 'WEB', 'label' => 'Web'],
         ];
     }
 

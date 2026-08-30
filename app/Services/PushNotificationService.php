@@ -147,7 +147,7 @@ class PushNotificationService
 
     private function usesTokens(string $platform): bool
     {
-        return in_array(strtolower(trim($platform)), ['todo', 'android', 'ios'], true);
+        return in_array(strtolower(trim($platform)), ['todo', 'android', 'ios', 'web'], true);
     }
 
     private function isStillPending(int $shipmentId): bool

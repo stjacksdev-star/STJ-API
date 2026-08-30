@@ -57,15 +57,6 @@ class MobileAuthEndpointTest extends TestCase
             $table->bigInteger('country_id');
             $table->string('name');
         });
-        Schema::create('stj_usuarios_dispositivos', function (Blueprint $table) {
-            $table->id('dis_id');
-            $table->bigInteger('dis_user');
-            $table->string('dis_token');
-            $table->timestamp('dis_fecha')->nullable();
-            $table->string('dis_tipo_dispositivo');
-            $table->unique(['dis_user', 'dis_token']);
-        });
-
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
         DB::table('stj_world_countries')->insert(['id' => 1, 'name' => 'El Salvador', 'phonecode' => '503']);
         DB::table('stj_world_states')->insert([
@@ -110,11 +101,6 @@ class MobileAuthEndpointTest extends TestCase
             'tokenable_id' => 77,
             'name' => 'mobile-ios-'.substr(hash('sha256', 'installation-123'), 0, 16),
             'token' => hash('sha256', $secret),
-        ]);
-        $this->assertDatabaseHas('stj_usuarios_dispositivos', [
-            'dis_user' => 77,
-            'dis_token' => 'fcm-device-token',
-            'dis_tipo_dispositivo' => 'IOS',
         ]);
     }
 

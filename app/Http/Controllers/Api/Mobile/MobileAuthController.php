@@ -4,17 +4,19 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
+use App\Services\Mobile\MobilePushSubscriptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class MobileAuthController extends Controller
 {
+    public function __construct(private readonly MobilePushSubscriptionService $pushSubscriptions) {}
+
     public function login(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -23,6 +25,8 @@ class MobileAuthController extends Controller
             'password' => ['required', 'string', 'max:255'],
             'token' => ['nullable', 'string', 'max:512'],
             'idSesion' => ['nullable', 'string', 'max:150'],
+            'installationId' => ['nullable', 'uuid'],
+            'environment' => ['nullable', Rule::in(['TEST', 'PRODUCTION'])],
             'dispositivo' => ['required', 'string', Rule::in(['IOS', 'ANDROID', 'WEB'])],
         ]);
 
@@ -51,7 +55,11 @@ class MobileAuthController extends Controller
         $customer->tokens()->where('name', $tokenName)->delete();
         $accessToken = $customer->createToken($tokenName, ['mobile:account'], $expiresAt)->plainTextToken;
 
-        $this->savePushToken($customer, $data, $platform);
+        $this->pushSubscriptions->attachCustomer(
+            (string) ($data['installationId'] ?? ''),
+            (string) ($data['environment'] ?? 'PRODUCTION'),
+            $customer,
+        );
 
         return response()->json($this->legacyProfile($customer) + [
             'resultado' => 'true',
@@ -81,6 +89,15 @@ class MobileAuthController extends Controller
             return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
         }
 
+        $data = $request->validate([
+            'installationId' => ['nullable', 'uuid'],
+            'environment' => ['nullable', Rule::in(['TEST', 'PRODUCTION'])],
+        ]);
+        $this->pushSubscriptions->detachCustomer(
+            (string) ($data['installationId'] ?? ''),
+            (string) ($data['environment'] ?? 'PRODUCTION'),
+            $customer,
+        );
         $customer->currentAccessToken()?->delete();
 
         return response()->json(['resultado' => 'true', 'mensaje' => 'Sesion cerrada.']);
@@ -181,19 +198,6 @@ class MobileAuthController extends Controller
         $user = $request->user();
 
         return $user instanceof StorefrontCustomer && $user->tokenCan('mobile:account') ? $user : null;
-    }
-
-    private function savePushToken(StorefrontCustomer $customer, array $data, string $platform): void
-    {
-        $pushToken = trim((string) ($data['token'] ?? ''));
-        if ($pushToken === '' || ! Schema::hasTable('stj_usuarios_dispositivos')) {
-            return;
-        }
-
-        DB::table('stj_usuarios_dispositivos')->updateOrInsert(
-            ['dis_user' => $customer->getKey(), 'dis_token' => $pushToken],
-            ['dis_fecha' => now(), 'dis_tipo_dispositivo' => $platform],
-        );
     }
 
     private function legacyProfile(StorefrontCustomer $customer): array
