@@ -10,8 +10,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class MobileAuthController extends Controller
 {
@@ -55,11 +57,20 @@ class MobileAuthController extends Controller
         $customer->tokens()->where('name', $tokenName)->delete();
         $accessToken = $customer->createToken($tokenName, ['mobile:account'], $expiresAt)->plainTextToken;
 
-        $this->pushSubscriptions->attachCustomer(
-            (string) ($data['installationId'] ?? ''),
-            (string) ($data['environment'] ?? 'PRODUCTION'),
-            $customer,
-        );
+        try {
+            $this->pushSubscriptions->attachCustomer(
+                (string) ($data['installationId'] ?? ''),
+                (string) ($data['environment'] ?? 'PRODUCTION'),
+                $customer,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('No se pudo asociar la suscripcion push durante el login mobile.', [
+                'userId' => $customer->getKey(),
+                'installationId' => (string) ($data['installationId'] ?? ''),
+                'environment' => (string) ($data['environment'] ?? 'PRODUCTION'),
+                'exception' => $exception,
+            ]);
+        }
 
         return response()->json($this->legacyProfile($customer) + [
             'resultado' => 'true',
@@ -93,11 +104,20 @@ class MobileAuthController extends Controller
             'installationId' => ['nullable', 'uuid'],
             'environment' => ['nullable', Rule::in(['TEST', 'PRODUCTION'])],
         ]);
-        $this->pushSubscriptions->detachCustomer(
-            (string) ($data['installationId'] ?? ''),
-            (string) ($data['environment'] ?? 'PRODUCTION'),
-            $customer,
-        );
+        try {
+            $this->pushSubscriptions->detachCustomer(
+                (string) ($data['installationId'] ?? ''),
+                (string) ($data['environment'] ?? 'PRODUCTION'),
+                $customer,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('No se pudo desvincular la suscripcion push durante el logout mobile.', [
+                'userId' => $customer->getKey(),
+                'installationId' => (string) ($data['installationId'] ?? ''),
+                'environment' => (string) ($data['environment'] ?? 'PRODUCTION'),
+                'exception' => $exception,
+            ]);
+        }
         $customer->currentAccessToken()?->delete();
 
         return response()->json(['resultado' => 'true', 'mensaje' => 'Sesion cerrada.']);

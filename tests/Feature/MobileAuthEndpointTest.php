@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use App\Models\StorefrontCustomer;
+use App\Services\Mobile\MobilePushSubscriptionService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Mockery;
 use Tests\TestCase;
 
 class MobileAuthEndpointTest extends TestCase
@@ -101,6 +103,29 @@ class MobileAuthEndpointTest extends TestCase
             'tokenable_id' => 77,
             'name' => 'mobile-ios-'.substr(hash('sha256', 'installation-123'), 0, 16),
             'token' => hash('sha256', $secret),
+        ]);
+    }
+
+    public function test_a_push_link_failure_does_not_block_a_valid_login(): void
+    {
+        $push = Mockery::mock(MobilePushSubscriptionService::class);
+        $push->shouldReceive('attachCustomer')->once()->andThrow(new \RuntimeException('Push schema unavailable'));
+        $this->app->instance(MobilePushSubscriptionService::class, $push);
+
+        $this->postJson('/api/mobile/v1/auth/login?countryId=1', [
+            'email' => 'cliente@example.com',
+            'password' => 'ClaveSegura123',
+            'idSesion' => 'installation-123',
+            'installationId' => '9d587183-10e7-4119-ae59-6e1c2f90fd14',
+            'environment' => 'TEST',
+            'dispositivo' => 'WEB',
+        ])->assertOk()
+            ->assertJsonPath('resultado', 'true')
+            ->assertJsonStructure(['accessToken', 'expiresAt']);
+
+        $this->assertDatabaseHas('personal_access_tokens', [
+            'tokenable_id' => 77,
+            'name' => 'mobile-web-'.substr(hash('sha256', 'installation-123'), 0, 16),
         ]);
     }
 
