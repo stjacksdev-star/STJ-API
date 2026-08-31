@@ -173,6 +173,10 @@ Schedule::command('inventory:sync')
     ->timezone('America/El_Salvador')
     ->withoutOverlapping(15)
     ->appendOutputTo(storage_path('logs/inventory-scheduler.log'));
+Schedule::command('storefront:navigation-build')
+    ->dailyAt('00:05')
+    ->timezone('America/El_Salvador')
+    ->withoutOverlapping(30);
 
 if (config('push_web.automation_enabled')) {
     Schedule::command('push:web-evaluate --limit='.(int) config('push_web.evaluate_limit', 500))

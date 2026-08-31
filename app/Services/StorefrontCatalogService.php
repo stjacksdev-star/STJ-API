@@ -35,6 +35,7 @@ class StorefrontCatalogService
         $trimmedQuery = trim((string) $query);
         $activeGroup = trim((string) ($filters['group'] ?? ''));
         $activeCategory = trim((string) ($filters['category'] ?? ''));
+        $activeSubcategory = (int) ($filters['subcategory'] ?? 0);
         $activeFit = trim((string) ($filters['fit'] ?? ''));
         $activeSort = trim((string) ($filters['sort'] ?? 'featured'));
         $activeStore = trim((string) ($filters['store'] ?? ''));
@@ -50,6 +51,7 @@ class StorefrontCatalogService
                     'active' => [
                         'group' => $activeGroup,
                         'category' => $activeCategory,
+                        'subcategory' => $activeSubcategory ?: '',
                         'fit' => $activeFit,
                         'sort' => $activeSort,
                         'promo' => $promoOnly,
@@ -87,6 +89,9 @@ class StorefrontCatalogService
         $this->applyGroupFilter($baseQuery, $activeGroup);
         $productsQuery = clone $baseQuery;
         $this->applyCategoryFilter($productsQuery, $activeCategory);
+        if ($activeSubcategory > 0) {
+            $productsQuery->where('p.pro_sub_categoria', $activeSubcategory);
+        }
         $this->applyDenimFitFilter($productsQuery, $activeFit);
         $this->applySort($productsQuery, $activeSort);
 
@@ -197,6 +202,7 @@ class StorefrontCatalogService
                 'active' => [
                     'group' => $activeGroup,
                     'category' => $activeCategory,
+                    'subcategory' => $activeSubcategory ?: '',
                     'fit' => $activeFit,
                     'sort' => $activeSort,
                     'promo' => $promoOnly,
