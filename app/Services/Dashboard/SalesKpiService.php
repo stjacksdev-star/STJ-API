@@ -2013,6 +2013,7 @@ class SalesKpiService
         return DB::table('stj_tiendas')
             ->select(['tie_id', 'tie_codigo', 'tie_nombre'])
             ->where('tie_pais', $countryId)
+            ->where('tie_productos', 1)
             ->orderBy('tie_nombre')
             ->get()
             ->map(fn ($store) => [
