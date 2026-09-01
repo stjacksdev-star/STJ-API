@@ -6,9 +6,9 @@ use App\Exceptions\CartOperationConflict;
 use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
+use App\Services\CheckoutEventService;
 use App\Services\Payments\PowerTranzPaymentService;
 use App\Services\Payments\PowerTranzUrlFactory;
-use App\Services\CheckoutEventService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,20 +24,26 @@ class PowerTranzController extends Controller
     public function start(Request $request, int $order, PowerTranzPaymentService $service, CheckoutEventService $events): JsonResponse
     {
         $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'card' => ['required', 'array'], 'card.pan' => ['required', 'digits_between:13,19'], 'card.cvv' => ['required', 'digits_between:3,4'], 'card.expiration' => ['required', 'digits:4'], 'card.holder' => ['required', 'string', 'max:100']]);
-        $visitor = $this->visitor($request); $customer = $this->customer();
+        $visitor = $this->visitor($request);
+        $customer = $this->customer();
         $event = ['flow' => 'PAYMENT', 'stage' => 'POWERTRANZ_START', 'event' => 'PAYMENT_ATTEMPT_STARTED', 'result' => 'STARTED', 'provider' => 'POWERTRANZ', 'order_id' => $order, 'operation_uuid' => $data['operation_uuid'], 'payment_method' => 'TARJETA'];
         $events->record($request, $event, $visitor, $customer);
         try {
             $result = $service->start($order, $visitor, $customer, $data);
         } catch (CartOperationConflict $exception) {
             $events->record($request, array_merge($event, ['event' => 'POWERTRANZ_REQUEST_ERROR', 'result' => 'ERROR', 'severity' => 'WARNING', 'code' => 'OPERATION_CONFLICT', 'message' => $exception->getMessage(), 'http_status' => 409]), $visitor, $customer);
+
             return response()->json(['ok' => false, 'message' => $exception->getMessage()], 409);
         } catch (\Throwable $exception) {
             $events->record($request, array_merge($event, ['event' => 'POWERTRANZ_REQUEST_ERROR', 'result' => 'ERROR', 'severity' => 'ERROR', 'code' => class_basename($exception), 'message' => $events->exceptionMessage($exception)]), $visitor, $customer);
             throw $exception;
         }
 
-        $events->record($request, array_merge($event, ['event' => match ($result['status'] ?? null) { 'PENDIENTE' => 'POWERTRANZ_CHALLENGE_REQUIRED', 'APROBADA' => 'POWERTRANZ_APPROVED', default => 'POWERTRANZ_DENIED' }, 'result' => match ($result['status'] ?? null) { 'PENDIENTE' => 'STARTED', 'APROBADA' => 'SUCCESS', default => 'REJECTED' }, 'severity' => ($result['status'] ?? null) === 'DENEGADA' ? 'WARNING' : 'INFO', 'payment_id' => $result['paymentId'] ?? null, 'provider_code' => $result['code'] ?? null]), $visitor, $customer);
+        $events->record($request, array_merge($event, ['event' => match ($result['status'] ?? null) {
+            'PENDIENTE' => 'POWERTRANZ_CHALLENGE_REQUIRED', 'APROBADA' => 'POWERTRANZ_APPROVED', default => 'POWERTRANZ_DENIED'
+        }, 'result' => match ($result['status'] ?? null) {
+            'PENDIENTE' => 'STARTED', 'APROBADA' => 'SUCCESS', default => 'REJECTED'
+        }, 'severity' => ($result['status'] ?? null) === 'DENEGADA' ? 'WARNING' : 'INFO', 'payment_id' => $result['paymentId'] ?? null, 'provider_code' => $result['code'] ?? null]), $visitor, $customer);
 
         if (filled($result['redirectData'] ?? null)) {
             $challengeToken = Str::random(64);
@@ -67,8 +73,9 @@ class PowerTranzController extends Controller
         $data = $request->validate(['SpiToken' => ['required', 'string', 'max:10000'], 'TransactionIdentifier' => ['required', 'string', 'max:255'], 'Response' => ['required', 'string', 'max:10000']]);
         $event = ['country' => $country, 'flow' => 'PAYMENT', 'stage' => 'POWERTRANZ_RETURN', 'event' => 'POWERTRANZ_RETURN_RECEIVED', 'result' => 'STARTED', 'provider' => 'POWERTRANZ', 'operation_uuid' => $data['TransactionIdentifier']];
         $events->record($request, $event);
-        try { $result = $service->confirm($country, $token, $data); }
-        catch (\Throwable $exception) {
+        try {
+            $result = $service->confirm($country, $token, $data);
+        } catch (\Throwable $exception) {
             $events->record($request, array_merge($event, ['event' => 'POWERTRANZ_RETURN_ERROR', 'result' => 'ERROR', 'severity' => 'ERROR', 'code' => class_basename($exception), 'message' => $events->exceptionMessage($exception)]));
             throw $exception;
         }
@@ -102,7 +109,14 @@ class PowerTranzController extends Controller
     {
         $visitor = $this->visitor($request);
         $customer = $this->customer();
-        $cart = DB::table('stj_carritos')->where('car_pedido_id', $order)->where('car_visitante_id', $visitor->getKey())->when($customer, fn ($q) => $q->where('car_usu_id', $customer->getKey()), fn ($q) => $q->whereNull('car_usu_id'))->first();
+        $cart = DB::table('stj_carritos')
+            ->where('car_pedido_id', $order)
+            ->when(
+                $customer,
+                fn ($query) => $query->where('car_usu_id', $customer->getKey()),
+                fn ($query) => $query->whereNull('car_usu_id')->where('car_visitante_id', $visitor->getKey()),
+            )
+            ->first();
         abort_unless($cart, 404);
         $payment = DB::table('stj_pedidos_pago')->where('ppa_pedido', $order)->orderByDesc('ppa_id')->first(['ppa_tipo', 'ppa_estado', 'ppa_ref', 'ppa_autorizacion', 'ppa_rsp_codigo', 'ppa_rsp_mensaje', 'ppa_fecha_procesado']);
 

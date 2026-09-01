@@ -6,6 +6,7 @@ use App\Exceptions\CartOperationConflict;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontPaymentEventService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -20,7 +21,10 @@ class PowerTranzPaymentService
         return DB::transaction(function () use ($orderId, $visitor, $customer, $input) {
             $order = DB::table('stj_pedidos')->where('ped_id', $orderId)->lockForUpdate()->first();
             $cart = DB::table('stj_carritos')->where('car_pedido_id', $orderId)->lockForUpdate()->first();
-            if (! $order || ! $cart || $cart->car_estado !== 'CONVERTIDO' || (int) $cart->car_visitante_id !== $visitor->getKey() || ($customer && (int) $cart->car_usu_id !== $customer->getKey()) || (! $customer && $cart->car_usu_id !== null)) {
+            $identityMatches = $customer
+                ? (int) $cart?->car_usu_id === $customer->getKey()
+                : $cart?->car_usu_id === null && (int) $cart?->car_visitante_id === $visitor->getKey();
+            if (! $order || ! $cart || $cart->car_estado !== 'CONVERTIDO' || ! $identityMatches) {
                 throw ValidationException::withMessages(['order' => 'Pedido no encontrado para la identidad autorizada.']);
             }
             if ($order->ped_estatus !== 'PENDIENTE_PAGO') {
@@ -52,6 +56,7 @@ class PowerTranzPaymentService
                 if ($existing->pto_estado === 'PENDIENTE') {
                     throw ValidationException::withMessages(['payment' => 'Este intento ya inicio 3DS. Consulta su estado antes de crear otro intento.']);
                 }
+
                 return $replay;
             }
             $returnToken = Str::random(64);
@@ -84,7 +89,7 @@ class PowerTranzPaymentService
                 throw ValidationException::withMessages(['return' => 'Retorno PowerTranz desconocido.']);
             }
             if (! in_array($operation->pto_estado, ['APROBADA', 'DENEGADA'], true) && now()->greaterThan(
-                \Illuminate\Support\Carbon::parse($operation->pto_creado_en)->addMinutes(max(1, (int) config('powertranz.return_token_ttl_minutes', 60)))
+                Carbon::parse($operation->pto_creado_en)->addMinutes(max(1, (int) config('powertranz.return_token_ttl_minutes', 60)))
             )) {
                 throw ValidationException::withMessages(['return' => 'El retorno PowerTranz expiro.']);
             }

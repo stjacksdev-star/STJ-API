@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\StorefrontCart;
+use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\Payments\PowerTranzClient;
 use App\Services\Payments\PowerTranzConfigResolver;
@@ -172,6 +173,53 @@ class StorefrontOrderFromCartTest extends TestCase
             'domicilio rechaza efectivo' => ['sv', 1, 'DOMICILIO', '57', 'EFECTIVO', false],
             'tarjeta rechazada no genera purchase' => ['sv', 1, 'TIENDA', '001', 'TARJETA', true, false],
         ];
+    }
+
+    public function test_authenticated_customer_can_start_payment_from_a_different_visitor(): void
+    {
+        $this->schema();
+        DB::table('stj_usuarios')->insert(['usu_id' => 7]);
+        DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_id_world' => 1, 'pai_codigo' => 'SV']);
+        $originalVisitor = $this->visitor(1);
+        $currentVisitor = $this->visitor(1);
+        $customer = StorefrontCustomer::query()->findOrFail(7);
+        $orderId = DB::table('stj_pedidos')->insertGetId(['ped_id_pais' => 1, 'ped_user' => 7, 'ped_estatus' => 'PENDIENTE_PAGO', 'ped_checkout' => 'TIENDA']);
+        DB::table('stj_pedidos_pago')->insert(['ppa_pedido' => $orderId, 'ppa_tipo' => 'TARJETA', 'ppa_estado' => 'PENDIENTE', 'ppa_ref' => 'AUTH-DEVICE', 'ppa_monto_senv' => 10, 'ppa_monto' => 10]);
+        DB::table('stj_pedidos_detalle')->insert(['car_ref' => 'AUTH-DEVICE', 'car_precio' => 10, 'car_cantidad' => 1, 'car_descuento' => 0]);
+        StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $originalVisitor->getKey(), 'car_usu_id' => 7, 'car_pais_id' => 1, 'car_tipo' => 'TIENDA', 'car_estado' => 'CONVERTIDO', 'car_origen' => 'WEB', 'car_moneda' => 'USD', 'car_version' => 2, 'car_pedido_id' => $orderId, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addMonth(), 'car_convertido_en' => now(), 'car_creado_en' => now(), 'car_actualizado_en' => now()]);
+
+        $configuration = Mockery::mock(PowerTranzConfigResolver::class);
+        $configuration->shouldReceive('forCountry')->once()->andReturn(['currency' => '840']);
+        $payloads = Mockery::mock(PowerTranzPayloadFactory::class);
+        $payloads->shouldReceive('sale')->once()->andReturn(['payload' => 'safe']);
+        $client = Mockery::mock(PowerTranzClient::class);
+        $client->shouldReceive('sale')->once()->andReturn(['RedirectData' => '<form method="post"></form>']);
+        $service = new PowerTranzPaymentService($configuration, $payloads, $client, new StorefrontPaymentEventService);
+
+        $result = $service->start($orderId, $currentVisitor, $customer, ['operation_uuid' => (string) Str::uuid(), 'card' => ['pan' => str_repeat('4', 16), 'cvv' => '123', 'expiration' => '3012', 'holder' => 'ANA LOPEZ']]);
+
+        $this->assertSame('PENDIENTE', $result['status']);
+    }
+
+    public function test_guest_cannot_start_payment_from_a_different_visitor(): void
+    {
+        $this->schema();
+        DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_id_world' => 1, 'pai_codigo' => 'SV']);
+        $originalVisitor = $this->visitor(1);
+        $differentVisitor = $this->visitor(1);
+        $orderId = DB::table('stj_pedidos')->insertGetId(['ped_id_pais' => 1, 'ped_estatus' => 'PENDIENTE_PAGO', 'ped_checkout' => 'TIENDA']);
+        StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $originalVisitor->getKey(), 'car_pais_id' => 1, 'car_tipo' => 'TIENDA', 'car_estado' => 'CONVERTIDO', 'car_origen' => 'WEB', 'car_moneda' => 'USD', 'car_version' => 2, 'car_pedido_id' => $orderId, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addMonth(), 'car_convertido_en' => now(), 'car_creado_en' => now(), 'car_actualizado_en' => now()]);
+        $service = new PowerTranzPaymentService(Mockery::mock(PowerTranzConfigResolver::class), Mockery::mock(PowerTranzPayloadFactory::class), Mockery::mock(PowerTranzClient::class), new StorefrontPaymentEventService);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Pedido no encontrado para la identidad autorizada.');
+
+        $service->start($orderId, $differentVisitor, null, ['operation_uuid' => (string) Str::uuid(), 'card' => []]);
+    }
+
+    private function visitor(int $countryId): StorefrontVisitor
+    {
+        return StorefrontVisitor::query()->create(['vis_uuid' => (string) Str::uuid(), 'vis_origen' => 'WEB', 'vis_pais_id' => $countryId, 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
     }
 
     private function schema(): void
