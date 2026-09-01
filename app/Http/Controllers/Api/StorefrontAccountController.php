@@ -3,11 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\StorefrontCustomer;
-use App\Models\WebPushSubscription;
 use App\Support\StorefrontImageUrl;
 use App\Services\StorefrontFavoriteService;
 use App\Services\StorefrontWelcomeCouponService;
 use App\Services\StorefrontPasswordResetService;
+use App\Services\CustomerAccountDeletionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +22,7 @@ class StorefrontAccountController extends BaseController
     public function __construct(
         private readonly StorefrontWelcomeCouponService $welcomeCoupons,
         private readonly StorefrontPasswordResetService $passwordResets,
+        private readonly CustomerAccountDeletionService $accountDeletion,
     ) {}
 
     public function login(Request $request)
@@ -116,44 +117,7 @@ class StorefrontAccountController extends BaseController
             return $this->error('La contraseña no es correcta.', 422);
         }
 
-        DB::transaction(function () use ($customer) {
-            $lockedCustomer = StorefrontCustomer::query()->whereKey($customer->getKey())->lockForUpdate()->firstOrFail();
-            if (! (bool) $lockedCustomer->usu_activo) return;
-
-            $originalUsername = trim((string) $lockedCustomer->usu_usuario);
-            $suffix = '_deleted';
-            $sequence = 1;
-
-            do {
-                $numberedSuffix = $sequence === 1 ? $suffix : $suffix.'_'.$sequence;
-                $candidate = mb_substr($originalUsername, 0, 100 - mb_strlen($numberedSuffix)).$numberedSuffix;
-                $exists = StorefrontCustomer::query()
-                    ->where('usu_usuario', $candidate)
-                    ->where($lockedCustomer->getKeyName(), '<>', $lockedCustomer->getKey())
-                    ->exists();
-                $sequence++;
-            } while ($exists);
-
-            $lockedCustomer->forceFill([
-                'usu_usuario' => $candidate,
-                'usu_activo' => 0,
-                'usu_ultima_modificacion' => now(),
-            ])->save();
-
-            DB::table('stj_storefront_password_resets')
-                ->where('spr_email', strtolower($originalUsername))
-                ->delete();
-            WebPushSubscription::query()
-                ->where('psu_usu_id', $lockedCustomer->getKey())
-                ->update([
-                    'psu_estado' => 'REVOCADA',
-                    'psu_permiso' => 'DENIED',
-                    'psu_revocado_en' => now(),
-                    'psu_ultima_actividad_en' => now(),
-                    'psu_actualizado_en' => now(),
-                ]);
-            $lockedCustomer->tokens()->delete();
-        });
+        $this->accountDeletion->delete($customer);
 
         $request->attributes->set('forgetStorefrontVisitor', true);
 

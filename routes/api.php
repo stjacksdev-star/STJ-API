@@ -94,6 +94,7 @@ Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
 Route::middleware('auth:sanctum')->prefix('mobile/v1/account')->group(function () {
     Route::get('/', [MobileAuthController::class, 'account']);
     Route::put('/', [MobileAuthController::class, 'updateAccount'])->middleware('throttle:30,1');
+    Route::delete('/', [MobileAuthController::class, 'deleteAccount'])->middleware('throttle:5,1');
     Route::get('/addresses', [MobileAddressController::class, 'index']);
     Route::get('/addresses/primary', [MobileAddressController::class, 'primary']);
     Route::post('/addresses', [MobileAddressController::class, 'store'])->middleware('throttle:30,1');

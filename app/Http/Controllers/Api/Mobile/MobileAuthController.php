@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Services\Mobile\MobilePushSubscriptionService;
+use App\Services\CustomerAccountDeletionService;
 use App\Services\StorefrontPasswordResetService;
 use App\Services\StorefrontWelcomeCouponService;
 use Illuminate\Http\JsonResponse;
@@ -24,6 +25,7 @@ class MobileAuthController extends Controller
         private readonly MobilePushSubscriptionService $pushSubscriptions,
         private readonly StorefrontWelcomeCouponService $welcomeCoupons,
         private readonly StorefrontPasswordResetService $passwordResets,
+        private readonly CustomerAccountDeletionService $accountDeletion,
     ) {}
 
     public function recoverPassword(Request $request): JsonResponse
@@ -313,6 +315,29 @@ class MobileAuthController extends Controller
         }
 
         return response()->json($this->legacyProfile($customer) + ['resultado' => 'true']);
+    }
+
+    public function deleteAccount(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        $data = $request->validate([
+            'password' => ['required', 'string', 'max:255'],
+            'confirmation' => ['required', Rule::in(['ELIMINAR'])],
+        ]);
+        if (! Hash::check((string) $data['password'], $customer->getAuthPassword())) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'La contrasena no es correcta.']);
+        }
+
+        $this->accountDeletion->delete($customer);
+
+        return response()->json([
+            'resultado' => 'true',
+            'mensaje' => 'Tu cuenta fue eliminada y todas las sesiones fueron cerradas.',
+        ]);
     }
 
     public function updateAccount(Request $request): JsonResponse

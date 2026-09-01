@@ -323,6 +323,48 @@ class MobileAuthEndpointTest extends TestCase
         $this->assertTrue(Hash::check('ClaveSegura123', StorefrontCustomer::query()->findOrFail(77)->usu_password));
     }
 
+    public function test_mobile_account_deletion_uses_the_authenticated_customer_and_revokes_all_sessions(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $current = $customer->createToken('mobile-ios-delete', ['mobile:account'], now()->addDays(30));
+        $other = $customer->createToken('mobile-android-delete', ['mobile:account'], now()->addDays(30));
+
+        $this->withToken($current->plainTextToken)->deleteJson('/api/mobile/v1/account', [
+            'password' => 'ClaveSegura123',
+            'confirmation' => 'ELIMINAR',
+            'id_usuario' => 999,
+        ])->assertOk()->assertExactJson([
+            'resultado' => 'true',
+            'mensaje' => 'Tu cuenta fue eliminada y todas las sesiones fueron cerradas.',
+        ]);
+
+        $this->assertDatabaseHas('stj_usuarios', [
+            'usu_id' => 77,
+            'usu_usuario' => 'cliente@example.com_deleted',
+            'usu_activo' => 0,
+        ]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $current->accessToken->getKey()]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $other->accessToken->getKey()]);
+    }
+
+    public function test_mobile_account_deletion_requires_the_current_password_and_confirmation(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-ios-delete-invalid', ['mobile:account'], now()->addDays(30));
+
+        $this->withToken($token->plainTextToken)->deleteJson('/api/mobile/v1/account', [
+            'password' => 'Incorrecta123',
+            'confirmation' => 'ELIMINAR',
+        ])->assertOk()->assertJsonPath('resultado', 'false');
+
+        $this->withToken($token->plainTextToken)->deleteJson('/api/mobile/v1/account', [
+            'password' => 'ClaveSegura123',
+            'confirmation' => 'BORRAR',
+        ])->assertUnprocessable()->assertJsonValidationErrors('confirmation');
+
+        $this->assertDatabaseHas('stj_usuarios', ['usu_id' => 77, 'usu_activo' => 1]);
+    }
+
     public function test_it_reads_and_updates_only_the_authenticated_mobile_account(): void
     {
         $customer = StorefrontCustomer::query()->findOrFail(77);
