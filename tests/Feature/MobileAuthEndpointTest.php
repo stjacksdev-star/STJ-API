@@ -74,6 +74,24 @@ class MobileAuthEndpointTest extends TestCase
             $table->bigInteger('country_id');
             $table->string('name');
         });
+        Schema::create('stj_pedidos', function (Blueprint $table) {
+            $table->bigInteger('ped_id')->primary();
+            $table->bigInteger('ped_id_pais');
+            $table->bigInteger('ped_user')->nullable();
+            $table->string('ped_email')->nullable();
+            $table->string('ped_checkout')->nullable();
+        });
+        Schema::create('stj_pedidos_pago', function (Blueprint $table) {
+            $table->bigInteger('ppa_id')->primary();
+            $table->bigInteger('ppa_pedido');
+            $table->string('ppa_estado');
+            $table->string('ppa_ref')->nullable();
+            $table->dateTime('ppa_fecha')->nullable();
+            $table->integer('ppa_articulos')->nullable();
+            $table->decimal('ppa_monto', 10, 2)->nullable();
+            $table->string('ppa_tipo')->nullable();
+            $table->string('ppa_tarjeta')->nullable();
+        });
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
         DB::table('stj_world_countries')->insert(['id' => 1, 'name' => 'El Salvador', 'phonecode' => '503']);
         DB::table('stj_world_states')->insert([
@@ -408,6 +426,36 @@ class MobileAuthEndpointTest extends TestCase
             'usu_estado' => 'San Salvador',
             'usu_telefono_pais' => '+503',
         ]);
+    }
+
+    public function test_it_returns_only_approved_orders_for_the_authenticated_customer_and_country(): void
+    {
+        DB::table('stj_paises')->insert(['pai_id' => 2, 'pai_codigo' => 'GT']);
+        DB::table('stj_pedidos')->insert([
+            ['ped_id' => 100, 'ped_id_pais' => 1, 'ped_user' => 77, 'ped_email' => 'ana@example.com', 'ped_checkout' => 'TIENDA'],
+            ['ped_id' => 101, 'ped_id_pais' => 1, 'ped_user' => 77, 'ped_email' => 'ana@example.com', 'ped_checkout' => 'DOMICILIO'],
+            ['ped_id' => 102, 'ped_id_pais' => 2, 'ped_user' => 77, 'ped_email' => 'ana@example.com', 'ped_checkout' => 'TIENDA'],
+            ['ped_id' => 103, 'ped_id_pais' => 1, 'ped_user' => 999, 'ped_email' => 'otra@example.com', 'ped_checkout' => 'TIENDA'],
+        ]);
+        DB::table('stj_pedidos_pago')->insert([
+            ['ppa_id' => 1, 'ppa_pedido' => 100, 'ppa_estado' => 'APROBADA', 'ppa_ref' => 'STJ100', 'ppa_fecha' => '2026-09-01 10:30:00', 'ppa_articulos' => 2, 'ppa_monto' => 25.50, 'ppa_tipo' => 'TARJETA', 'ppa_tarjeta' => '****0006'],
+            ['ppa_id' => 2, 'ppa_pedido' => 101, 'ppa_estado' => 'DENEGADA', 'ppa_ref' => 'STJ101', 'ppa_fecha' => '2026-09-01 11:30:00', 'ppa_articulos' => 1, 'ppa_monto' => 10, 'ppa_tipo' => 'TARJETA', 'ppa_tarjeta' => '****0006'],
+            ['ppa_id' => 3, 'ppa_pedido' => 102, 'ppa_estado' => 'APROBADA', 'ppa_ref' => 'STJ102', 'ppa_fecha' => '2026-09-01 12:30:00', 'ppa_articulos' => 1, 'ppa_monto' => 12, 'ppa_tipo' => 'EFECTIVO', 'ppa_tarjeta' => null],
+            ['ppa_id' => 4, 'ppa_pedido' => 103, 'ppa_estado' => 'APROBADA', 'ppa_ref' => 'STJ103', 'ppa_fecha' => '2026-09-01 13:30:00', 'ppa_articulos' => 1, 'ppa_monto' => 15, 'ppa_tipo' => 'EFECTIVO', 'ppa_tarjeta' => null],
+        ]);
+
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-ios-orders', ['mobile:account'], now()->addDays(30));
+
+        $this->withToken($token->plainTextToken)
+            ->getJson('/api/mobile/v1/account/orders?countryId=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'records')
+            ->assertJsonPath('records.0.id', 100)
+            ->assertJsonPath('records.0.ref', 'STJ100')
+            ->assertJsonPath('records.0.articulos', 2)
+            ->assertJsonPath('records.0.compra', 25.5)
+            ->assertJsonPath('records.0.pago', 'TARJETA ****0006');
     }
 
     public function test_account_update_rejects_duplicate_email_and_cross_country_department(): void

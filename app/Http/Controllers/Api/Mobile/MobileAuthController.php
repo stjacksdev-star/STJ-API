@@ -317,6 +317,56 @@ class MobileAuthController extends Controller
         return response()->json($this->legacyProfile($customer) + ['resultado' => 'true']);
     }
 
+    public function orderHistory(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1', Rule::exists('stj_paises', 'pai_id')],
+        ]);
+
+        $orders = DB::table('stj_pedidos as orders')
+            ->join('stj_pedidos_pago as payments', function ($join) {
+                $join->on('payments.ppa_pedido', '=', 'orders.ped_id')
+                    ->where('payments.ppa_estado', 'APROBADA');
+            })
+            ->where('orders.ped_id_pais', (int) $data['countryId'])
+            ->where(function ($query) use ($customer) {
+                $query->where('orders.ped_user', $customer->getKey())
+                    ->orWhere('orders.ped_email', $customer->usu_correo ?: $customer->usu_usuario);
+            })
+            ->orderByDesc('payments.ppa_fecha')
+            ->get([
+                'orders.ped_id',
+                'orders.ped_checkout',
+                'payments.ppa_ref',
+                'payments.ppa_fecha',
+                'payments.ppa_articulos',
+                'payments.ppa_monto',
+                'payments.ppa_tipo',
+                'payments.ppa_tarjeta',
+            ])
+            ->map(function ($order) {
+                $paymentType = trim((string) $order->ppa_tipo);
+                $card = strtoupper($paymentType) === 'TARJETA' ? trim((string) $order->ppa_tarjeta) : '';
+
+                return [
+                    'id' => $order->ped_id,
+                    'ref' => $order->ppa_ref,
+                    'fecha' => $order->ppa_fecha ? Carbon::parse($order->ppa_fecha)->format('d M Y g:i:s A') : null,
+                    'checkout' => $order->ped_checkout,
+                    'articulos' => $order->ppa_articulos,
+                    'compra' => $order->ppa_monto !== null ? (float) $order->ppa_monto : null,
+                    'pago' => trim($paymentType.' '.$card),
+                ];
+            });
+
+        return response()->json(['records' => $orders]);
+    }
+
     public function deleteAccount(Request $request): JsonResponse
     {
         $customer = $this->mobileCustomer($request);

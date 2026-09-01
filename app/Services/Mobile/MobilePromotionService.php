@@ -59,7 +59,7 @@ class MobilePromotionService
             $collectionId = (int) $matches[1];
         }
 
-        $actionType = $collectionId ? 7 : (int) ($asset->ast_tipo_accion ?: 1);
+        $actionType = $collectionId ? 7 : 1;
         $image = $asset->ast_imagen_movil ?: $asset->ast_imagen;
 
         return [

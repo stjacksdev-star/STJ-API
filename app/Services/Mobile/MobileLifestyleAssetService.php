@@ -14,6 +14,7 @@ class MobileLifestyleAssetService
             ->where('ast_tipo', 'SLIDER')
             ->where('ast_estado', 'ACTIVO')
             ->whereIn('ast_plataforma', ['TODO', 'APP'])
+            ->where(fn ($query) => $query->whereNull('ast_tipo_accion')->orWhere('ast_tipo_accion', '<>', 4))
             ->where(fn ($query) => $query->whereNull('ast_inicio')->orWhere('ast_inicio', '<=', now()))
             ->where(fn ($query) => $query->whereNull('ast_fin')->orWhere('ast_fin', '>=', now()))
             ->orderBy('ast_orden')

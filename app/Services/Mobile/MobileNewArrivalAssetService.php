@@ -18,6 +18,7 @@ class MobileNewArrivalAssetService
             ->where('asset.ast_tipo', 'LO-MAS-NUEVO')
             ->where('asset.ast_estado', 'ACTIVO')
             ->whereIn('asset.ast_plataforma', ['TODO', 'APP'])
+            ->where('asset.ast_tipo_accion', '<>', 4)
             ->where(fn ($query) => $query->whereNull('asset.ast_inicio')->orWhere('asset.ast_inicio', '<=', now()))
             ->where(fn ($query) => $query->whereNull('asset.ast_fin')->orWhere('asset.ast_fin', '>=', now()))
             ->where(function ($query) use ($countryId) {
