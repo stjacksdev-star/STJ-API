@@ -150,24 +150,30 @@ class MobileAuthController extends Controller
             'form1.pais' => ['required', 'string', 'max:100'],
             'form1.departamento' => ['nullable'],
             'form1.estado' => ['nullable', 'string', 'max:100'],
-            'form1.ciudad' => ['nullable', 'string', 'max:100'],
+            'form1.ciudad' => ['required', 'string', 'max:100'],
             'form1.direccion' => ['nullable', 'string', 'max:500'],
             'form1.telefono' => ['required', 'string', 'max:30', 'regex:/^[+ 0-9-]+$/'],
             'form1.whatsapp' => ['nullable', 'string', 'max:30', 'regex:/^[+ 0-9-]*$/'],
         ])['form1'];
 
         $email = strtolower(trim((string) $data['email']));
-        $duplicate = StorefrontCustomer::query()
-            ->whereKeyNot($customer->getKey())
-            ->where(function ($query) use ($email) {
-                $query->whereRaw('LOWER(usu_usuario) = ?', [$email])
-                    ->orWhereRaw('LOWER(usu_correo) = ?', [$email]);
-            })->exists();
-        if ($duplicate) {
-            return response()->json([
-                'resultado' => 'false',
-                'mensaje' => 'El correo '.$email.' ya se encuentra registrado.',
-            ]);
+        $currentEmails = collect([$customer->usu_usuario, $customer->usu_correo])
+            ->map(fn ($value) => strtolower(trim((string) $value)))
+            ->filter()
+            ->unique();
+        if (! $currentEmails->contains($email)) {
+            $duplicate = StorefrontCustomer::query()
+                ->whereKeyNot($customer->getKey())
+                ->where(function ($query) use ($email) {
+                    $query->whereRaw('LOWER(usu_usuario) = ?', [$email])
+                        ->orWhereRaw('LOWER(usu_correo) = ?', [$email]);
+                })->exists();
+            if ($duplicate) {
+                return response()->json([
+                    'resultado' => 'false',
+                    'mensaje' => 'El correo '.$email.' ya se encuentra registrado.',
+                ]);
+            }
         }
 
         $country = DB::table('stj_world_countries')

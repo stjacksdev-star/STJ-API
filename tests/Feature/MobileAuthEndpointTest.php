@@ -247,7 +247,7 @@ class MobileAuthEndpointTest extends TestCase
         $token = $customer->createToken('mobile-ios-validation', ['mobile:account'], now()->addDays(30));
         $base = [
             'nombres' => 'Ana', 'apellidos' => 'Lopez', 'tipoIdentificacion' => '', 'identificacion' => '',
-            'pais' => 'El Salvador', 'departamento' => '', 'estado' => '', 'ciudad' => '', 'direccion' => '',
+            'pais' => 'El Salvador', 'departamento' => '', 'estado' => '', 'ciudad' => 'Santa Tecla', 'direccion' => '',
             'telefono' => '70000000', 'whatsapp' => '',
         ];
 
@@ -258,5 +258,42 @@ class MobileAuthEndpointTest extends TestCase
         $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
             'form1' => array_merge($base, ['email' => 'cliente@example.com', 'departamento' => 20]),
         ])->assertUnprocessable()->assertJsonValidationErrors('form1.departamento');
+    }
+
+    public function test_account_update_accepts_the_authenticated_email_and_requires_city(): void
+    {
+        DB::table('stj_usuarios')->insert([
+            'usu_id' => 88,
+            'usu_usuario' => 'cliente@example.com',
+            'usu_correo' => 'cliente@example.com',
+            'usu_password' => Hash::make('OtraClave123'),
+            'usu_activo' => 1,
+        ]);
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-ios-current-email', ['mobile:account'], now()->addDays(30));
+        $form = [
+            'nombres' => 'Ana',
+            'apellidos' => 'Lopez',
+            'email' => 'cliente@example.com',
+            'tipoIdentificacion' => 'DUI',
+            'identificacion' => '01234567-8',
+            'pais' => 'El Salvador',
+            'departamento' => 10,
+            'estado' => 'San Salvador',
+            'ciudad' => 'Santa Tecla',
+            'direccion' => 'Colonia Escalon',
+            'telefono' => '70000000',
+            'whatsapp' => '',
+        ];
+
+        $this->withToken($token->plainTextToken)
+            ->putJson('/api/mobile/v1/account', ['form1' => $form])
+            ->assertOk()
+            ->assertJsonPath('resultado', 'true');
+
+        $this->withToken($token->plainTextToken)
+            ->putJson('/api/mobile/v1/account', ['form1' => array_merge($form, ['ciudad' => ''])])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('form1.ciudad');
     }
 }
