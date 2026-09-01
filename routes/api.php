@@ -89,6 +89,7 @@ Route::get('/mobile/v1/assets/new-arrivals', [MobileAssetController::class, 'new
 Route::middleware('auth:sanctum')->prefix('mobile/v1/auth')->group(function () {
     Route::get('/session', [MobileAuthController::class, 'session']);
     Route::post('/logout', [MobileAuthController::class, 'logout']);
+    Route::put('/password', [MobileAuthController::class, 'changePassword'])->middleware('throttle:10,1');
 });
 Route::middleware('auth:sanctum')->prefix('mobile/v1/account')->group(function () {
     Route::get('/', [MobileAuthController::class, 'account']);

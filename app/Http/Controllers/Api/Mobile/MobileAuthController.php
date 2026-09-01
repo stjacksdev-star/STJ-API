@@ -262,6 +262,49 @@ class MobileAuthController extends Controller
         return response()->json(['resultado' => 'true', 'mensaje' => 'Sesion cerrada.']);
     }
 
+    public function changePassword(Request $request): JsonResponse
+    {
+        $customer = $this->mobileCustomer($request);
+        if (! $customer) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Sesion mobile no valida.'], 403);
+        }
+
+        $data = $request->validate([
+            'current_password' => ['required', 'string', 'max:255'],
+            'password' => ['required', 'string', 'min:8', 'max:255', 'confirmed', 'regex:/^(?=.*[A-Za-z])(?=.*\d).+$/'],
+        ]);
+
+        if (! Hash::check((string) $data['current_password'], $customer->getAuthPassword())) {
+            return response()->json([
+                'resultado' => 'false',
+                'mensaje' => 'La contrasena actual no es correcta.',
+            ]);
+        }
+        if (Hash::check((string) $data['password'], $customer->getAuthPassword())) {
+            return response()->json([
+                'resultado' => 'false',
+                'mensaje' => 'La nueva contrasena debe ser diferente a la actual.',
+            ]);
+        }
+
+        $currentTokenId = $customer->currentAccessToken()?->getKey();
+        DB::transaction(function () use ($customer, $data, $currentTokenId) {
+            $customer->forceFill(['usu_password' => Hash::make((string) $data['password'])])->save();
+            $customer->tokens()
+                ->when($currentTokenId, fn ($query) => $query->whereKeyNot($currentTokenId))
+                ->delete();
+            DB::table('stj_storefront_password_resets')
+                ->where('spr_email', strtolower(trim((string) ($customer->usu_correo ?: $customer->usu_usuario))))
+                ->delete();
+        });
+        $this->passwordResets->sendPasswordChangedNotification($customer->refresh());
+
+        return response()->json([
+            'resultado' => 'true',
+            'mensaje' => 'Tu contrasena fue actualizada correctamente.',
+        ]);
+    }
+
     public function account(Request $request): JsonResponse
     {
         $customer = $this->mobileCustomer($request);

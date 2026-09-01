@@ -94,6 +94,37 @@ class StorefrontPasswordResetService
         });
     }
 
+    public function sendPasswordChangedNotification(StorefrontCustomer $customer): bool
+    {
+        $email = strtolower(trim((string) ($customer->usu_correo ?: $customer->usu_usuario)));
+        if ($email === '') return false;
+
+        $name = e(trim((string) $customer->usu_nombre) ?: 'Hola');
+        $countryCode = $this->customerCountryCode($customer);
+        $content = <<<HTML
+        <h1 style="font-size:26px;line-height:1.25;margin:0 0 16px;color:#0f172a">Tu contrase&ntilde;a fue actualizada</h1>
+        <p style="font-size:16px;line-height:1.65;margin:0 0 12px;color:#475569">Hola <strong>{$name}</strong>, la contrase&ntilde;a de tu cuenta fue cambiada desde la app de St. Jack's.</p>
+        <p style="font-size:14px;line-height:1.65;margin:0;color:#64748b">Si realizaste este cambio, no necesitas hacer nada. Si no lo reconoces, solicita de inmediato un enlace de recuperaci&oacute;n y comun&iacute;cate con nosotros.</p>
+        HTML;
+
+        try {
+            $this->mailer->sendHtml(
+                $email,
+                'Tu contrasena de St. Jack\'s fue actualizada',
+                $this->template->render($content, $countryCode),
+            );
+
+            return true;
+        } catch (Throwable $exception) {
+            Log::warning('No fue posible enviar el aviso de cambio de contrasena.', [
+                'customer_id' => $customer->getKey(),
+                'exception' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
     private function resetUrl(string $country, string $token): string
     {
         return str_replace(

@@ -282,6 +282,47 @@ class MobileAuthEndpointTest extends TestCase
             ->assertJsonPath('resultado', 'false');
     }
 
+    public function test_authenticated_mobile_customer_can_change_password_and_other_sessions_are_revoked(): void
+    {
+        $resets = Mockery::mock(StorefrontPasswordResetService::class);
+        $resets->shouldReceive('sendPasswordChangedNotification')->once()->andReturn(true);
+        $this->app->instance(StorefrontPasswordResetService::class, $resets);
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $current = $customer->createToken('mobile-ios-password', ['mobile:account'], now()->addDays(30));
+        $other = $customer->createToken('mobile-android-password', ['mobile:account'], now()->addDays(30));
+
+        $this->withToken($current->plainTextToken)->putJson('/api/mobile/v1/auth/password', [
+            'current_password' => 'ClaveSegura123',
+            'password' => 'NuevaClave456',
+            'password_confirmation' => 'NuevaClave456',
+        ])->assertOk()->assertExactJson([
+            'resultado' => 'true',
+            'mensaje' => 'Tu contrasena fue actualizada correctamente.',
+        ]);
+
+        $this->assertTrue(Hash::check('NuevaClave456', StorefrontCustomer::query()->findOrFail(77)->usu_password));
+        $this->assertDatabaseHas('personal_access_tokens', ['id' => $current->accessToken->getKey()]);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $other->accessToken->getKey()]);
+    }
+
+    public function test_mobile_password_change_requires_the_current_password_and_ignores_user_ids(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-ios-password-invalid', ['mobile:account'], now()->addDays(30));
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/auth/password', [
+            'user' => 999,
+            'current_password' => 'ClaveIncorrecta',
+            'password' => 'NuevaClave456',
+            'password_confirmation' => 'NuevaClave456',
+        ])->assertOk()->assertExactJson([
+            'resultado' => 'false',
+            'mensaje' => 'La contrasena actual no es correcta.',
+        ]);
+
+        $this->assertTrue(Hash::check('ClaveSegura123', StorefrontCustomer::query()->findOrFail(77)->usu_password));
+    }
+
     public function test_it_reads_and_updates_only_the_authenticated_mobile_account(): void
     {
         $customer = StorefrontCustomer::query()->findOrFail(77);
