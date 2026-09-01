@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Services\Mobile\MobilePushSubscriptionService;
+use App\Services\StorefrontPasswordResetService;
 use App\Services\StorefrontWelcomeCouponService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +13,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -21,7 +23,39 @@ class MobileAuthController extends Controller
     public function __construct(
         private readonly MobilePushSubscriptionService $pushSubscriptions,
         private readonly StorefrontWelcomeCouponService $welcomeCoupons,
+        private readonly StorefrontPasswordResetService $passwordResets,
     ) {}
+
+    public function recoverPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'email' => ['required', 'email', 'max:150'],
+        ]);
+
+        $allowedCodes = collect(config('mobile.registration_country_codes', ['SV', 'GT', 'CR', 'HN']))
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->all();
+        $country = DB::table('stj_paises')
+            ->where('pai_id', (int) $data['countryId'])
+            ->whereIn(DB::raw('UPPER(pai_codigo)'), $allowedCodes)
+            ->first(['pai_codigo']);
+        if (! $country) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Pais no soportado.'], 422);
+        }
+
+        $email = strtolower(trim((string) $data['email']));
+        $key = 'mobile-password-reset:'.hash('sha256', ($request->ip() ?? '').'|'.$email);
+        if (! RateLimiter::tooManyAttempts($key, 3)) {
+            RateLimiter::hit($key, 900);
+            $this->passwordResets->request($email, strtoupper((string) $country->pai_codigo), $request->ip());
+        }
+
+        return response()->json([
+            'resultado' => 'true',
+            'mensaje' => 'Si existe una cuenta con ese correo, enviaremos un enlace para restablecer la contrasena.',
+        ]);
+    }
 
     public function register(Request $request): JsonResponse
     {

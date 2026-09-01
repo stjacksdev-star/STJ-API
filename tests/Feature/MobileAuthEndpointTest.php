@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\StorefrontCustomer;
 use App\Services\Mobile\MobilePushSubscriptionService;
+use App\Services\StorefrontPasswordResetService;
 use App\Services\StorefrontWelcomeCouponService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -166,6 +167,35 @@ class MobileAuthEndpointTest extends TestCase
         ])->assertUnprocessable()->assertJsonPath('resultado', 'false');
 
         $this->assertDatabaseMissing('stj_usuarios', ['usu_correo' => 'nuevo@example.com']);
+    }
+
+    public function test_mobile_password_recovery_uses_the_shared_secure_reset_flow(): void
+    {
+        $resets = Mockery::mock(StorefrontPasswordResetService::class);
+        $resets->shouldReceive('request')
+            ->once()
+            ->with('cliente@example.com', 'SV', '127.0.0.1')
+            ->andReturn(true);
+        $this->app->instance(StorefrontPasswordResetService::class, $resets);
+
+        $this->postJson('/api/mobile/v1/auth/recovery?countryId=1', [
+            'email' => ' Cliente@Example.com ',
+        ])->assertOk()->assertExactJson([
+            'resultado' => 'true',
+            'mensaje' => 'Si existe una cuenta con ese correo, enviaremos un enlace para restablecer la contrasena.',
+        ]);
+    }
+
+    public function test_mobile_password_recovery_rejects_unsupported_country_and_invalid_email(): void
+    {
+        $resets = Mockery::mock(StorefrontPasswordResetService::class);
+        $resets->shouldNotReceive('request');
+        $this->app->instance(StorefrontPasswordResetService::class, $resets);
+
+        $this->postJson('/api/mobile/v1/auth/recovery?countryId=99', ['email' => 'cliente@example.com'])
+            ->assertUnprocessable()->assertJsonPath('resultado', 'false');
+        $this->postJson('/api/mobile/v1/auth/recovery?countryId=1', ['email' => 'correo-invalido'])
+            ->assertUnprocessable()->assertJsonValidationErrors('email');
     }
 
     public function test_a_push_link_failure_does_not_block_a_valid_login(): void
