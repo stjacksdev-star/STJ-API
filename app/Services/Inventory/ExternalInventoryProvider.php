@@ -6,6 +6,47 @@ use Illuminate\Support\Facades\Http;
 
 class ExternalInventoryProvider
 {
+    public function fetchBarcode(int $countryId, string $countryCode, string $barcode): array
+    {
+        $template = strtolower($countryCode) === 'sv'
+            ? trim((string) config('inventory.external.sv_barcode_url', ''))
+            : trim((string) config('inventory.external.generic_barcode_url', ''));
+        $token = trim((string) config('inventory.external.token', ''));
+
+        if ($template === '' || $token === '') {
+            return ['ok' => false, 'data' => null, 'error' => 'La configuracion del buscador por codigo de barras esta incompleta.'];
+        }
+
+        $url = str_replace(
+            ['{barcode}', '{countryId}'],
+            [rawurlencode($barcode), (string) $countryId],
+            $template,
+        );
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout((int) config('inventory.external.timeout_seconds', 8))
+                ->acceptJson()
+                ->get($url);
+
+            if (! $response->successful()) {
+                return ['ok' => false, 'data' => null, 'error' => "HTTP {$response->status()} al consultar el codigo de barras."];
+            }
+
+            $data = $response->json();
+
+            return [
+                'ok' => true,
+                'data' => is_array($data) ? $data : null,
+                'source' => 'external_api',
+            ];
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return ['ok' => false, 'data' => null, 'error' => $exception->getMessage()];
+        }
+    }
+
     public function fetchProductListAvailability(int $countryId, string $countryCode, string $storeCode, array $productCodes): array
     {
         $url = $this->resolveProductListUrl($countryCode);

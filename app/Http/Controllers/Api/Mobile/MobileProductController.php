@@ -49,6 +49,21 @@ class MobileProductController extends Controller
         ]);
     }
 
+    public function barcode(Request $request)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'codigoTienda' => ['required', 'string', 'max:30'],
+            'codigo' => ['required', 'string', 'min:3', 'max:80', 'regex:/^[A-Za-z0-9._-]+$/'],
+        ]);
+
+        return response()->json($this->products->barcode(
+            (int) $data['countryId'],
+            (string) $data['codigo'],
+            (string) $data['codigoTienda'],
+        ));
+    }
+
     public function show(Request $request, int $product)
     {
         $data = $request->validate([

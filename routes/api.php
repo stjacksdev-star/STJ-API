@@ -142,6 +142,8 @@ Route::get('/mobile/v1/catalog/products', [MobileProductController::class, 'inde
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/products/search', [MobileProductController::class, 'search'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/products/barcode', [MobileProductController::class, 'barcode'])
+    ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/products/{sku}/availability', [MobileProductController::class, 'sizes'])
     ->where('sku', '[A-Za-z0-9._-]+')
     ->middleware('throttle:120,1');

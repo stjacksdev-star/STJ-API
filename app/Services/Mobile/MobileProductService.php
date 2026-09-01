@@ -2,6 +2,7 @@
 
 namespace App\Services\Mobile;
 
+use App\Services\Inventory\ExternalInventoryProvider;
 use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
 use Illuminate\Database\Query\Builder;
@@ -35,7 +36,97 @@ class MobileProductService
     public function __construct(
         private readonly ProductListAvailabilityService $availability,
         private readonly ProductDetailAvailabilityService $detailAvailability,
+        private readonly ExternalInventoryProvider $externalInventory,
     ) {}
+
+    public function barcode(int $countryId, string $barcode, string $storeCode): array
+    {
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages(['codigoTienda' => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $result = $this->externalInventory->fetchBarcode(
+            $countryId,
+            strtolower((string) $country->pai_codigo),
+            trim($barcode),
+        );
+        if (! ($result['ok'] ?? false)) {
+            throw ValidationException::withMessages([
+                'codigo' => (string) ($result['error'] ?? 'No se pudo consultar el codigo de barras.'),
+            ]);
+        }
+
+        $source = is_array($result['data'] ?? null) ? $result['data'] : [];
+        $sku = trim((string) ($source['estilo'] ?? ''));
+        if ($sku === '') {
+            return ['resultado' => false, 'mensaje' => 'No encontramos un producto para ese codigo.', 'availability' => []];
+        }
+
+        $product = DB::table('stj_productos as p')
+            ->join('stj_producto_pais as pp', 'pp.ppa_producto', '=', 'p.pro_id')
+            ->where('p.pro_codigo', $sku)
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->first(['p.pro_id', 'p.pro_nombre', 'p.pro_codigo']);
+        if (! $product) {
+            return ['resultado' => false, 'mensaje' => 'El producto no esta disponible para el pais seleccionado.', 'availability' => []];
+        }
+
+        $storeColumns = ['tie_codigo'];
+        if (Schema::hasColumn('stj_tiendas', 'tie_nombre')) {
+            $storeColumns[] = 'tie_nombre';
+        }
+        $countryStores = DB::table('stj_tiendas')
+            ->where('tie_pais', $countryId)
+            ->get($storeColumns)
+            ->keyBy(fn (object $store) => trim((string) $store->tie_codigo));
+        $rows = collect(is_array($source['datos'] ?? null) ? $source['datos'] : [])
+            ->map(function (array $row) {
+                return [
+                    'storeCode' => trim((string) ($row['codTienda'] ?? '')),
+                    'storeName' => trim((string) ($row['tienda'] ?? '')),
+                    'size' => trim((string) ($row['talla'] ?? '')),
+                    'quantity' => max(0, (int) ($row['existencia'] ?? 0)),
+                ];
+            })
+            ->filter(fn (array $row) => $row['storeCode'] !== '' && $row['size'] !== '' && $countryStores->has($row['storeCode']))
+            ->groupBy('storeCode')
+            ->map(function ($rows, string $code) use ($countryStores, $storeCode): array {
+                $store = $countryStores->get($code);
+
+                return [
+                    'storeCode' => $code,
+                    'storeName' => trim((string) ($store->tie_nombre ?? $rows->first()['storeName'] ?? '')),
+                    'selected' => $code === $storeCode,
+                    'sizes' => $rows->map(fn (array $row) => [
+                        'size' => $row['size'],
+                        'quantity' => min(4, $row['quantity']),
+                        'quantityLabel' => $row['quantity'] > 4 ? '4+' : (string) $row['quantity'],
+                    ])->values()->all(),
+                ];
+            })
+            ->sortByDesc('selected')
+            ->values()
+            ->all();
+
+        return [
+            'resultado' => true,
+            'mensaje' => '',
+            'productId' => (int) $product->pro_id,
+            'url' => rtrim((string) config('mobile.legacy_product_image_url'), '/').'/'.$sku.'.jpg',
+            'titulo' => (string) $product->pro_nombre,
+            'nombre' => trim((string) ($source['nombre'] ?? $product->pro_nombre)),
+            'estilo' => 'SKU: '.$sku,
+            'sku' => $sku,
+            'availability' => $rows,
+        ];
+    }
 
     public function forCategory(int $countryId, int $categoryId, string $storeCode): array
     {

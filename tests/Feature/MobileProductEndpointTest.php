@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
+use App\Services\Inventory\ExternalInventoryProvider;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -223,6 +224,52 @@ class MobileProductEndpointTest extends TestCase
         $this->getJson('/api/mobile/v1/catalog/products/search?countryId=1&codigoTienda=999&q=vestido')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_it_resolves_a_barcode_and_returns_structured_country_store_availability(): void
+    {
+        $this->mock(ExternalInventoryProvider::class, function (MockInterface $mock) {
+            $mock->shouldReceive('fetchBarcode')
+                ->once()
+                ->with(1, 'sv', '7412345678901')
+                ->andReturn([
+                    'ok' => true,
+                    'data' => [
+                        'estilo' => 'SKU-1',
+                        'nombre' => 'Vestido rojo talla 4',
+                        'datos' => [
+                            ['codTienda' => '019', 'tienda' => 'Ahuachapan', 'talla' => '4', 'existencia' => 7],
+                            ['codTienda' => '019', 'tienda' => 'Ahuachapan', 'talla' => '6', 'existencia' => 2],
+                            ['codTienda' => '999', 'tienda' => 'Otro pais', 'talla' => '4', 'existencia' => 9],
+                        ],
+                    ],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products/barcode?countryId=1&codigoTienda=019&codigo=7412345678901')
+            ->assertOk()
+            ->assertJsonPath('resultado', true)
+            ->assertJsonPath('productId', 100)
+            ->assertJsonPath('sku', 'SKU-1')
+            ->assertJsonPath('availability.0.storeCode', '019')
+            ->assertJsonPath('availability.0.selected', true)
+            ->assertJsonPath('availability.0.sizes.0.quantityLabel', '4+')
+            ->assertJsonCount(1, 'availability');
+    }
+
+    public function test_barcode_rejects_products_not_enabled_for_the_selected_country(): void
+    {
+        $this->mock(ExternalInventoryProvider::class, function (MockInterface $mock) {
+            $mock->shouldReceive('fetchBarcode')->once()->andReturn([
+                'ok' => true,
+                'data' => ['estilo' => 'SKU-NOT-IN-COUNTRY', 'datos' => []],
+            ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products/barcode?countryId=1&codigoTienda=019&codigo=7412345678901')
+            ->assertOk()
+            ->assertJsonPath('resultado', false)
+            ->assertJsonPath('mensaje', 'El producto no esta disponible para el pais seleccionado.');
     }
 
     public function test_it_searches_with_the_dynamic_basikos_category_scope(): void
