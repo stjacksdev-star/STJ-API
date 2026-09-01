@@ -148,9 +148,10 @@ class MobileAuthController extends Controller
             'form1.tipoIdentificacion' => ['nullable', 'string', 'max:50'],
             'form1.identificacion' => ['nullable', 'string', 'max:50'],
             'form1.pais' => ['required', 'string', 'max:100'],
-            'form1.departamento' => ['nullable'],
+            'form1.departamento' => ['required', 'integer'],
+            'form1.municipio' => ['required', 'integer'],
             'form1.estado' => ['nullable', 'string', 'max:100'],
-            'form1.ciudad' => ['required', 'string', 'max:100'],
+            'form1.ciudad' => ['nullable', 'string', 'max:100'],
             'form1.direccion' => ['nullable', 'string', 'max:500'],
             'form1.telefono' => ['required', 'string', 'max:30', 'regex:/^[+ 0-9-]+$/'],
             'form1.whatsapp' => ['nullable', 'string', 'max:30', 'regex:/^[+ 0-9-]*$/'],
@@ -183,16 +184,27 @@ class MobileAuthController extends Controller
             throw ValidationException::withMessages(['form1.pais' => 'El pais seleccionado no es valido.']);
         }
 
-        $departmentId = trim((string) ($data['departamento'] ?? ''));
-        $department = $departmentId !== ''
-            ? DB::table('stj_world_states')->where('id', $departmentId)->where('country_id', $country->id)->first(['id', 'name'])
-            : null;
-        if ($departmentId !== '' && ! $department) {
+        $departmentId = (int) $data['departamento'];
+        $department = DB::table('stj_world_states')
+            ->where('id', $departmentId)
+            ->where('country_id', $country->id)
+            ->where('estado', 1)
+            ->first(['id', 'name']);
+        if (! $department) {
             throw ValidationException::withMessages(['form1.departamento' => 'El departamento no pertenece al pais seleccionado.']);
         }
 
-        $stateName = $department?->name ?: trim((string) ($data['estado'] ?? ''));
-        $city = trim((string) ($data['ciudad'] ?? ''));
+        $municipality = DB::table('stj_world_cities')
+            ->where('id', (int) $data['municipio'])
+            ->where('state_id', $department->id)
+            ->where('country_id', $country->id)
+            ->first(['id', 'name']);
+        if (! $municipality) {
+            throw ValidationException::withMessages(['form1.municipio' => 'El municipio no pertenece al departamento seleccionado.']);
+        }
+
+        $stateName = (string) $department->name;
+        $city = (string) $municipality->name;
         $phoneCode = '+'.ltrim((string) $country->phonecode, '+');
 
         $customer->forceFill([
@@ -203,10 +215,10 @@ class MobileAuthController extends Controller
             'usu_tipo_identificacion' => trim((string) ($data['tipoIdentificacion'] ?? '')),
             'usu_identificacion' => trim((string) ($data['identificacion'] ?? '')),
             'usu_pais' => $country->name,
-            'usu_departamento_id' => $department?->id,
+            'usu_departamento_id' => $department->id,
             'usu_departamento_txt' => $stateName,
             'usu_estado' => $stateName,
-            'usu_municipio_id' => null,
+            'usu_municipio_id' => $municipality->id,
             'usu_municipio_txt' => $city,
             'usu_ciudad' => $city,
             'usu_direccion' => trim((string) ($data['direccion'] ?? '')),

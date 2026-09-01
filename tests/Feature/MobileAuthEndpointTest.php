@@ -58,12 +58,23 @@ class MobileAuthEndpointTest extends TestCase
             $table->id();
             $table->bigInteger('country_id');
             $table->string('name');
+            $table->unsignedTinyInteger('estado')->default(1);
+        });
+        Schema::create('stj_world_cities', function (Blueprint $table) {
+            $table->id();
+            $table->bigInteger('state_id');
+            $table->bigInteger('country_id');
+            $table->string('name');
         });
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
         DB::table('stj_world_countries')->insert(['id' => 1, 'name' => 'El Salvador', 'phonecode' => '503']);
         DB::table('stj_world_states')->insert([
             ['id' => 10, 'country_id' => 1, 'name' => 'San Salvador'],
             ['id' => 20, 'country_id' => 2, 'name' => 'Guatemala'],
+        ]);
+        DB::table('stj_world_cities')->insert([
+            ['id' => 11, 'state_id' => 10, 'country_id' => 1, 'name' => 'Santa Tecla'],
+            ['id' => 21, 'state_id' => 20, 'country_id' => 2, 'name' => 'Guatemala'],
         ]);
         DB::table('stj_usuarios')->insert([
             'usu_id' => 77,
@@ -211,6 +222,7 @@ class MobileAuthEndpointTest extends TestCase
                 'identificacion' => '01234567-8',
                 'pais' => 'El Salvador',
                 'departamento' => 10,
+                'municipio' => 11,
                 'estado' => 'Texto manipulado',
                 'ciudad' => 'San Salvador',
                 'direccion' => 'Colonia Escalon',
@@ -247,7 +259,7 @@ class MobileAuthEndpointTest extends TestCase
         $token = $customer->createToken('mobile-ios-validation', ['mobile:account'], now()->addDays(30));
         $base = [
             'nombres' => 'Ana', 'apellidos' => 'Lopez', 'tipoIdentificacion' => '', 'identificacion' => '',
-            'pais' => 'El Salvador', 'departamento' => '', 'estado' => '', 'ciudad' => 'Santa Tecla', 'direccion' => '',
+            'pais' => 'El Salvador', 'departamento' => 10, 'municipio' => 11, 'estado' => '', 'ciudad' => 'Santa Tecla', 'direccion' => '',
             'telefono' => '70000000', 'whatsapp' => '',
         ];
 
@@ -260,7 +272,7 @@ class MobileAuthEndpointTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('form1.departamento');
     }
 
-    public function test_account_update_accepts_the_authenticated_email_and_requires_city(): void
+    public function test_account_update_accepts_the_authenticated_email_and_requires_municipality(): void
     {
         DB::table('stj_usuarios')->insert([
             'usu_id' => 88,
@@ -279,6 +291,7 @@ class MobileAuthEndpointTest extends TestCase
             'identificacion' => '01234567-8',
             'pais' => 'El Salvador',
             'departamento' => 10,
+            'municipio' => 11,
             'estado' => 'San Salvador',
             'ciudad' => 'Santa Tecla',
             'direccion' => 'Colonia Escalon',
@@ -292,8 +305,8 @@ class MobileAuthEndpointTest extends TestCase
             ->assertJsonPath('resultado', 'true');
 
         $this->withToken($token->plainTextToken)
-            ->putJson('/api/mobile/v1/account', ['form1' => array_merge($form, ['ciudad' => ''])])
+            ->putJson('/api/mobile/v1/account', ['form1' => array_merge($form, ['municipio' => ''])])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('form1.ciudad');
+            ->assertJsonValidationErrors('form1.municipio');
     }
 }
