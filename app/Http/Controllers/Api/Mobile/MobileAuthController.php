@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
 use App\Services\Mobile\MobilePushSubscriptionService;
+use App\Services\StorefrontWelcomeCouponService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -17,7 +18,111 @@ use Throwable;
 
 class MobileAuthController extends Controller
 {
-    public function __construct(private readonly MobilePushSubscriptionService $pushSubscriptions) {}
+    public function __construct(
+        private readonly MobilePushSubscriptionService $pushSubscriptions,
+        private readonly StorefrontWelcomeCouponService $welcomeCoupons,
+    ) {}
+
+    public function register(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'nombres' => ['required', 'string', 'min:2', 'max:100', "regex:/^[\\pL\\s'.-]+$/u"],
+            'apellidos' => ['required', 'string', 'min:2', 'max:100', "regex:/^[\\pL\\s'.-]+$/u"],
+            'email' => ['required', 'email', 'max:150'],
+            'fechaNac' => ['nullable', 'date', 'before:today', 'after_or_equal:'.now()->subYears(120)->toDateString()],
+            'telefono' => ['required', 'string', 'min:8', 'max:30', 'regex:/^[+ 0-9-]+$/'],
+            'password' => ['required', 'string', 'min:6', 'max:255'],
+            'token' => ['nullable', 'string', 'max:512'],
+            'idSesion' => ['nullable', 'string', 'max:150'],
+            'installationId' => ['nullable', 'uuid'],
+            'environment' => ['nullable', Rule::in(['TEST', 'PRODUCTION'])],
+            'dispositivo' => ['required', 'string', Rule::in(['IOS', 'ANDROID', 'WEB'])],
+        ]);
+
+        $allowedCodes = collect(config('mobile.registration_country_codes', ['SV', 'GT', 'CR', 'HN']))
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->all();
+        $country = DB::table('stj_paises')
+            ->where('pai_id', (int) $data['countryId'])
+            ->whereIn(DB::raw('UPPER(pai_codigo)'), $allowedCodes)
+            ->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'Pais no soportado.'], 422);
+        }
+
+        $email = strtolower(trim((string) $data['email']));
+        if (StorefrontCustomer::query()
+            ->where(fn ($query) => $query->whereRaw('LOWER(usu_usuario) = ?', [$email])->orWhereRaw('LOWER(usu_correo) = ?', [$email]))
+            ->exists()) {
+            return response()->json(['resultado' => 'false', 'mensaje' => 'El usuario '.$email.' ya se encuentra registrado.']);
+        }
+
+        $countryCode = strtoupper((string) $country->pai_codigo);
+        $countryNames = ['SV' => 'El Salvador', 'GT' => 'Guatemala', 'CR' => 'Costa Rica', 'HN' => 'Honduras'];
+        $phoneCodes = ['SV' => '+503', 'GT' => '+502', 'CR' => '+506', 'HN' => '+504'];
+        $customerId = DB::table('stj_usuarios')->insertGetId([
+            'usu_usuario' => $email,
+            'usu_password' => Hash::make((string) $data['password']),
+            'usu_nombre' => trim((string) $data['nombres']),
+            'usu_apellido' => trim((string) $data['apellidos']),
+            'usu_telefono_pais' => $phoneCodes[$countryCode] ?? '',
+            'usu_telefono' => trim((string) $data['telefono']),
+            'usu_correo' => $email,
+            'usu_fecha_nacimiento' => filled($data['fechaNac'] ?? null) ? $data['fechaNac'] : null,
+            'usu_tipo_login' => 'APP',
+            'usu_perfil' => (string) round(microtime(true) * 1000),
+            'usu_fecha_registro' => now(),
+            'usu_foto_perfil' => '',
+            'usu_suscrito_mailing' => 0,
+            'usu_pais_registro' => (int) $country->pai_id,
+            'usu_pais' => $countryNames[$countryCode] ?? $countryCode,
+            'usu_activo' => 1,
+        ]);
+        $customer = StorefrontCustomer::query()->findOrFail($customerId);
+
+        try {
+            $coupon = $this->welcomeCoupons->issue(
+                (int) $country->pai_id,
+                $countryCode,
+                $email,
+                trim((string) $data['nombres'].' '.(string) $data['apellidos']),
+            );
+            $this->welcomeCoupons->sendWelcomeEmail($coupon);
+        } catch (Throwable $exception) {
+            Log::warning('No se pudo generar el cupon de bienvenida durante el registro mobile.', [
+                'userId' => $customerId,
+                'countryId' => (int) $country->pai_id,
+                'exception' => $exception,
+            ]);
+        }
+
+        $platform = strtoupper((string) $data['dispositivo']);
+        $deviceReference = trim((string) ($data['idSesion'] ?? '')) ?: trim((string) ($data['token'] ?? ''));
+        $tokenName = 'mobile-'.strtolower($platform).'-'.substr(hash('sha256', $deviceReference ?: $platform), 0, 16);
+        $expiresAt = Carbon::now()->addDays((int) config('mobile.auth_token_days', 30));
+        $accessToken = $customer->createToken($tokenName, ['mobile:account'], $expiresAt)->plainTextToken;
+
+        try {
+            $this->pushSubscriptions->attachCustomer(
+                (string) ($data['installationId'] ?? ''),
+                (string) ($data['environment'] ?? 'PRODUCTION'),
+                $customer,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('No se pudo asociar la suscripcion push durante el registro mobile.', [
+                'userId' => $customerId,
+                'exception' => $exception,
+            ]);
+        }
+
+        return response()->json($this->legacyProfile($customer) + [
+            'resultado' => 'true',
+            'accessToken' => $accessToken,
+            'tokenType' => 'Bearer',
+            'expiresAt' => $expiresAt->toISOString(),
+        ], 201);
+    }
 
     public function login(Request $request): JsonResponse
     {

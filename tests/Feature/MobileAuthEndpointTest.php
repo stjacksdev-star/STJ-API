@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\StorefrontCustomer;
 use App\Services\Mobile\MobilePushSubscriptionService;
+use App\Services\StorefrontWelcomeCouponService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -48,6 +49,12 @@ class MobileAuthEndpointTest extends TestCase
             $table->string('usu_telefono_w_pais')->nullable();
             $table->string('usu_telefono_w')->nullable();
             $table->string('usu_foto_perfil')->nullable();
+            $table->date('usu_fecha_nacimiento')->nullable();
+            $table->string('usu_tipo_login')->nullable();
+            $table->string('usu_perfil')->nullable();
+            $table->dateTime('usu_fecha_registro')->nullable();
+            $table->boolean('usu_suscrito_mailing')->default(false);
+            $table->bigInteger('usu_pais_registro')->nullable();
         });
         Schema::create('stj_world_countries', function (Blueprint $table) {
             $table->id();
@@ -115,6 +122,50 @@ class MobileAuthEndpointTest extends TestCase
             'name' => 'mobile-ios-'.substr(hash('sha256', 'installation-123'), 0, 16),
             'token' => hash('sha256', $secret),
         ]);
+    }
+
+    public function test_it_registers_a_mobile_customer_with_the_validated_registration_country(): void
+    {
+        $welcome = Mockery::mock(StorefrontWelcomeCouponService::class);
+        $welcome->shouldReceive('issue')->once()->with(1, 'SV', 'nuevo@example.com', 'Nuevo Cliente')->andReturn(null);
+        $welcome->shouldReceive('sendWelcomeEmail')->once()->with(null);
+        $this->app->instance(StorefrontWelcomeCouponService::class, $welcome);
+
+        $response = $this->postJson('/api/mobile/v1/auth/register?countryId=1', [
+            'nombres' => 'Nuevo',
+            'apellidos' => 'Cliente',
+            'email' => 'NUEVO@example.com',
+            'fechaNac' => '1995-05-10',
+            'pais' => 'Honduras',
+            'telefono' => '70001111',
+            'password' => 'Clave123',
+            'idSesion' => 'installation-register',
+            'dispositivo' => 'ANDROID',
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('resultado', 'true')
+            ->assertJsonPath('correo', 'nuevo@example.com')
+            ->assertJsonStructure(['idUser', 'accessToken', 'expiresAt']);
+
+        $this->assertDatabaseHas('stj_usuarios', [
+            'usu_correo' => 'nuevo@example.com',
+            'usu_pais_registro' => 1,
+            'usu_pais' => 'El Salvador',
+            'usu_tipo_login' => 'APP',
+        ]);
+    }
+
+    public function test_mobile_registration_rejects_a_country_outside_the_app_scope(): void
+    {
+        DB::table('stj_paises')->insert(['pai_id' => 5, 'pai_codigo' => 'PA']);
+
+        $this->postJson('/api/mobile/v1/auth/register?countryId=5', [
+            'nombres' => 'Nuevo', 'apellidos' => 'Cliente', 'email' => 'nuevo@example.com',
+            'telefono' => '70001111', 'password' => 'Clave123', 'dispositivo' => 'IOS',
+        ])->assertUnprocessable()->assertJsonPath('resultado', 'false');
+
+        $this->assertDatabaseMissing('stj_usuarios', ['usu_correo' => 'nuevo@example.com']);
     }
 
     public function test_a_push_link_failure_does_not_block_a_valid_login(): void

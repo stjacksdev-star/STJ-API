@@ -72,6 +72,8 @@ use Illuminate\Support\Facades\Route;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
     ->middleware('throttle:10,1');
+Route::post('/mobile/v1/auth/register', [MobileAuthController::class, 'register'])
+    ->middleware('throttle:10,1');
 Route::post('/mobile/v1/visits', MobileDailyVisitController::class)
     ->middleware('throttle:30,1');
 Route::post('/mobile/v1/push/subscriptions', [MobilePushSubscriptionController::class, 'store'])

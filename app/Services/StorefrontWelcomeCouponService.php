@@ -21,9 +21,12 @@ class StorefrontWelcomeCouponService
     public function issue(int $countryId, string $countryCode, string $email, string $customerName): ?array
     {
         $email = strtolower(trim($email));
+        $now = now();
         $template = DB::table('stj_cupones_header')
             ->where('che_config_automatica', self::TEMPLATE)
             ->where('che_estado', 'ACTIVO')
+            ->where('che_inicio', '<=', $now)
+            ->where('che_final', '>=', $now)
             ->where(function ($query) use ($countryId) {
                 $query->where('che_pais', $countryId)->orWhere('che_regional', 'SI');
             })
@@ -42,7 +45,6 @@ class StorefrontWelcomeCouponService
             return null;
         }
 
-        $now = now();
         $header = (array) $template;
         unset($header['che_id']);
         $header['che_generico'] = 'NO';

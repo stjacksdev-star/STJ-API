@@ -64,12 +64,44 @@ class StorefrontWelcomeCouponServiceTest extends TestCase
             && str_contains($request['html_body'], '20 % de descuento'));
     }
 
+    public function test_it_does_not_create_a_coupon_from_an_expired_registration_template(): void
+    {
+        Carbon::setTestNow('2026-08-13 10:00:00');
+        $this->seedTemplate();
+        DB::table('stj_cupones_header')->where('che_id', 62)->update([
+            'che_inicio' => '2026-07-01 00:00:00',
+            'che_final' => '2026-08-12 23:59:59',
+        ]);
+
+        $coupon = app(StorefrontWelcomeCouponService::class)->issue(1, 'SV', 'new@example.com', 'Ana Lopez');
+
+        $this->assertNull($coupon);
+        $this->assertDatabaseCount('stj_cupones_header', 1);
+        $this->assertDatabaseCount('stj_cupones', 0);
+    }
+
+    public function test_it_does_not_create_a_coupon_before_the_template_start_date(): void
+    {
+        Carbon::setTestNow('2026-08-13 10:00:00');
+        $this->seedTemplate();
+        DB::table('stj_cupones_header')->where('che_id', 62)->update([
+            'che_inicio' => '2026-08-14 00:00:00',
+            'che_final' => '2026-09-30 23:59:59',
+        ]);
+
+        $coupon = app(StorefrontWelcomeCouponService::class)->issue(1, 'SV', 'new@example.com', 'Ana Lopez');
+
+        $this->assertNull($coupon);
+        $this->assertDatabaseCount('stj_cupones_header', 1);
+        $this->assertDatabaseCount('stj_cupones', 0);
+    }
+
     private function seedTemplate(): void
     {
         DB::table('stj_cupones_header')->insert([
             'che_id' => 62, 'che_aplica' => 'TODO', 'che_tipo' => 'DESCUENTO', 'che_checkout' => 'TODO',
             'che_generico' => 'NO', 'che_nombre' => 'Cupón de registro', 'che_regional' => 'NO', 'che_pais' => 1,
-            'che_inicio' => '2025-01-01', 'che_final' => '2025-01-02', 'che_monto' => 0, 'che_descuento' => 20,
+            'che_inicio' => '2026-01-01', 'che_final' => '2027-12-31', 'che_monto' => 0, 'che_descuento' => 20,
             'che_aplica_monto_minimo' => 'NO', 'che_monto_minimo' => 0, 'che_multiple' => 'NO',
             'che_aplica_promo' => 'REGULAR', 'che_solo_primera_compra' => 'NO', 'che_estado' => 'ACTIVO',
             'che_config_automatica' => 'REGISTRO_EMAIL', 'che_tipo_productos' => 'PLA', 'che_para' => 'NA',
