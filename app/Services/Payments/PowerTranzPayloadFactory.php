@@ -2,8 +2,8 @@
 
 namespace App\Services\Payments;
 
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class PowerTranzPayloadFactory
 {
@@ -24,7 +24,9 @@ class PowerTranzPayloadFactory
             'AddressMatch' => false,
             'ExtendedData' => ['ThreeDSecure' => ['ChallengeWindowSize' => 4], 'MerchantResponseUrl' => $returnUrl],
         ];
-        if (strtoupper((string) $order->ped_pais) === 'HN') {
+        // Honduras stores the customer's residence country name in ped_pais,
+        // so the ISO currency is the stable country discriminator here.
+        if ($currency === '340') {
             $totalCents = $this->cents((string) $total);
             $taxCents = (int) round($totalCents * 15 / 115, 0, PHP_ROUND_HALF_UP);
             $payload['TaxAmount'] = $taxCents / 100;
@@ -74,5 +76,4 @@ class PowerTranzPayloadFactory
 
         return ((int) $whole * 100) + (int) str_pad(substr($fraction, 0, 2), 2, '0');
     }
-
 }

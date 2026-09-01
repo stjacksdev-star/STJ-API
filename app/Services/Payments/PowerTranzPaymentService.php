@@ -165,15 +165,27 @@ class PowerTranzPaymentService
 
     private function assertAuthorizedAmount(int $orderId, object $payment): void
     {
-        $subtotal = DB::table('stj_pedidos_detalle')->where('car_ref', $payment->ppa_ref)
-            ->selectRaw('COALESCE(SUM(ROUND(car_precio * car_cantidad * (100 - COALESCE(car_descuento_final, car_descuento, 0)) / 100, 2)), 0) total')
-            ->value('total');
+        $details = DB::table('stj_pedidos_detalle')->where('car_ref', $payment->ppa_ref)
+            ->get(['car_precio', 'car_cantidad', 'car_descuento_final', 'car_descuento']);
+        $subtotal = 0;
+        $roundingTolerance = 0;
+        foreach ($details as $detail) {
+            $baseCents = $this->cents((string) $detail->car_precio) * (int) $detail->car_cantidad;
+            $discount = (float) ($detail->car_descuento_final ?? $detail->car_descuento ?? 0);
+            $subtotal += (int) round($baseCents * (100 - $discount) / 100, 0, PHP_ROUND_HALF_UP);
+            // car_descuento_final stores two decimal places. Reconstructing a
+            // line can therefore differ by 0.005 percentage points plus the
+            // final cent rounding, without changing the authorized charge.
+            $roundingTolerance += max(1, (int) ceil($baseCents / 20000));
+        }
         $order = DB::table('stj_pedidos')->where('ped_id', $orderId)->first(['ped_checkout']);
         $shipping = $order?->ped_checkout === 'DOMICILIO'
-            ? DB::table('stj_pedidos_direccion')->where('pdi_pedido', $orderId)->value('pdi_costo_envio_final')
-            : '0';
-        $calculated = $this->cents((string) $subtotal) + $this->cents((string) $shipping);
-        if ($calculated <= 0 || $calculated !== $this->cents((string) $payment->ppa_monto) || $this->cents((string) $subtotal) !== $this->cents((string) $payment->ppa_monto_senv)) {
+            ? $this->cents((string) DB::table('stj_pedidos_direccion')->where('pdi_pedido', $orderId)->value('pdi_costo_envio_final'))
+            : 0;
+        $persistedSubtotal = $this->cents((string) $payment->ppa_monto_senv);
+        $persistedTotal = $this->cents((string) $payment->ppa_monto);
+        $detailsMatch = $details->isNotEmpty() && abs($subtotal - $persistedSubtotal) <= $roundingTolerance;
+        if ($persistedTotal <= 0 || ! $detailsMatch || $persistedSubtotal + $shipping !== $persistedTotal) {
             throw ValidationException::withMessages(['payment' => 'El importe persistido no coincide con el pedido recalculado.']);
         }
     }

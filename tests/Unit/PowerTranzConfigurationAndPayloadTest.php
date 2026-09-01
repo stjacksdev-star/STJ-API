@@ -37,7 +37,9 @@ class PowerTranzConfigurationAndPayloadTest extends TestCase
         $payment = (object) ['ppa_monto' => '115.01', 'ppa_ref' => 'SAFE-REFERENCE'];
         $payload = (new PowerTranzPayloadFactory)->sale($order, $payment, ['pan' => str_repeat('4', 16), 'cvv' => implode('', ['1', '2', '3']), 'expiration' => '3012', 'holder' => 'TEST CUSTOMER'], $currency, '00000000-0000-4000-8000-000000000001', "https://api.example.test/return/{$country}/opaque");
         $expectedKeys = ['TransactionIdentifier', 'TotalAmount', 'CurrencyCode', 'ThreeDSecure', 'Source', 'OrderIdentifier', 'BillingAddress', 'AddressMatch', 'ExtendedData'];
-        if ($country === 'hn') $expectedKeys[] = 'TaxAmount';
+        if ($country === 'hn') {
+            $expectedKeys[] = 'TaxAmount';
+        }
         $this->assertEqualsCanonicalizing($expectedKeys, array_keys($payload));
         $this->assertSame(['CardPresent', 'CardEmvFallback', 'ManualEntry', 'Debit', 'Contactless', 'CardPan', 'CardCvv', 'CardExpiration', 'CardholderName'], array_keys($payload['Source']));
         $this->assertSame(['FirstName', 'LastName', 'Line1', 'Line2', 'City', 'State', 'PostalCode', 'CountryCode', 'EmailAddress', 'PhoneNumber'], array_keys($payload['BillingAddress']));
@@ -85,6 +87,16 @@ class PowerTranzConfigurationAndPayloadTest extends TestCase
         $payload = $factory->sale($order, $payment, ['pan' => '4012000000020006', 'cvv' => '123', 'expiration' => '2812', 'holder' => 'Ana Lopez'], '840', 'operation-id', 'https://api.example.test/return');
 
         $this->assertSame('50377042525', $payload['BillingAddress']['PhoneNumber']);
+    }
+
+    public function test_honduras_tax_uses_currency_when_order_stores_country_name(): void
+    {
+        $order = (object) ['ped_pais' => 'Honduras', 'ped_nombres' => 'Ana', 'ped_apellidos' => 'Lopez', 'ped_email' => 'ana@example.test', 'ped_telefono_pais' => '504', 'ped_telefono' => '9999-9999'];
+        $payment = (object) ['ppa_monto' => '1022.00', 'ppa_ref' => 'HN-TAX'];
+
+        $payload = (new PowerTranzPayloadFactory)->sale($order, $payment, ['pan' => str_repeat('4', 16), 'cvv' => '123', 'expiration' => '3012', 'holder' => 'ANA LOPEZ'], '340', 'operation-id', 'https://api.example.test/return');
+
+        $this->assertSame(133.30, $payload['TaxAmount']);
     }
 
     public function test_expiration_from_checkout_is_converted_from_month_year_to_powertranz_year_month(): void

@@ -184,8 +184,8 @@ class StorefrontOrderFromCartTest extends TestCase
         $currentVisitor = $this->visitor(1);
         $customer = StorefrontCustomer::query()->findOrFail(7);
         $orderId = DB::table('stj_pedidos')->insertGetId(['ped_id_pais' => 1, 'ped_user' => 7, 'ped_estatus' => 'PENDIENTE_PAGO', 'ped_checkout' => 'TIENDA']);
-        DB::table('stj_pedidos_pago')->insert(['ppa_pedido' => $orderId, 'ppa_tipo' => 'TARJETA', 'ppa_estado' => 'PENDIENTE', 'ppa_ref' => 'AUTH-DEVICE', 'ppa_monto_senv' => 10, 'ppa_monto' => 10]);
-        DB::table('stj_pedidos_detalle')->insert(['car_ref' => 'AUTH-DEVICE', 'car_precio' => 10, 'car_cantidad' => 1, 'car_descuento' => 0]);
+        DB::table('stj_pedidos_pago')->insert(['ppa_pedido' => $orderId, 'ppa_tipo' => 'TARJETA', 'ppa_estado' => 'PENDIENTE', 'ppa_ref' => 'AUTH-DEVICE', 'ppa_monto_senv' => 950, 'ppa_monto' => 950]);
+        DB::table('stj_pedidos_detalle')->insert(['car_ref' => 'AUTH-DEVICE', 'car_precio' => 525, 'car_cantidad' => 2, 'car_descuento' => 9.52]);
         StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $originalVisitor->getKey(), 'car_usu_id' => 7, 'car_pais_id' => 1, 'car_tipo' => 'TIENDA', 'car_estado' => 'CONVERTIDO', 'car_origen' => 'WEB', 'car_moneda' => 'USD', 'car_version' => 2, 'car_pedido_id' => $orderId, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addMonth(), 'car_convertido_en' => now(), 'car_creado_en' => now(), 'car_actualizado_en' => now()]);
 
         $configuration = Mockery::mock(PowerTranzConfigResolver::class);
