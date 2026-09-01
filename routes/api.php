@@ -124,6 +124,8 @@ Route::get('/mobile/v1/catalog/stores', [MobileStoreController::class, 'index'])
     ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/departments', [MobileLocationController::class, 'departments'])
     ->middleware('throttle:120,1');
+Route::get('/mobile/v1/catalog/municipalities', [MobileLocationController::class, 'municipalities'])
+    ->middleware('throttle:120,1');
 Route::get('/mobile/v1/catalog/collections/{collection}', [MobileCollectionController::class, 'show'])
     ->whereNumber('collection')
     ->middleware('throttle:120,1');
