@@ -40,6 +40,7 @@ class MobileProductEndpointTest extends TestCase
             $table->id('pro_id');
             $table->string('pro_codigo');
             $table->string('pro_nombre');
+            $table->string('pro_tags')->nullable();
             $table->text('pro_descripcion')->nullable();
             $table->string('pro_marca')->nullable();
             $table->string('pro_oc_marca')->nullable();
@@ -187,6 +188,65 @@ class MobileProductEndpointTest extends TestCase
             ->assertJsonPath('records.0.sku', 'SKU-3')
             ->assertJsonPath('records.1.sku', 'SKU-1')
             ->assertJsonPath('records.1.availableSizes', ['4']);
+    }
+
+    public function test_it_searches_name_sku_and_tags_with_selected_store_inventory(): void
+    {
+        DB::table('stj_productos')->where('pro_id', 102)->update(['pro_tags' => 'camiseta minnie']);
+
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', \Mockery::on(fn (array $products) => collect($products)->pluck('pro_codigo')->all() === ['BAS-1', 'SKU-3']), '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'SKU-3' => ['hasStock' => true, 'availableSizes' => ['6'], 'totalQuantity' => 2],
+                    ],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products/search?countryId=1&codigoTienda=019&q=camisetas')
+            ->assertOk()
+            ->assertJsonCount(1, 'records')
+            ->assertJsonPath('records.0.id', 102)
+            ->assertJsonPath('records.0.sku', 'SKU-3')
+            ->assertJsonPath('records.0.hasStock', true)
+            ->assertJsonPath('records.0.availableSizes', ['6']);
+    }
+
+    public function test_product_search_validates_query_country_and_store(): void
+    {
+        $this->getJson('/api/mobile/v1/catalog/products/search?countryId=1&codigoTienda=019&q=a')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('q');
+
+        $this->getJson('/api/mobile/v1/catalog/products/search?countryId=1&codigoTienda=999&q=vestido')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('codigoTienda');
+    }
+
+    public function test_it_searches_with_the_dynamic_basikos_category_scope(): void
+    {
+        DB::table('stj_productos')->where('pro_id', 102)->update(['pro_tags' => 'camiseta minnie']);
+
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', \Mockery::on(fn (array $products) => collect($products)->pluck('pro_codigo')->all() === ['BAS-1']), '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'BAS-1' => ['hasStock' => true, 'availableSizes' => ['6', '8'], 'totalQuantity' => 4],
+                    ],
+                ]);
+        });
+
+        $this->getJson('/api/mobile/v1/catalog/products/search?countryId=1&codigoTienda=019&q=camiseta&categoryId=12')
+            ->assertOk()
+            ->assertJsonCount(1, 'records')
+            ->assertJsonPath('records.0.id', 300)
+            ->assertJsonPath('records.0.sku', 'BAS-1')
+            ->assertJsonPath('records.0.marca', 'BASIKOS')
+            ->assertJsonPath('records.0.availableSizes', ['6', '8']);
     }
 
     public function test_it_returns_the_direct_legacy_product_detail_contract(): void

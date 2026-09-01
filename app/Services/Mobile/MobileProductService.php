@@ -65,6 +65,67 @@ class MobileProductService
             ->all();
     }
 
+    public function search(int $countryId, string $text, string $storeCode, ?int $categoryId = null): array
+    {
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        if (! $country) {
+            throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);
+        }
+
+        $storeCode = trim($storeCode);
+        if (! DB::table('stj_tiendas')->where('tie_pais', $countryId)->where('tie_codigo', $storeCode)->exists()) {
+            throw ValidationException::withMessages(['codigoTienda' => 'La tienda no pertenece al pais seleccionado.']);
+        }
+
+        $terms = collect(preg_split('/\s+/', Str::ascii(mb_strtolower(trim($text), 'UTF-8'))) ?: [])
+            ->map(fn (string $term) => preg_replace('/[^a-z0-9._-]+/', '', $term) ?: '')
+            ->reject(fn (string $term) => $term === '' || in_array($term, ['a', 'la', 'el', 'de', 'para'], true))
+            ->map(fn (string $term) => mb_strlen($term) > 4 ? mb_substr($term, 0, -1) : $term)
+            ->unique()
+            ->values();
+
+        if ($terms->isEmpty()) {
+            return [];
+        }
+
+        $hasTags = Schema::hasColumn('stj_productos', 'pro_tags');
+        $query = $this->productQuery($countryId);
+        if ($categoryId !== null) {
+            $category = DB::table('stj_categorias')->where('cat_id', $categoryId)
+                ->first(['cat_id', 'cat_si_sub_otras', 'cat_sub_otras', 'cat_marca']);
+            if (! $category) {
+                throw ValidationException::withMessages(['categoryId' => 'Categoria no encontrada.']);
+            }
+            $this->applyCategory($query, $category, []);
+            $query->where('pp.ppa_precio', '>=', 0.99);
+        }
+
+        $query->where(function (Builder $search) use ($terms, $hasTags) {
+                foreach ($terms as $term) {
+                    $pattern = '%'.$term.'%';
+                    $search->orWhereRaw('LOWER(p.pro_nombre) LIKE ?', [$pattern])
+                        ->orWhereRaw('LOWER(p.pro_codigo) LIKE ?', [$pattern]);
+                    if ($hasTags) {
+                        $search->orWhereRaw('LOWER(p.pro_tags) LIKE ?', [$pattern]);
+                    }
+                }
+            })
+            ->orderByDesc('pp.ppa_promo_logo')
+            ->orderByDesc('pp.ppa_tipo_descuento')
+            ->orderByDesc('p.pro_id');
+
+        $products = $this->getProducts($query, 100);
+        $availability = $this->summarize($country, $products, $storeCode);
+        $bySku = $availability['availabilityBySku'] ?? [];
+
+        return $products
+            ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
+            ->take(13)
+            ->map(fn (object $product) => $this->legacyProduct($product, $bySku, true))
+            ->values()
+            ->all();
+    }
+
     public function detail(int $countryId, int $productId, string $storeCode): array
     {
         if (! DB::table('stj_paises')->where('pai_id', $countryId)->exists()) {

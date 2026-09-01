@@ -30,6 +30,25 @@ class MobileProductController extends Controller
         ]);
     }
 
+    public function search(Request $request)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'min:1'],
+            'codigoTienda' => ['required', 'string', 'max:30'],
+            'q' => ['required', 'string', 'min:2', 'max:100'],
+            'categoryId' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        return response()->json([
+            'records' => $this->products->search(
+                (int) $data['countryId'],
+                (string) $data['q'],
+                (string) $data['codigoTienda'],
+                isset($data['categoryId']) ? (int) $data['categoryId'] : null,
+            ),
+        ]);
+    }
+
     public function show(Request $request, int $product)
     {
         $data = $request->validate([
