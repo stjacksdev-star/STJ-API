@@ -363,6 +363,7 @@ class MobileProductService
                     'pro_tallas' => $product->pro_tallas,
                     'cat_nombre' => $product->cat_nombre,
                     'sca_nombre' => $product->sca_nombre,
+                    'foto' => rtrim((string) config('mobile.legacy_product_image_url'), '/').'/'.rawurlencode($sku).'.jpg?'.rawurlencode((string) $product->pro_nombre),
                     'ppa_precio' => $product->ppa_precio,
                     'ppa_descuento' => $product->ppa_descuento,
                     'ppa_origen_descuento' => $product->ppa_origen_descuento,

@@ -395,6 +395,7 @@ class MobileProductEndpointTest extends TestCase
             ->assertJsonPath('populares.0.pro_id', 101)
             ->assertJsonPath('populares.0.pro_codigo', 'SKU-2')
             ->assertJsonPath('populares.0.pro_marca', "ST. JACK'S")
+            ->assertJsonPath('populares.0.foto', 'https://assets.example/p400/SKU-2.jpg?VESTIDO%20AZUL')
             ->assertJsonPath('populares.0.availableSizes', ['8'])
             ->assertJsonMissing(['pro_id' => 100]);
     }
