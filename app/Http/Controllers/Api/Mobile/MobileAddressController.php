@@ -136,7 +136,53 @@ class MobileAddressController extends Controller
     private function addresses(StorefrontCustomer $customer)
     {
         return DB::table('stj_direcciones')->where('dir_usuario', $customer->getKey())->where('dir_save', 'SI')
-            ->orderByRaw("dir_principal = 'SI' DESC")->orderByDesc('dir_id')->get();
+            ->orderByRaw("dir_principal = 'SI' DESC")->orderByDesc('dir_id')->get()
+            ->map(fn (object $address) => $this->normalizeLocation($address));
+    }
+
+    private function normalizeLocation(object $address): object
+    {
+        $country = DB::table('stj_world_countries')
+            ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower(trim((string) ($address->dir_pais ?? '')), 'UTF-8')])
+            ->first(['id']);
+        if (! $country) {
+            return $address;
+        }
+
+        $stateId = filter_var($address->dir_departamento ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+        $state = $stateId
+            ? DB::table('stj_world_states')->where('id', $stateId)->where('country_id', $country->id)->first(['id', 'name'])
+            : null;
+        if (! $state) {
+            $stateName = trim((string) (($address->dir_departamento_txt ?? '') ?: ($address->dir_departamento ?? '')));
+            $state = DB::table('stj_world_states')->where('country_id', $country->id)
+                ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($stateName, 'UTF-8')])
+                ->first(['id', 'name']);
+        }
+        if (! $state) {
+            return $address;
+        }
+
+        $cityId = filter_var($address->dir_municipio ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+        $city = $cityId
+            ? DB::table('stj_world_cities')->where('id', $cityId)->where('state_id', $state->id)->first(['id', 'name'])
+            : null;
+        if (! $city) {
+            $cityName = trim((string) (($address->dir_municipio_txt ?? '') ?: ($address->dir_municipio ?? '')));
+            $city = DB::table('stj_world_cities')->where('state_id', $state->id)
+                ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($cityName, 'UTF-8')])
+                ->first(['id', 'name']);
+        }
+        if (! $city) {
+            return $address;
+        }
+
+        $address->dir_departamento = (int) $state->id;
+        $address->dir_municipio = (int) $city->id;
+        $address->dir_departamento_txt = (string) $state->name;
+        $address->dir_municipio_txt = (string) $city->name;
+
+        return $address;
     }
 
     private function sameCountry(object $address, object $country): bool

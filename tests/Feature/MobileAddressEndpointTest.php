@@ -127,6 +127,29 @@ class MobileAddressEndpointTest extends TestCase
         $this->withToken($this->token)->putJson('/api/mobile/v1/account/addresses/4/primary?countryId=1')->assertNotFound();
     }
 
+    public function test_it_normalizes_legacy_address_location_text_to_catalog_ids(): void
+    {
+        DB::table('stj_direcciones')->insert([
+            'dir_id' => 5,
+            'dir_usuario' => 77,
+            'dir_pais' => 'El Salvador',
+            'dir_departamento' => 'San Salvador',
+            'dir_municipio' => 'San Salvador Centro',
+            'dir_departamento_txt' => 'San Salvador',
+            'dir_municipio_txt' => 'San Salvador Centro',
+            'dir_save' => 'SI',
+            'dir_principal' => 'SI',
+        ]);
+
+        $this->withToken($this->token)
+            ->getJson('/api/mobile/v1/account/addresses/primary?countryId=1')
+            ->assertOk()
+            ->assertJsonPath('records.0.dir_departamento', 10)
+            ->assertJsonPath('records.0.dir_municipio', 100)
+            ->assertJsonPath('records.0.dir_departamento_txt', 'San Salvador')
+            ->assertJsonPath('records.0.dir_municipio_txt', 'San Salvador Centro');
+    }
+
     public function test_it_rejects_cross_country_or_invalid_location_data(): void
     {
         $payload = [
