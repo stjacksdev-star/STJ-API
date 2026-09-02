@@ -472,7 +472,7 @@ class MobileProductEndpointTest extends TestCase
             ->assertUnprocessable()->assertJsonValidationErrors('product');
     }
 
-    public function test_android_sets_and_removes_a_favorite_in_both_tables(): void
+    public function test_android_sets_and_removes_a_favorite_in_the_authoritative_table(): void
     {
         $url = '/api/mobile/v1/catalog/favorites?countryId=1&plataforma=ANDROID';
 
@@ -490,8 +490,8 @@ class MobileProductEndpointTest extends TestCase
         $this->assertDatabaseHas('stj_favoritos', [
             'fav_pais' => 1, 'fav_usuario' => 77, 'fav_producto' => 100, 'fav_origen' => 'ANDROID',
         ]);
-        $this->assertDatabaseHas('stj_hearts', [
-            'hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100, 'hea_estado' => 'ACTIVO',
+        $this->assertDatabaseMissing('stj_hearts', [
+            'hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100,
         ]);
 
         $this->postJson($url, [
@@ -503,8 +503,8 @@ class MobileProductEndpointTest extends TestCase
         $this->assertDatabaseMissing('stj_favoritos', [
             'fav_pais' => 1, 'fav_usuario' => 77, 'fav_producto' => 100,
         ]);
-        $this->assertDatabaseHas('stj_hearts', [
-            'hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100, 'hea_estado' => 'INACTIVO',
+        $this->assertDatabaseMissing('stj_hearts', [
+            'hea_pais' => 1, 'hea_usuario' => 77, 'hea_producto' => 100,
         ]);
     }
 

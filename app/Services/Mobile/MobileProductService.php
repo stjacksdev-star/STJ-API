@@ -498,7 +498,9 @@ class MobileProductService
                 }
             }
 
-            if (Schema::hasTable('stj_hearts')) {
+            // stj_favoritos is authoritative. Only use the legacy table as a fallback
+            // on installations where the new table has not been created yet.
+            if (! Schema::hasTable('stj_favoritos') && Schema::hasTable('stj_hearts')) {
                 $key = [
                     'hea_pais' => $countryId,
                     'hea_usuario' => $userId,
