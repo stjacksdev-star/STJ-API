@@ -139,7 +139,7 @@ class ProductMasterService
                         $row,
                         $data['codigo'],
                         'error',
-                        "Marca no permitida: {$data['marca']}. Valores validos: ST JACKS, BUNGEE, BASICS, FITONE, JACK & CO.",
+                        "Marca no permitida: {$data['marca']}. Valores validos: ST JACKS, BUNGEE, BASICS, BASIKOS, FITONE, JACK & CO.",
                     );
                     continue;
                 }
@@ -635,7 +635,7 @@ class ProductMasterService
             return true;
         }
 
-        $brands = ['ST JACKS', 'BUNGEE', 'BASICS', 'FITONE', 'JACK & CO'];
+        $brands = ['ST JACKS', 'BUNGEE', 'BASICS', 'BASIKOS', 'FITONE', 'JACK & CO'];
 
         return in_array($value, $brands, true);
     }

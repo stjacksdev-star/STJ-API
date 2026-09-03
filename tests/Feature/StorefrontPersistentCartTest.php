@@ -44,6 +44,7 @@ class StorefrontPersistentCartTest extends TestCase
             $t->bigInteger('pro_id', true);
             $t->string('pro_codigo');
             $t->string('pro_nombre');
+            $t->string('pro_marca')->nullable();
             $t->string('pro_tallas');
             $t->string('pro_estatus');
             $t->unsignedBigInteger('pro_categoria')->nullable();
@@ -112,7 +113,7 @@ class StorefrontPersistentCartTest extends TestCase
             $t->bigInteger('prt_tienda');
         });
         DB::table('stj_paises')->insert([['pai_id' => 1, 'pai_id_world' => 1, 'pai_codigo' => 'SV'], ['pai_id' => 2, 'pai_id_world' => 2, 'pai_codigo' => 'GT']]);
-        DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_tallas' => 'S,M', 'pro_estatus' => 'ACTIVO']);
+        DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_marca' => 'BASICS', 'pro_tallas' => 'S,M', 'pro_estatus' => 'ACTIVO']);
         DB::table('stj_producto_pais')->insert([['ppa_pais' => 1, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 100, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => 10, 'ppa_origen_descuento' => 'WEB', 'ppa_promo_nombre' => 'Promo'], ['ppa_pais' => 2, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 200, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => null, 'ppa_origen_descuento' => null, 'ppa_promo_nombre' => null]]);
         DB::table('stj_tiendas')->insert([['tie_id' => 1, 'tie_codigo' => '57', 'tie_nombre' => 'Domicilio SV', 'tie_pais' => 1, 'tie_productos' => 0], ['tie_id' => 2, 'tie_codigo' => '002', 'tie_nombre' => 'Las Cascadas', 'tie_pais' => 1, 'tie_productos' => 1], ['tie_id' => 3, 'tie_codigo' => '2', 'tie_nombre' => 'Domicilio GT', 'tie_pais' => 2, 'tie_productos' => 0]]);
         config(['inventory.domicilio_store_by_country.sv' => '57', 'inventory.domicilio_store_by_country.gt' => '2']);
@@ -133,6 +134,7 @@ class StorefrontPersistentCartTest extends TestCase
         $first = $this->service->add('sv', $this->visitor, null, $input);
         $retry = $this->service->add('sv', $this->visitor, null, $input);
         $this->assertSame($first, $retry);
+        $this->assertSame('BASICS', $first['cart']['items'][0]['brand']);
         $this->assertDatabaseCount('stj_carrito_detalles', 1);
         $this->assertDatabaseHas('stj_carrito_detalles', ['cad_cantidad' => 1, 'cad_precio_unitario' => 100, 'cad_descuento_unitario' => 0, 'cad_precio_final_unitario' => 100]);
         $this->assertDatabaseHas('stj_cliente_eventos', ['cev_tipo' => 'ADD_TO_CART', 'cev_usu_id' => null, 'cev_producto_id' => 10]);

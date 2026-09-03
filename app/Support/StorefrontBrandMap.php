@@ -22,7 +22,7 @@ class StorefrontBrandMap
             ],
             'basikos' => [
                 'canonical' => 'BASIKOS',
-                'aliases' => ['BASICS', 'BASIKO'],
+                'aliases' => ['BASICS', 'BASIKOS', 'BASIKO'],
             ],
         ];
     }

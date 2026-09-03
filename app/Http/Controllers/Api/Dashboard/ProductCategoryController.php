@@ -89,7 +89,7 @@ class ProductCategoryController extends BaseController
             'otherSubcategories' => ['nullable', 'string', 'max:100'],
             'description' => ['required', 'string', 'max:500'],
             'sizes' => ['required', 'string', 'max:250'],
-            'brand' => ['nullable', Rule::in(['ST JACKS', 'BUNGEE', 'BASICS', 'JACK & CO'])],
+            'brand' => ['nullable', Rule::in(['ST JACKS', 'BUNGEE', 'BASICS', 'BASIKOS', 'JACK & CO'])],
             'enabledSv' => ['nullable', 'boolean'],
             'enabledGt' => ['nullable', 'boolean'],
             'enabledCr' => ['nullable', 'boolean'],

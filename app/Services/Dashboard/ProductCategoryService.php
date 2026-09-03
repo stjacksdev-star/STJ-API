@@ -47,7 +47,7 @@ class ProductCategoryService
         return [
             'options' => [
                 'alignments' => ['left', 'center', 'right'],
-                'brands' => ['ST JACKS', 'BUNGEE', 'BASICS', 'JACK & CO'],
+                'brands' => ['ST JACKS', 'BUNGEE', 'BASICS', 'BASIKOS', 'JACK & CO'],
             ],
             'categories' => $categories,
         ];

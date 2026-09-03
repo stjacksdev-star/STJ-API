@@ -824,7 +824,7 @@ class StorefrontCartService
     private function payload(StorefrontCart $cart, array $alerts = []): array
     {
         $cart->load('items');
-        $products = DB::table('stj_productos')->whereIn('pro_id', $cart->items->pluck('cad_producto_id'))->get(['pro_id', 'pro_nombre', 'pro_thumbs'])->keyBy('pro_id');
+        $products = DB::table('stj_productos')->whereIn('pro_id', $cart->items->pluck('cad_producto_id'))->get(['pro_id', 'pro_nombre', 'pro_marca', 'pro_thumbs'])->keyBy('pro_id');
         $countryCode = strtolower((string) DB::table('stj_paises')->where('pai_id', $cart->car_pais_id)->value('pai_codigo'));
         $fulfillment = $this->context($cart);
         $eligibleItems = $cart->items
@@ -873,6 +873,7 @@ class StorefrontCartService
                 'countryCode' => $countryCode,
                 'productId' => (int) $item->cad_producto_id,
                 'name' => $products[$item->cad_producto_id]->pro_nombre ?? $item->cad_ref,
+                'brand' => $products[$item->cad_producto_id]->pro_marca ?? '',
                 'imageUrl' => StorefrontImageUrl::image($products[$item->cad_producto_id]->pro_thumbs ?? null, 'p100'),
                 'sku' => $item->cad_ref,
                 'size' => $item->cad_talla,

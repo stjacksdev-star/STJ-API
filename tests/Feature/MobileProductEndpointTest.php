@@ -275,6 +275,7 @@ class MobileProductEndpointTest extends TestCase
     public function test_it_searches_with_the_dynamic_basikos_category_scope(): void
     {
         DB::table('stj_productos')->where('pro_id', 102)->update(['pro_tags' => 'camiseta minnie']);
+        DB::table('stj_productos')->where('pro_id', 300)->update(['pro_marca' => 'BASIKOS']);
 
         $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
             $mock->shouldReceive('summarize')

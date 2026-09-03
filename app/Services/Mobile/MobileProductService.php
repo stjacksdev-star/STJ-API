@@ -801,8 +801,12 @@ class MobileProductService
         if ((bool) $category->cat_si_sub_otras) {
             $subcategoryIds = collect(explode(',', (string) $category->cat_sub_otras))
                 ->map(fn (string $id) => (int) trim($id))->filter()->unique()->all();
-            $query->whereIn('p.pro_sub_categoria', $subcategoryIds)
-                ->where('p.pro_marca', trim((string) ($category->cat_marca ?: 'ST JACKS')));
+            $brand = strtoupper(trim((string) ($category->cat_marca ?: 'ST JACKS')));
+            $query->whereIn('p.pro_sub_categoria', $subcategoryIds);
+
+            in_array($brand, ['BASICS', 'BASIKOS'], true)
+                ? $query->whereIn(DB::raw('UPPER(TRIM(p.pro_marca))'), ['BASICS', 'BASIKOS'])
+                : $query->whereRaw('UPPER(TRIM(p.pro_marca)) = ?', [$brand]);
         } else {
             $query->where('p.pro_categoria', (int) $category->cat_id);
             $subcategory = trim((string) ($filters['scat'] ?? $filters['sub_id'] ?? ''));
