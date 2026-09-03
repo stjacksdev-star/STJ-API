@@ -37,6 +37,7 @@ class ProductMasterService
         'P' => 'oracleCategoria',
         'Q' => 'oracleLicencia',
         'R' => 'oraclePersonaje',
+        'S' => 'denimFit',
     ];
 
     private const PHOTO_COLUMNS = [
@@ -257,6 +258,7 @@ class ProductMasterService
                 'pro_oc_personaje' => $product->pro_oc_personaje,
                 'pro_oc_anio' => $product->pro_oc_anio,
                 'pro_oc_trimestre' => $product->pro_oc_trimestre,
+                'pro_denim_fit' => $product->pro_denim_fit,
             ],
         ];
     }
@@ -558,6 +560,7 @@ class ProductMasterService
             'pro_oc_personaje' => $data['oraclePersonaje'] !== '' ? mb_substr($data['oraclePersonaje'], 0, 100) : null,
             'pro_oc_anio' => $data['oracleAnio'] !== '' ? (int) $data['oracleAnio'] : null,
             'pro_oc_trimestre' => $data['oracleTrimestre'] !== '' ? (int) $data['oracleTrimestre'] : null,
+            'pro_denim_fit' => $data['denimFit'] !== '' ? mb_substr($data['denimFit'], 0, 50) : null,
         ];
     }
 
