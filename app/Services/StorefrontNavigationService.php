@@ -6,10 +6,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
 
 class StorefrontNavigationService
 {
-    private const VERSION = 1;
+    private const VERSION = 2;
 
     private const GROUPS = [
         ['key' => 'girls', 'label' => 'Niñas', 'categoryIds' => [5]],
@@ -116,7 +117,12 @@ class StorefrontNavigationService
                                 'productCount' => (int) $row->product_count,
                                 'isNew' => $latest?->greaterThanOrEqualTo($cutoff) ?? false,
                             ];
-                        })->values();
+                        })
+                            ->sortBy(
+                                fn (array $subcategory) => Str::lower(Str::ascii($subcategory['label'])),
+                                SORT_NATURAL,
+                            )
+                            ->values();
 
                         return [
                             'categoryId' => (int) $first->cat_id,

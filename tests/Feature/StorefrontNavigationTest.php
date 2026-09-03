@@ -38,14 +38,17 @@ class StorefrontNavigationTest extends TestCase
 
     public function test_it_builds_a_versioned_country_snapshot_from_active_products(): void
     {
+        DB::table('stj_productos')->insert(['pro_id' => 4, 'pro_codigo' => 'P-4', 'pro_nombre' => 'Pijama', 'pro_categoria' => 5, 'pro_sub_categoria' => 20, 'pro_estatus' => 'ACTIVO']);
+        DB::table('stj_producto_pais')->insert(['ppa_id' => 4, 'ppa_pais' => 99, 'ppa_producto' => 4, 'ppa_estado' => 'ACTIVO', 'ppa_fecha_activo' => now()]);
+
         $payload = app(StorefrontNavigationService::class)->build('zz');
 
-        $this->assertSame(1, $payload['version']);
+        $this->assertSame(2, $payload['version']);
         $this->assertSame('zz', $payload['country']);
         $this->assertFileExists($this->snapshot);
         $this->assertSame(['girls', 'accessories'], array_column($payload['groups'], 'key'));
-        $this->assertSame(2, $payload['groups'][0]['productCount']);
-        $this->assertSame('Vestidos', $payload['groups'][0]['segments'][0]['subcategories'][0]['label']);
+        $this->assertSame(3, $payload['groups'][0]['productCount']);
+        $this->assertSame(['Pijamas', 'Vestidos'], array_column($payload['groups'][0]['segments'][0]['subcategories'], 'label'));
         $this->assertTrue($payload['groups'][0]['segments'][0]['subcategories'][0]['isNew']);
     }
 
