@@ -428,6 +428,39 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertEqualsCanonicalizing([102, 103], collect($response->json('data.items'))->pluck('id')->all());
     }
 
+    public function test_spanish_garment_words_find_english_product_names_with_other_intents(): void
+    {
+        $this->withoutMiddleware(ResolveStorefrontVisitor::class);
+        DB::table('stj_categorias')->insert(['cat_id' => 2, 'cat_nombre' => 'Caballeros']);
+        DB::table('stj_productos')->insert([
+            'pro_id' => 104,
+            'pro_codigo' => 'SKU104',
+            'pro_nombre' => 'T-SHIRT SPIDERMAN DARK',
+            'pro_marca' => 'ST JACKS',
+            'pro_categoria' => 2,
+            'pro_personaje' => 'SPIDERMAN',
+            'pro_estatus' => 'ACTIVO',
+            'pro_registro' => '2026-08-04 10:00:00',
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            'ppa_id' => 5,
+            'ppa_pais' => 1,
+            'ppa_producto' => 104,
+            'ppa_estado' => 'ACTIVO',
+            'ppa_precio' => 18,
+            'ppa_es_popular' => 0,
+        ]);
+
+        $this->getJson('/api/storefront/search/SV?q=camisas%20para%20hombres')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', 104)
+            ->assertJsonPath('data.items.0.gender', 'Caballeros');
+
+        $this->getJson('/api/storefront/search/SV?q=camisas%20de%20spiderman')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', 104);
+    }
+
     public function test_catalog_uses_the_same_extended_search_scope(): void
     {
         DB::table('stj_productos')->where('pro_id', 100)->update(['pro_personaje' => 'Mickey Mouse']);
