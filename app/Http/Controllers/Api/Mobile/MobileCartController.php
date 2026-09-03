@@ -255,6 +255,7 @@ class MobileCartController extends Controller
             $this->carts->startCheckout(strtolower((string) $country->pai_codigo), $visitor, $customer, [
                 'operation_uuid' => (string) Str::uuid(),
                 'email' => (string) data_get($data, 'customer.email'),
+                'delivery' => $data['delivery'] ?? [],
                 '_selected_only' => true,
             ]);
 
