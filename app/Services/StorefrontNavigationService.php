@@ -6,7 +6,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class StorefrontNavigationService
 {
@@ -31,16 +33,26 @@ class StorefrontNavigationService
     {
         $countryCode = strtolower(trim($countryCode));
         $key = $this->cacheKey($countryCode);
-        $cached = Cache::get($key);
+        try {
+            $cached = Cache::get($key);
+        } catch (Throwable $exception) {
+            $cached = null;
+            $this->reportPersistenceFailure('read cache', $countryCode, $exception);
+        }
 
         if (is_array($cached)) {
             return $cached;
         }
 
-        $snapshot = $this->readSnapshot($countryCode);
+        try {
+            $snapshot = $this->readSnapshot($countryCode);
+        } catch (Throwable $exception) {
+            $snapshot = null;
+            $this->reportPersistenceFailure('read snapshot', $countryCode, $exception);
+        }
 
         if ($snapshot) {
-            Cache::put($key, $snapshot, now()->addDay());
+            $this->storeInCache($countryCode, $snapshot);
         }
 
         return $snapshot;
@@ -154,8 +166,15 @@ class StorefrontNavigationService
             'groups' => $groups,
         ];
 
-        $this->writeSnapshot($countryCode, $payload);
-        Cache::put($this->cacheKey($countryCode), $payload, now()->addDay());
+        // Persistence is an optimization. A read-only or temporarily unavailable
+        // cache/storage directory must not turn valid navigation data into a 500.
+        try {
+            $this->writeSnapshot($countryCode, $payload);
+        } catch (Throwable $exception) {
+            $this->reportPersistenceFailure('write snapshot', $countryCode, $exception);
+        }
+
+        $this->storeInCache($countryCode, $payload);
 
         return $payload;
     }
@@ -210,5 +229,24 @@ class StorefrontNavigationService
         File::ensureDirectoryExists($directory);
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
         File::replace($path, $json);
+    }
+
+    private function storeInCache(string $countryCode, array $payload): void
+    {
+        try {
+            Cache::put($this->cacheKey($countryCode), $payload, now()->addDay());
+        } catch (Throwable $exception) {
+            $this->reportPersistenceFailure('write cache', $countryCode, $exception);
+        }
+    }
+
+    private function reportPersistenceFailure(string $operation, string $countryCode, Throwable $exception): void
+    {
+        Log::warning('Storefront navigation persistence failed.', [
+            'operation' => $operation,
+            'country' => $countryCode,
+            'exception' => $exception::class,
+            'message' => $exception->getMessage(),
+        ]);
     }
 }
