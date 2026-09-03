@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Support\StorefrontImageUrl;
 use App\Support\StorefrontProductExclusions;
+use App\Support\StorefrontProductSearch;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -76,14 +77,7 @@ class StorefrontCatalogService
         StorefrontProductExclusions::apply($baseQuery, 'p');
 
         if ($trimmedQuery !== '') {
-            $baseQuery->where(function ($subQuery) use ($trimmedQuery) {
-                $subQuery
-                    ->where('p.pro_nombre', 'like', "%{$trimmedQuery}%")
-                    ->orWhere('p.pro_codigo', 'like', "%{$trimmedQuery}%")
-                    ->orWhere('p.pro_tags', 'like', "%{$trimmedQuery}%")
-                    ->orWhere('p.pro_oc_categoria', 'like', "%{$trimmedQuery}%")
-                    ->orWhere('sc.sca_nombre', 'like', "%{$trimmedQuery}%");
-            });
+            StorefrontProductSearch::apply($baseQuery, $trimmedQuery);
         }
 
         $this->applyGroupFilter($baseQuery, $activeGroup);

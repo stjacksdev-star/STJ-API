@@ -6,6 +6,7 @@ use App\Services\ProductListAvailabilityService;
 use App\Services\StorefrontProductService;
 use App\Services\StorefrontCatalogService;
 use App\Services\StorefrontPromotionLandingService;
+use App\Http\Middleware\ResolveStorefrontVisitor;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -346,6 +347,102 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertSame('25% de descuento', $result['product']['badge']);
         $this->assertSame(10, $result['product']['promotion']['id']);
         $this->assertSame('25% de descuento', $result['product']['promotion']['benefitLabel']);
+    }
+
+    public function test_predictive_search_finds_products_by_category_and_character(): void
+    {
+        $this->withoutMiddleware(ResolveStorefrontVisitor::class);
+
+        $this->getJson('/api/storefront/search/SV?q=pijama')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', 100)
+            ->assertJsonPath('data.items.0.gender', 'Pijamas')
+            ->assertJsonPath('data.items.0.imageUrl', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/images/p100/producto.jpg');
+
+        DB::table('stj_productos')->where('pro_id', 100)->update(['pro_personaje' => 'Mickey Mouse']);
+
+        $this->getJson('/api/storefront/search/SV?q=mickey')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.slug', 'producto-prueba-100');
+    }
+
+    public function test_predictive_search_requires_three_characters(): void
+    {
+        $this->withoutMiddleware(ResolveStorefrontVisitor::class);
+
+        $this->getJson('/api/storefront/search/SV?q=pi')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('q');
+    }
+
+    public function test_search_ignores_connectors_and_translates_customer_gender_terms(): void
+    {
+        $this->withoutMiddleware(ResolveStorefrontVisitor::class);
+        DB::table('stj_categorias')->insert(['cat_id' => 2, 'cat_nombre' => 'Caballeros']);
+        DB::table('stj_productos')->insert([
+            'pro_id' => 101,
+            'pro_codigo' => 'SKU101',
+            'pro_nombre' => 'Pantalones clásicos',
+            'pro_marca' => 'ST JACKS',
+            'pro_categoria' => 2,
+            'pro_estatus' => 'ACTIVO',
+            'pro_registro' => '2026-08-01 10:00:00',
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            'ppa_id' => 2,
+            'ppa_pais' => 1,
+            'ppa_producto' => 101,
+            'ppa_estado' => 'ACTIVO',
+            'ppa_precio' => 35,
+            'ppa_es_popular' => 0,
+        ]);
+
+        $this->getJson('/api/storefront/search/SV?q=pantalones%20para%20hombres')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', 101)
+            ->assertJsonPath('data.items.0.gender', 'Caballeros');
+
+        $this->getJson('/api/storefront/search/SV?q=pantalones%20de%20adultos')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.id', 101);
+    }
+
+    public function test_generic_adolescent_intent_searches_both_teen_categories(): void
+    {
+        $this->withoutMiddleware(ResolveStorefrontVisitor::class);
+        DB::table('stj_categorias')->insert([
+            ['cat_id' => 3, 'cat_nombre' => 'Teen Chicos'],
+            ['cat_id' => 4, 'cat_nombre' => 'Teen Chicas'],
+        ]);
+        DB::table('stj_productos')->insert([
+            ['pro_id' => 102, 'pro_codigo' => 'SKU102', 'pro_nombre' => 'Camiseta juvenil azul', 'pro_marca' => 'ST JACKS', 'pro_categoria' => 3, 'pro_estatus' => 'ACTIVO', 'pro_registro' => '2026-08-02 10:00:00'],
+            ['pro_id' => 103, 'pro_codigo' => 'SKU103', 'pro_nombre' => 'Camiseta juvenil rosa', 'pro_marca' => 'ST JACKS', 'pro_categoria' => 4, 'pro_estatus' => 'ACTIVO', 'pro_registro' => '2026-08-03 10:00:00'],
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            ['ppa_id' => 3, 'ppa_pais' => 1, 'ppa_producto' => 102, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 20, 'ppa_es_popular' => 0],
+            ['ppa_id' => 4, 'ppa_pais' => 1, 'ppa_producto' => 103, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 20, 'ppa_es_popular' => 0],
+        ]);
+
+        $response = $this->getJson('/api/storefront/search/SV?q=ropa%20para%20adolescentes')->assertOk();
+
+        $this->assertEqualsCanonicalizing([102, 103], collect($response->json('data.items'))->pluck('id')->all());
+    }
+
+    public function test_catalog_uses_the_same_extended_search_scope(): void
+    {
+        DB::table('stj_productos')->where('pro_id', 100)->update(['pro_personaje' => 'Mickey Mouse']);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+
+        $result = (new StorefrontCatalogService($availability))->forCountry('SV', 'mickey');
+
+        $this->assertSame([100], collect($result['products'])->pluck('id')->all());
+        $this->assertSame('mickey', $result['search']['query']);
     }
 
     private function seedData(): void
