@@ -253,6 +253,10 @@ class PromotionAssetService
 
     private function storeImage(UploadedFile $image, string $type, string $countryCode, int $promotionId, string $variant): string
     {
+        if ($type === 'BANNER' && $variant === 'desktop' && $this->isStandardPromotionBanner($image)) {
+            return $this->storeOriginalPromotionBanner($image, $countryCode, $promotionId);
+        }
+
         $optimized = $this->images->optimize($image);
         $folder = $this->folderForType($type);
         $filename = $promotionId.'-'.$variant.'-'.now()->format('YmdHis').'-'.Str::random(6).'.'.$optimized->extension;
@@ -283,6 +287,49 @@ class PromotionAssetService
                 unlink($optimized->path);
             }
         }
+    }
+
+    private function isStandardPromotionBanner(UploadedFile $image): bool
+    {
+        $dimensions = getimagesize($image->getRealPath());
+
+        return $dimensions !== false
+            && (int) $dimensions[0] === 1466
+            && (int) $dimensions[1] === 320;
+    }
+
+    private function storeOriginalPromotionBanner(UploadedFile $image, string $countryCode, int $promotionId): string
+    {
+        $mime = (string) ($image->getMimeType() ?: 'image/jpeg');
+        $extension = match ($mime) {
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/gif' => 'gif',
+            default => 'jpg',
+        };
+        $folder = 'banner';
+        $filename = $promotionId.'-desktop-'.now()->format('YmdHis').'-'.Str::random(6).'.'.$extension;
+        $path = "{$folder}/{$countryCode}/{$filename}";
+
+        if ($this->shouldStoreInSpaces()) {
+            Storage::disk('spaces')->put($path, fopen($image->getRealPath(), 'rb'), [
+                'visibility' => 'public',
+                'ContentType' => $mime,
+                'CacheControl' => 'public, max-age=31536000, immutable',
+            ]);
+
+            return rtrim((string) config('filesystems.disks.spaces.url'), '/').'/'.$path;
+        }
+
+        $directory = public_path("images/{$folder}/{$countryCode}");
+
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        copy($image->getRealPath(), $directory.DIRECTORY_SEPARATOR.$filename);
+
+        return "/images/{$folder}/{$countryCode}/{$filename}";
     }
 
     private function folderForType(string $type): string
