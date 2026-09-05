@@ -7,7 +7,6 @@ use App\Models\WebPushSubscription;
 use App\Services\PushTopicService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 class MobilePushSubscriptionService
 {
@@ -20,10 +19,9 @@ class MobilePushSubscriptionService
         $installationId = trim((string) $data['installationId']);
         $token = trim((string) ($data['token'] ?? ''));
         $environment = strtoupper((string) ($data['environment'] ?? 'PRODUCTION'));
-        $session = $this->session($request, trim((string) ($data['sessionCode'] ?? '')));
 
         if ($platform === 'WEB') {
-            return $this->response(null, $session);
+            return $this->response(null);
         }
 
         if ($token === '') {
@@ -42,7 +40,7 @@ class MobilePushSubscriptionService
                 ])->save();
             }
 
-            return $this->response($existing ?? null, $session);
+            return $this->response($existing ?? null);
         }
 
         $requestedCountryId = (int) $data['countryId'];
@@ -50,7 +48,7 @@ class MobilePushSubscriptionService
             ? (int) $customer->usu_pais_registro
             : $requestedCountryId;
 
-        $subscription = DB::transaction(function () use ($request, $data, $customer, $platform, $installationId, $token, $environment, $countryId, $session) {
+        $subscription = DB::transaction(function () use ($request, $data, $customer, $platform, $installationId, $token, $environment, $countryId) {
             $hash = hash('sha256', $token);
             $subscription = WebPushSubscription::query()
                 ->where('psu_instalacion_uuid', $installationId)
@@ -94,8 +92,6 @@ class MobilePushSubscriptionService
                 'psu_zona_horaria' => mb_substr((string) ($data['timezone'] ?? ''), 0, 64) ?: null,
                 'psu_user_agent' => mb_substr((string) $request->userAgent(), 0, 500),
                 'psu_instalacion_uuid' => $installationId,
-                'psu_sesion_id' => $session['id'],
-                'psu_sesion_codigo' => $session['code'],
                 'psu_app_version' => mb_substr((string) ($data['appVersion'] ?? ''), 0, 40) ?: null,
                 'psu_app_build' => mb_substr((string) ($data['appBuild'] ?? ''), 0, 40) ?: null,
                 'psu_entorno' => $environment,
@@ -117,7 +113,7 @@ class MobilePushSubscriptionService
             return $subscription;
         });
 
-        return $this->response($subscription, $session);
+        return $this->response($subscription);
     }
 
     public function attachCustomer(string $installationId, string $environment, StorefrontCustomer $customer): void
@@ -175,36 +171,10 @@ class MobilePushSubscriptionService
         });
     }
 
-    /** @return array{id:int,code:string} */
-    private function session(Request $request, string $code): array
-    {
-        if ($code !== '') {
-            $existing = DB::table('stj_sesiones')->where('ses_codigo', $code)->first(['ses_id', 'ses_codigo']);
-            if ($existing) {
-                return ['id' => (int) $existing->ses_id, 'code' => (string) $existing->ses_codigo];
-            }
-        }
-
-        $code = now()->getTimestampMs().'-'.Str::random(10);
-        $id = DB::table('stj_sesiones')->insertGetId([
-            'ses_origen' => 'APP',
-            'ses_codigo' => $code,
-            'ses_dispositivo' => mb_substr((string) $request->userAgent(), 0, 500),
-            'ses_fecha' => now(),
-            'ses_url_inicio' => mb_substr($request->fullUrl(), 0, 500),
-            'ses_ip' => mb_substr((string) $request->ip(), 0, 64),
-        ], 'ses_id');
-
-        return ['id' => (int) $id, 'code' => $code];
-    }
-
-    /** @param array{id:int,code:string} $session */
-    private function response(?WebPushSubscription $subscription, array $session): array
+    private function response(?WebPushSubscription $subscription): array
     {
         return [
             'resultado' => 'true',
-            'sess' => $session['code'],
-            'sessId' => $session['id'],
             'subscriptionId' => $subscription ? (int) $subscription->getKey() : null,
             'platform' => $subscription?->psu_plataforma,
             'countryId' => $subscription ? (int) $subscription->psu_pais_id : null,

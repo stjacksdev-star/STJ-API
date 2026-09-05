@@ -44,7 +44,6 @@ class MobileCartController extends Controller
             'talla' => ['required', 'string', 'max:10'],
             'cantidad' => ['required', 'integer', 'min:1', 'max:99'],
             'idUser' => ['nullable'],
-            'idSesion' => ['nullable'],
             'tipo' => ['nullable', 'string'],
         ]);
         $product = DB::table('stj_productos')->where('pro_id', $data['producto'])->first(['pro_id', 'pro_codigo']);
@@ -75,7 +74,6 @@ class MobileCartController extends Controller
             'cantidad' => ['nullable', 'integer', 'min:1', 'max:99'],
             'eliminar' => ['nullable', 'boolean'],
             'idUser' => ['nullable'],
-            'idSesion' => ['nullable'],
         ]);
         $this->cartInCurrentStore($request, $country, $visitor, $customer);
         $operation = ['operation_uuid' => (string) Str::uuid()];

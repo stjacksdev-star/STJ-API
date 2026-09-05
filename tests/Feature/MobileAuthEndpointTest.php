@@ -120,8 +120,7 @@ class MobileAuthEndpointTest extends TestCase
         $response = $this->postJson('/api/mobile/v1/auth/login?countryId=1', [
             'email' => ' Cliente@Example.com ',
             'password' => 'ClaveSegura123',
-            'token' => 'fcm-device-token',
-            'idSesion' => 'installation-123',
+            'installationId' => '9d587183-10e7-4119-ae59-6e1c2f90fd14',
             'dispositivo' => 'IOS',
         ]);
 
@@ -138,7 +137,7 @@ class MobileAuthEndpointTest extends TestCase
         $this->assertDatabaseHas('personal_access_tokens', [
             'tokenable_type' => 'App\\Models\\StorefrontCustomer',
             'tokenable_id' => 77,
-            'name' => 'mobile-ios-'.substr(hash('sha256', 'installation-123'), 0, 16),
+            'name' => 'mobile-ios-'.substr(hash('sha256', '9d587183-10e7-4119-ae59-6e1c2f90fd14'), 0, 16),
             'token' => hash('sha256', $secret),
         ]);
     }
@@ -158,7 +157,7 @@ class MobileAuthEndpointTest extends TestCase
             'pais' => 'Honduras',
             'telefono' => '70001111',
             'password' => 'Clave123',
-            'idSesion' => 'installation-register',
+            'installationId' => 'c6c78d5d-b89e-4457-934e-a43ad41bf03e',
             'dispositivo' => 'ANDROID',
         ]);
 
@@ -225,7 +224,6 @@ class MobileAuthEndpointTest extends TestCase
         $this->postJson('/api/mobile/v1/auth/login?countryId=1', [
             'email' => 'cliente@example.com',
             'password' => 'ClaveSegura123',
-            'idSesion' => 'installation-123',
             'installationId' => '9d587183-10e7-4119-ae59-6e1c2f90fd14',
             'environment' => 'TEST',
             'dispositivo' => 'WEB',
@@ -235,13 +233,13 @@ class MobileAuthEndpointTest extends TestCase
 
         $this->assertDatabaseHas('personal_access_tokens', [
             'tokenable_id' => 77,
-            'name' => 'mobile-web-'.substr(hash('sha256', 'installation-123'), 0, 16),
+            'name' => 'mobile-web-'.substr(hash('sha256', '9d587183-10e7-4119-ae59-6e1c2f90fd14'), 0, 16),
         ]);
     }
 
     public function test_it_keeps_legacy_credential_error_messages_without_issuing_tokens(): void
     {
-        $payload = ['password' => 'incorrecta', 'token' => '', 'idSesion' => 'abc', 'dispositivo' => 'ANDROID'];
+        $payload = ['password' => 'incorrecta', 'dispositivo' => 'ANDROID'];
 
         $this->postJson('/api/mobile/v1/auth/login?countryId=1', $payload + ['email' => 'cliente@example.com'])
             ->assertOk()->assertExactJson(['resultado' => 'false', 'mensaje' => "Contrase\u{00F1}a incorrecta"]);

@@ -510,8 +510,6 @@ class MobileProductService
                 $optional = [
                     'hea_categoria' => $legacyData['categoria'] ?? $product->pro_categoria,
                     'hea_sub_categoria' => $legacyData['subCategoria'] ?? $product->pro_sub_categoria,
-                    'hea_id_sesion' => $legacyData['idSesion'] ?? null,
-                    'hea_sesion' => $legacyData['sesion'] ?? null,
                 ];
                 foreach ($optional as $column => $value) {
                     if (Schema::hasColumn('stj_hearts', $column)) {

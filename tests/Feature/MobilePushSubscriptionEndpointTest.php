@@ -23,15 +23,6 @@ class MobilePushSubscriptionEndpointTest extends TestCase
         Schema::create('stj_usuarios', function (Blueprint $table) {
             $table->id('usu_id');
         });
-        Schema::create('stj_sesiones', function (Blueprint $table) {
-            $table->id('ses_id');
-            $table->string('ses_origen');
-            $table->string('ses_codigo')->unique();
-            $table->string('ses_dispositivo')->nullable();
-            $table->dateTime('ses_fecha');
-            $table->string('ses_url_inicio')->nullable();
-            $table->string('ses_ip')->nullable();
-        });
         Schema::disableForeignKeyConstraints();
         Schema::drop('stj_push_suscripciones');
         Schema::enableForeignKeyConstraints();
@@ -51,8 +42,6 @@ class MobilePushSubscriptionEndpointTest extends TestCase
             $table->string('psu_zona_horaria')->nullable();
             $table->string('psu_user_agent')->nullable();
             $table->uuid('psu_instalacion_uuid');
-            $table->bigInteger('psu_sesion_id')->nullable();
-            $table->string('psu_sesion_codigo')->nullable();
             $table->string('psu_app_version')->nullable();
             $table->string('psu_app_build')->nullable();
             $table->string('psu_entorno');
@@ -109,14 +98,13 @@ class MobilePushSubscriptionEndpointTest extends TestCase
             'environment' => 'TEST',
         ];
 
-        $first = $this->postJson('/api/mobile/v1/push/subscriptions', $payload)
+        $this->postJson('/api/mobile/v1/push/subscriptions', $payload)
             ->assertCreated()->assertJsonPath('resultado', 'true')->assertJsonPath('countryId', 1);
 
         $this->postJson('/api/mobile/v1/push/subscriptions', [
             ...$payload,
             'token' => 'fcm-token-rotated',
             'countryId' => 2,
-            'sessionCode' => $first->json('sess'),
         ])->assertCreated()->assertJsonPath('countryId', 1);
 
         $this->assertDatabaseCount('stj_push_suscripciones', 1);

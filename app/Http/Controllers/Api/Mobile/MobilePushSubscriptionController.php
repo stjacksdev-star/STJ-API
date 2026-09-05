@@ -18,7 +18,6 @@ class MobilePushSubscriptionController extends Controller
         $data = $request->validate([
             'token' => ['nullable', 'string', 'max:500'],
             'installationId' => ['required', 'uuid'],
-            'sessionCode' => ['nullable', 'string', 'max:150'],
             'platform' => ['required', Rule::in(['IOS', 'ANDROID', 'WEB'])],
             'countryId' => ['required', 'integer', Rule::exists('stj_paises', 'pai_id')],
             'permission' => ['required', Rule::in(['GRANTED', 'DENIED', 'DEFAULT'])],

@@ -69,8 +69,6 @@ class MobileAuthController extends Controller
             'fechaNac' => ['nullable', 'date', 'before:today', 'after_or_equal:'.now()->subYears(120)->toDateString()],
             'telefono' => ['required', 'string', 'min:8', 'max:30', 'regex:/^[+ 0-9-]+$/'],
             'password' => ['required', 'string', 'min:6', 'max:255'],
-            'token' => ['nullable', 'string', 'max:512'],
-            'idSesion' => ['nullable', 'string', 'max:150'],
             'installationId' => ['nullable', 'uuid'],
             'environment' => ['nullable', Rule::in(['TEST', 'PRODUCTION'])],
             'dispositivo' => ['required', 'string', Rule::in(['IOS', 'ANDROID', 'WEB'])],
@@ -134,7 +132,7 @@ class MobileAuthController extends Controller
         }
 
         $platform = strtoupper((string) $data['dispositivo']);
-        $deviceReference = trim((string) ($data['idSesion'] ?? '')) ?: trim((string) ($data['token'] ?? ''));
+        $deviceReference = trim((string) ($data['installationId'] ?? '')) ?: $platform;
         $tokenName = 'mobile-'.strtolower($platform).'-'.substr(hash('sha256', $deviceReference ?: $platform), 0, 16);
         $expiresAt = Carbon::now()->addDays((int) config('mobile.auth_token_days', 30));
         $accessToken = $customer->createToken($tokenName, ['mobile:account'], $expiresAt)->plainTextToken;
@@ -166,8 +164,6 @@ class MobileAuthController extends Controller
             'countryId' => ['required', 'integer', 'min:1'],
             'email' => ['required', 'email', 'max:150'],
             'password' => ['required', 'string', 'max:255'],
-            'token' => ['nullable', 'string', 'max:512'],
-            'idSesion' => ['nullable', 'string', 'max:150'],
             'installationId' => ['nullable', 'uuid'],
             'environment' => ['nullable', Rule::in(['TEST', 'PRODUCTION'])],
             'dispositivo' => ['required', 'string', Rule::in(['IOS', 'ANDROID', 'WEB'])],
@@ -191,7 +187,7 @@ class MobileAuthController extends Controller
         }
 
         $platform = strtoupper((string) $data['dispositivo']);
-        $deviceReference = trim((string) ($data['idSesion'] ?? '')) ?: trim((string) ($data['token'] ?? ''));
+        $deviceReference = trim((string) ($data['installationId'] ?? '')) ?: $platform;
         $tokenName = 'mobile-'.strtolower($platform).'-'.substr(hash('sha256', $deviceReference ?: $platform), 0, 16);
         $expiresAt = Carbon::now()->addDays((int) config('mobile.auth_token_days', 30));
 

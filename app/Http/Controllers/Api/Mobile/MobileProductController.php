@@ -141,8 +141,6 @@ class MobileProductController extends Controller
             'estado' => ['nullable', 'string', Rule::in(['ACTIVO', 'INACTIVO', 'activo', 'inactivo'])],
             'categoria' => ['nullable'],
             'subCategoria' => ['nullable'],
-            'idSesion' => ['nullable'],
-            'sesion' => ['nullable'],
         ]);
 
         $authenticated = Auth::guard('sanctum')->user();
