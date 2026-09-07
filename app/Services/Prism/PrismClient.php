@@ -12,6 +12,40 @@ class PrismClient
 {
     private ?string $token = null;
 
+    public ?int $lastStatus = null;
+
+    /** Only reads may renew and repeat automatically. Writes are journaled by the processor. */
+    public function request(string $method, string $path, array $query = [], ?array $body = null): array
+    {
+        $this->lastStatus = null;
+        if (! preg_match('#^/v1/rest/[a-zA-Z0-9/_-]+$#D', $path) || ! in_array($method, ['GET', 'POST', 'PUT'], true)) {
+            throw new RuntimeException('Prism: ruta o método no permitido.');
+        }
+        $this->validateConfiguration();
+        $this->token ??= $this->login();
+        $send = function () use ($method, $path, $query, $body): Response {
+            try {
+                return Http::acceptJson()->connectTimeout(max(1, (int) config('prism.hn.connect_timeout')))
+                    ->timeout(max(1, (int) config('prism.hn.timeout')))
+                    ->withOptions(['allow_redirects' => false, 'verify' => true])
+                    ->withHeaders(['Auth-Session' => $this->token])
+                    ->send($method, rtrim((string) config('prism.hn.host'), '/').$path,
+                        $body === null ? ['query' => $query] : ['query' => $query, 'json' => $body]);
+            } catch (ConnectionException) {
+                throw new RuntimeException('Prism: conexión fallida o tiempo de espera agotado.');
+            }
+        };
+        $response = $send();
+        if ($method === 'GET' && in_array($response->status(), [401, 403], true)) {
+            $this->token = null;
+            $this->token = $this->login();
+            $response = $send();
+        }
+        $this->lastStatus = $response->status();
+
+        return $this->decode($response, $method.' '.$path);
+    }
+
     /** Read-only entry point. Tokens belong to this execution, never to a browser session. */
     public function activeStores(): array
     {
