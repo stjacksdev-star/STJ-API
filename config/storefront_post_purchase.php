@@ -16,6 +16,8 @@ return [
     ],
 
     'honduras' => [
+        'register_pending' => env('STOREFRONT_HN_PRISM_REGISTER_PENDING', false),
+        // Reserved for the independent sender; checkout never calls Retail.
         'enabled' => env('STOREFRONT_HN_PRISM_ENABLED', true),
         'url' => env('STOREFRONT_HN_PRISM_URL', 'https://stjacks.com/Honduras/Prism/prism_crear_documento_items_y_tender'),
     ],

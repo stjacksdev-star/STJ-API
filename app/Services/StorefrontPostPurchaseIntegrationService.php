@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Services\Prism\PrismPendingShipmentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -10,6 +11,9 @@ class StorefrontPostPurchaseIntegrationService
 {
     public function dispatch(int $orderId, int $paymentId): void
     {
+        // Local registration is independent of the external integration switches.
+        app(PrismPendingShipmentService::class)->register($orderId, $paymentId);
+
         if (! config('storefront_post_purchase.integrations_enabled')) {
             return;
         }
@@ -26,7 +30,6 @@ class StorefrontPostPurchaseIntegrationService
 
         match (strtoupper((string) $order->pai_codigo)) {
             'GT', 'CR', 'PA' => $this->reservePosItems($order, strtoupper((string) $order->pai_codigo)),
-            'HN' => $this->triggerHondurasPrism($orderId, $paymentId),
             default => null,
         };
     }
@@ -57,20 +60,6 @@ class StorefrontPostPurchaseIntegrationService
             ]);
             $this->client()->get($url)->throw();
         }
-    }
-
-    private function triggerHondurasPrism(int $orderId, int $paymentId): void
-    {
-        if (! config('storefront_post_purchase.honduras.enabled')) {
-            return;
-        }
-
-        $url = trim((string) config('storefront_post_purchase.honduras.url'));
-        if ($url === '') {
-            throw new RuntimeException('STOREFRONT_HN_PRISM_URL no está configurada.');
-        }
-
-        $this->client()->get($url, ['ped_id' => $orderId, 'ppa_id' => $paymentId])->throw();
     }
 
     private function client()
