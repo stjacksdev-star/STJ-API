@@ -270,12 +270,14 @@ class PrismShipmentProcessor
             $rows = $journal->read($this->client, 'tender_verify', $path.'/tender', ['cols' => '*']);
         }
         $tender = self::one($rows);
+        $documentSid = basename($path);
         if (PrismOrderSnapshot::cents($tender['taken'] ?? null) !== $prismTotal
-            || (string) ($tender['authorization_code'] ?? '') !== $snapshot['authorization']
-            || (string) ($tender['tender_name'] ?? '') !== $snapshot['tender_name']
-            || (string) ($tender['card_type_name'] ?? '') !== $snapshot['card_type']
-            || (int) ($tender['tender_type'] ?? -1) !== 0) {
-            throw new RuntimeException('Tender remoto no coincide con importe/autorización/tipo del pago.');
+            || (isset($tender['amount']) && PrismOrderSnapshot::cents($tender['amount']) !== $prismTotal)
+            || (int) ($tender['tender_type'] ?? -1) !== 0
+            || (string) ($tender['document_sid'] ?? '') !== $documentSid
+            || (isset($tender['tenant_sid']) && (string) $tender['tenant_sid'] !== (string) config('prism.hn.tenant_sid'))
+            || (string) ($tender['origin_application'] ?? '') !== 'ECOMMERCE') {
+            throw new RuntimeException('Tender remoto no coincide con documento, tenant, importe o tipo esperado.');
         }
         $journal->verified('tender_post');
     }

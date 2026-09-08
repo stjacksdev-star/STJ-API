@@ -234,6 +234,10 @@ Código de salida 0 significa validado/enviado/ya_enviado; 1 indica bloqueo/erro
   y continúa solo si puede confirmar lo aplicado. No vuelve a publicar artículos
   parciales ni tenders desconocidos. Un documento creado con respuesta perdida puede
   recuperarse por referencia única y coincidencia de tienda/subsidiaria.
+- Prism normaliza `tender_name` al número enmascarado y omite `authorization_code`
+  y `card_type_name` al consultar el tender. El payload START conserva los valores
+  enviados; la conciliación remota valida document_sid, tenant_sid cuando viene,
+  origin_application, tender_type, amount/taken y el total calculado por Prism.
 - Un rechazo HTTP 401/403/409/422 deja el paso disponible para corregir y reintentar;
   los POST/PUT nunca se reintentan automáticamente dentro del cliente HTTP.
 - Si el proceso muere abruptamente y deja `procesando`, requiere revisión operativa:

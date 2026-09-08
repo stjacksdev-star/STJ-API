@@ -203,9 +203,20 @@ class PrismShipmentProcessorTest extends TestCase
                     $this->failure = null;
                     throw new ConnectionException('Timeout after tender');
                 }
+
+                return Http::response($this->tenders);
             }
 
-            return Http::response($this->tenders);
+            return Http::response(array_map(fn ($tender) => [
+                'sid' => '770000000000000001',
+                'document_sid' => '790000000000000001',
+                'tenant_sid' => '100',
+                'origin_application' => $tender['origin_application'],
+                'tender_type' => $tender['tender_type'],
+                'amount' => $tender['taken'],
+                'taken' => $tender['taken'],
+                'tender_name' => '411111XXXXXX1111',
+            ], $this->tenders));
         }
         if ($path === '/v1/rest/customer' && $method === 'POST') {
             $this->customer = array_merge($request->data()[0], ['sid' => '780000000000000001', 'row_version' => 1,
