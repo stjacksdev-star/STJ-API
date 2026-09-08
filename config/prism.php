@@ -19,5 +19,7 @@ return [
         'controller_sid' => env('PRISM_HN_CONTROLLER_SID', '760543192000098255'),
         'cashier' => env('PRISM_HN_CASHIER', 'SYSADMIN'),
         'max_attempts' => (int) env('PRISM_HN_MAX_ATTEMPTS', 5),
+        'retry_minutes' => (int) env('PRISM_HN_RETRY_MINUTES', 15),
+        'process_pending_enabled' => env('PRISM_HN_PROCESS_PENDING_ENABLED', false),
     ],
 ];

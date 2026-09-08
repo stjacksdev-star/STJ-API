@@ -109,8 +109,9 @@ quedan para la fase 3; actualmente una falla de insert exige revisión del log.
 
 ## Fases acordadas pendientes
 
-La fase 3 manual descrita abajo ya está implementada. La selección masiva,
-recuperación de aprobados sin registro y programación cron siguen pendientes.
+La fase 3 manual descrita abajo y el procesador automático limitado a un envío
+por ejecución ya están implementados. La recuperación de aprobados sin registro
+y la pantalla de operación siguen pendientes.
 
 3. Comando independiente programado por el scheduler de Laravel: reclamar
    pendientes atómicamente, prevalidar tienda/SKU/importes, crear documento,
@@ -296,3 +297,69 @@ el artículo existente antes de continuar; no borrar documento/checkpoint.
 Durante el diagnóstico solo se hicieron consultas remotas GET y apertura/cierre de
 sesión; no se reejecutó el envío real ni se modificó el estado del registro.
 Se retiró el bloqueo de costo de envío según la regla comercial confirmada arriba.
+
+## Fase 4: procesador programado, límite fijo de un pedido
+
+`php artisan prism:process-pending` selecciona como máximo un registro por ejecución.
+No acepta una opción `--limit`, por lo que no puede ampliarse accidentalmente desde
+cron. Prioriza el pendiente más antiguo; después considera errores cuyo tiempo de
+espera ya terminó. Si ese pedido falla, el comando termina con código 1 y no intenta
+un segundo registro durante la misma ejecución.
+
+Filtros obligatorios:
+
+- país relacionado `stj_paises.pai_codigo = HN`;
+- `integration_environment = APP_ENV` exacto;
+- estado `pendiente`, o `error` con antigüedad suficiente;
+- `intentos < PRISM_HN_MAX_ATTEMPTS`.
+
+Los registros `procesando`, `enviado`, de otro entorno o que agotaron intentos no
+se seleccionan. Un `procesando` abandonado no se recupera automáticamente porque
+puede representar una escritura remota incierta; debe revisarse antes de cambiarlo.
+
+Configuración inicial recomendada en producción:
+
+```dotenv
+APP_ENV=production
+STOREFRONT_HN_PRISM_REGISTER_PENDING=true
+STOREFRONT_POST_PURCHASE_INTEGRATIONS_ENABLED=true
+STOREFRONT_HN_PRISM_ENABLED=true
+PRISM_HN_PROCESS_PENDING_ENABLED=true
+PRISM_HN_MAX_ATTEMPTS=5
+PRISM_HN_RETRY_MINUTES=15
+```
+
+Además deben configurarse `PRISM_HN_HOST`, credenciales, workstation, URL/token del
+resolver SKU y timeouts descritos previamente. El flag general puede habilitar los
+POS de GT/CR/PA según sus propios flags; administrarlos de acuerdo con el ambiente.
+
+El scheduler registra el comando cada minuto solamente cuando
+`PRISM_HN_PROCESS_PENDING_ENABLED=true`. Usa `withoutOverlapping(60)` para impedir
+que otra ejecución empiece mientras la anterior mantiene el lock, y escribe salida
+en `storage/logs/prism-scheduler.log`. El servidor debe ejecutar el scheduler:
+
+```cron
+* * * * * cd /ruta/stj-api && php artisan schedule:run >> /dev/null 2>&1
+```
+
+Después de editar `.env`, ejecutar `php artisan optimize:clear` y la estrategia de
+caché de configuración aprobada para el despliegue. Verificar con:
+
+```bash
+php artisan schedule:list
+php artisan prism:process-pending
+```
+
+La segunda orden procesa un pedido si todos los interruptores están activos. Para
+una revisión sin escrituras se mantiene `prism:process-shipment --stj=REFERENCIA`.
+Antes de activar el cron conviene observar un ciclo manual de `process-pending`,
+confirmar el único pedido enviado y revisar `prism_envios`, logs y documento Retail.
+
+`PRISM_HN_MAX_ATTEMPTS` es el máximo total de reclamos del registro, contando cada
+ejecución real que lo pasa a `procesando`; no es la cantidad de pedidos por corrida.
+`PRISM_HN_RETRY_MINUTES` evita reintentar inmediatamente un registro en error.
+
+Pruebas acumuladas tras esta fase: 48 tests, 156 assertions. Cubren límite fijo de
+uno, orden de selección, prioridad de pendientes, intervalo y máximo de intentos,
+aislamiento de país/entorno, exclusión de `procesando`, flags y finalización inmediata
+ante error sin seleccionar un segundo pedido.

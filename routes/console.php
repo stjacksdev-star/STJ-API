@@ -178,6 +178,13 @@ Schedule::command('storefront:navigation-build')
     ->timezone('America/El_Salvador')
     ->withoutOverlapping(30);
 
+if (config('prism.hn.process_pending_enabled')) {
+    Schedule::command('prism:process-pending')
+        ->everyMinute()
+        ->withoutOverlapping(60)
+        ->appendOutputTo(storage_path('logs/prism-scheduler.log'));
+}
+
 if (config('push_web.automation_enabled')) {
     Schedule::command('push:web-evaluate --limit='.(int) config('push_web.evaluate_limit', 500))
         ->everyFifteenMinutes()
