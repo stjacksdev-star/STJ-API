@@ -253,8 +253,11 @@ class PromotionAssetService
 
     private function storeImage(UploadedFile $image, string $type, string $countryCode, int $promotionId, string $variant): string
     {
-        if ($type === 'BANNER' && $variant === 'desktop' && $this->isStandardPromotionBanner($image)) {
-            return $this->storeOriginalPromotionBanner($image, $countryCode, $promotionId);
+        $shouldPreserveOriginal = $type === 'BANNER'
+            && ($variant === 'header' || ($variant === 'desktop' && $this->isStandardPromotionBanner($image)));
+
+        if ($shouldPreserveOriginal) {
+            return $this->storeOriginalPromotionBanner($image, $countryCode, $promotionId, $variant);
         }
 
         $optimized = $this->images->optimize($image);
@@ -298,7 +301,7 @@ class PromotionAssetService
             && (int) $dimensions[1] === 320;
     }
 
-    private function storeOriginalPromotionBanner(UploadedFile $image, string $countryCode, int $promotionId): string
+    private function storeOriginalPromotionBanner(UploadedFile $image, string $countryCode, int $promotionId, string $variant): string
     {
         $mime = (string) ($image->getMimeType() ?: 'image/jpeg');
         $extension = match ($mime) {
@@ -308,7 +311,7 @@ class PromotionAssetService
             default => 'jpg',
         };
         $folder = 'banner';
-        $filename = $promotionId.'-desktop-'.now()->format('YmdHis').'-'.Str::random(6).'.'.$extension;
+        $filename = $promotionId.'-'.$variant.'-'.now()->format('YmdHis').'-'.Str::random(6).'.'.$extension;
         $path = "{$folder}/{$countryCode}/{$filename}";
 
         if ($this->shouldStoreInSpaces()) {
