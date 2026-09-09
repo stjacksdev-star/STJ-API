@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Services\Mail\Smtp2GoMailer;
+use App\Support\OrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1710,11 +1711,7 @@ class OrderReferenceService
 
     private function currency(int $countryId): string
     {
-        return match ($countryId) {
-            2 => 'Q',
-            3 => 'CRC',
-            default => 'USD',
-        };
+        return OrderCurrency::symbolForCountryId($countryId);
     }
 
     private function countrySlug(int $countryId): string

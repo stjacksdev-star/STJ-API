@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Services\Mail\Smtp2GoMailer;
 use App\Services\Mail\StorefrontMailTemplate;
+use App\Support\OrderCurrency;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -152,6 +153,6 @@ class StorefrontOrderConfirmationEmailService
 
     private function currency(string $country): string
     {
-        return match (strtoupper($country)) { 'GT' => 'Q', 'HN' => 'L', default => 'USD $' };
+        return OrderCurrency::symbolForCountryCode($country);
     }
 }
