@@ -26,19 +26,19 @@ class AbandonedCartReportService
         }
 
         $paymentAbandoned = $this->paymentAbandoned($since, $until);
-        $cartAbandoned = $this->cartAbandoned($since, $inactiveBefore);
+        $checkoutAbandoned = $this->checkoutAbandoned($since, $inactiveBefore);
 
         $this->mailer->sendHtml(
             $to,
             "Carritos Abandonados | St. Jack's Online",
-            $this->html($paymentAbandoned, $cartAbandoned, $since, $until),
+            $this->html($paymentAbandoned, $checkoutAbandoned, $since, $until),
             (array) config('abandoned_carts.cc', []),
             (array) config('abandoned_carts.bcc', []),
         );
 
         return [
             'payment_abandoned' => $paymentAbandoned->count(),
-            'cart_abandoned' => $cartAbandoned->count(),
+            'cart_abandoned' => $checkoutAbandoned->count(),
             'sent' => true,
             'since' => $since->toDateTimeString(),
             'until' => $until->toDateTimeString(),
@@ -74,13 +74,19 @@ class AbandonedCartReportService
         });
     }
 
-    private function cartAbandoned(CarbonImmutable $since, CarbonImmutable $inactiveBefore): Collection
+    private function checkoutAbandoned(CarbonImmutable $since, CarbonImmutable $inactiveBefore): Collection
     {
         return DB::table('stj_carritos as cart')
             ->join('stj_paises as country', 'country.pai_id', '=', 'cart.car_pais_id')
-            ->leftJoin('stj_usuarios as customer', 'customer.usu_id', '=', 'cart.car_usu_id')
+            ->join('stj_usuarios as customer', 'customer.usu_id', '=', 'cart.car_usu_id')
             ->where('cart.car_estado', 'ACTIVO')->whereNull('cart.car_pedido_id')
             ->whereBetween('cart.car_ultima_actividad_en', [$since, $inactiveBefore])
+            ->whereRaw("TRIM(COALESCE(customer.usu_nombre, '')) <> ''")
+            ->whereRaw("TRIM(COALESCE(customer.usu_correo, '')) <> ''")
+            ->whereRaw("TRIM(COALESCE(customer.usu_telefono, '')) <> ''")
+            ->whereExists(fn ($query) => $query->selectRaw('1')->from('stj_cliente_eventos as event')
+                ->whereColumn('event.cev_carrito_id', 'cart.car_id')
+                ->where('event.cev_tipo', 'BEGIN_CHECKOUT'))
             ->whereExists(fn ($query) => $query->selectRaw('1')->from('stj_carrito_detalles as item')
                 ->whereColumn('item.cad_carrito_id', 'cart.car_id'))
             ->orderBy('cart.car_ultima_actividad_en')
@@ -110,10 +116,10 @@ class AbandonedCartReportService
     private function html(Collection $payments, Collection $carts, CarbonImmutable $since, CarbonImmutable $until): string
     {
         $style = '<style>body{font-family:Arial,sans-serif;color:#222}table{width:100%;border-collapse:collapse;margin:12px 0 28px}th,td{border:1px solid #d3d3d3;padding:8px;text-align:left;vertical-align:top}th{background:#007ac9;color:#fff}.meta{color:#555;font-size:12px}.items{margin:6px 0 0;padding-left:18px}</style>';
-        $summary = '<h2>Carritos abandonados stjacks.com</h2><p>Periodo: '.$this->e($since->format('d/m/Y H:i')).' al '.$this->e($until->format('d/m/Y H:i')).'</p><p><b>Checkout/pago abandonado:</b> '.$payments->count().' &nbsp; <b>Carrito sin pedido:</b> '.$carts->count().'</p>';
+        $summary = '<h2>Checkouts abandonados stjacks.com</h2><p>Periodo: '.$this->e($since->format('d/m/Y H:i')).' al '.$this->e($until->format('d/m/Y H:i')).'</p><p><b>Checkout/pago abandonado:</b> '.$payments->count().' &nbsp; <b>Checkout sin pedido:</b> '.$carts->count().'</p>';
 
         return $style.$summary.'<h3>Checkout o pago abandonado</h3>'.$this->paymentTable($payments)
-            .'<h3>Carrito abandonado antes de crear pedido</h3>'.$this->cartTable($carts)
+            .'<h3>Checkout abandonado antes de crear pedido</h3>'.$this->cartTable($carts)
             .'<p class="meta">Proceso automatico ejecutado: '.$this->e($until->format('d/m/Y H:i:s')).'</p>';
     }
 

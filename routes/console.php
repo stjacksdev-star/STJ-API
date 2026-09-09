@@ -143,7 +143,7 @@ Artisan::command('reports:abandoned-carts', function (AbandonedCartReportService
     }
 
     $summary = $report->send();
-    $this->info("Reporte enviado. Pagos abandonados: {$summary['payment_abandoned']} | Carritos sin pedido: {$summary['cart_abandoned']}");
+    $this->info("Reporte enviado. Pagos abandonados: {$summary['payment_abandoned']} | Checkouts sin pedido: {$summary['cart_abandoned']}");
 
     return self::SUCCESS;
 })->purpose('Envia el reporte diario de carritos y pagos abandonados');

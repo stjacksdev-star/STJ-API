@@ -67,6 +67,11 @@ class AbandonedCartReportServiceTest extends TestCase
             $t->decimal('cad_precio_final_unitario');
             $t->string('cad_promocion')->nullable();
         });
+        Schema::create('stj_cliente_eventos', function (Blueprint $t) {
+            $t->id('cev_id');
+            $t->unsignedBigInteger('cev_carrito_id')->nullable();
+            $t->string('cev_tipo');
+        });
         Schema::create('stj_pedidos_pago', function (Blueprint $t) {
             $t->id('ppa_id');
             $t->unsignedBigInteger('ppa_pedido');
@@ -88,7 +93,7 @@ class AbandonedCartReportServiceTest extends TestCase
         Http::fake(['*' => Http::response(['data' => ['failed' => 0]], 200)]);
     }
 
-    public function test_it_reports_unapproved_checkout_and_inactive_cart_but_excludes_approved_and_recent_activity(): void
+    public function test_it_reports_only_abandoned_checkouts_with_customer_contact_data(): void
     {
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_nombre' => 'El Salvador']);
         DB::table('stj_usuarios')->insert(['usu_id' => 5, 'usu_nombre' => 'Ana', 'usu_apellido' => 'Cliente', 'usu_correo' => 'ana@example.com', 'usu_telefono' => '70000000']);
@@ -101,11 +106,17 @@ class AbandonedCartReportServiceTest extends TestCase
             ['car_id' => 1, 'car_uuid' => '00000000-0000-0000-0000-000000000001', 'car_pais_id' => 1, 'car_usu_id' => 5, 'car_pedido_id' => 10, 'car_tipo' => 'TIENDA', 'car_estado' => 'CONVERTIDO', 'car_origen' => 'APP', 'car_ultima_actividad_en' => '2026-08-29 06:00:00'],
             ['car_id' => 2, 'car_uuid' => '00000000-0000-0000-0000-000000000002', 'car_pais_id' => 1, 'car_usu_id' => 5, 'car_pedido_id' => null, 'car_tipo' => 'DOMICILIO', 'car_estado' => 'ACTIVO', 'car_origen' => 'WEB', 'car_ultima_actividad_en' => '2026-08-29 05:00:00'],
             ['car_id' => 3, 'car_uuid' => '00000000-0000-0000-0000-000000000003', 'car_pais_id' => 1, 'car_usu_id' => 5, 'car_pedido_id' => null, 'car_tipo' => 'DOMICILIO', 'car_estado' => 'ACTIVO', 'car_origen' => 'WEB', 'car_ultima_actividad_en' => '2026-08-29 07:30:00'],
+            ['car_id' => 4, 'car_uuid' => '00000000-0000-0000-0000-000000000004', 'car_pais_id' => 1, 'car_usu_id' => null, 'car_pedido_id' => null, 'car_tipo' => 'DOMICILIO', 'car_estado' => 'ACTIVO', 'car_origen' => 'WEB', 'car_ultima_actividad_en' => '2026-08-29 05:15:00'],
         ]);
         DB::table('stj_carrito_detalles')->insert([
             ['cad_carrito_id' => 1, 'cad_producto_id' => 8, 'cad_ref' => 'SKU8', 'cad_talla' => 'M', 'cad_cantidad' => 1, 'cad_precio_final_unitario' => 9.95, 'cad_promocion' => null],
             ['cad_carrito_id' => 2, 'cad_producto_id' => 8, 'cad_ref' => 'SKU8', 'cad_talla' => 'M', 'cad_cantidad' => 2, 'cad_precio_final_unitario' => 9.95, 'cad_promocion' => 'Oferta'],
             ['cad_carrito_id' => 3, 'cad_producto_id' => 8, 'cad_ref' => 'SKU8', 'cad_talla' => 'M', 'cad_cantidad' => 1, 'cad_precio_final_unitario' => 9.95, 'cad_promocion' => null],
+            ['cad_carrito_id' => 4, 'cad_producto_id' => 8, 'cad_ref' => 'SKU8', 'cad_talla' => 'M', 'cad_cantidad' => 1, 'cad_precio_final_unitario' => 9.95, 'cad_promocion' => null],
+        ]);
+        DB::table('stj_cliente_eventos')->insert([
+            ['cev_carrito_id' => 2, 'cev_tipo' => 'BEGIN_CHECKOUT'],
+            ['cev_carrito_id' => 4, 'cev_tipo' => 'BEGIN_CHECKOUT'],
         ]);
         DB::table('stj_pedidos_pago')->insert([
             ['ppa_id' => 100, 'ppa_pedido' => 10, 'ppa_estado' => 'DENEGADA'],
@@ -125,7 +136,8 @@ class AbandonedCartReportServiceTest extends TestCase
                 && str_contains($html, 'Ana Cliente')
                 && str_contains($html, 'DENEGADA')
                 && str_contains($html, '3DS: SI')
-                && str_contains($html, 'Carrito abandonado antes de crear pedido')
+                && str_contains($html, 'Checkout abandonado antes de crear pedido')
+                && ! str_contains($html, '00000000-0000-0000-0000-000000000004')
                 && ! str_contains($html, 'Pago Aprobado');
         });
     }
