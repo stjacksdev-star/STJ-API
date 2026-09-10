@@ -145,7 +145,9 @@ class StorefrontPromotionLandingService
                 $resolved = $resolvedByProduct->get((int) $product->pro_id);
                 $promotion = $resolved['promotion'] ?? null;
                 $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
-                $discount = $promotion['discountPercentage'] ?? null;
+                $discount = $regularPrice > 0 && $finalPrice < $regularPrice
+                    ? round((($regularPrice - $finalPrice) / $regularPrice) * 100, 2)
+                    : null;
                 $category = trim((string) ($product->cat_nombre ?: 'Promocion'));
                 $description = trim((string) $product->pro_descripcion)
                     ?: trim((string) ($product->sca_nombre ?: "Categoria {$category}"));

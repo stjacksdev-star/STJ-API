@@ -2,11 +2,11 @@
 
 namespace Tests\Feature;
 
-use App\Services\ProductListAvailabilityService;
-use App\Services\StorefrontProductService;
-use App\Services\StorefrontCatalogService;
-use App\Services\StorefrontPromotionLandingService;
 use App\Http\Middleware\ResolveStorefrontVisitor;
+use App\Services\ProductListAvailabilityService;
+use App\Services\StorefrontCatalogService;
+use App\Services\StorefrontProductService;
+use App\Services\StorefrontPromotionLandingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -78,6 +78,34 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertSame(75.0, $mobile['products'][0]['price']);
         $this->assertNull($web['products'][0]['promotion']);
         $this->assertSame(100.0, $web['products'][0]['price']);
+    }
+
+    public function test_mobile_promotion_endpoint_preserves_the_complete_landing_contract(): void
+    {
+        DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_origen' => 'APP']);
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [
+                'SKU100' => ['availableSizes' => ['4', '6'], 'hasStock' => true, 'totalQuantity' => 3],
+            ],
+            'activeStoreCode' => '57',
+            'usedSource' => 'local',
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $this->getJson('/api/mobile/v1/catalog/promotions/10?countryId=1&codigoTienda=57&tipoServicio=Domicilio&plataforma=ANDROID&page=1&perPage=12')
+            ->assertOk()
+            ->assertJsonPath('promotion.id', 10)
+            ->assertJsonPath('products.0.promotion.origin', 'APP')
+            ->assertJsonPath('products.0.availableSizes', ['4', '6'])
+            ->assertJsonPath('filters.active.sort', 'featured')
+            ->assertJsonPath('pagination.perPage', 12)
+            ->assertJsonPath('availability.activeStoreCode', '57')
+            ->assertJsonPath('records.0.pro_id', 100)
+            ->assertJsonPath('records.0.precio', '100.00')
+            ->assertJsonPath('records.0.precioCD', '75.00')
+            ->assertJsonPath('records.0.descuento', 25)
+            ->assertJsonPath('records.0.availableSizes', ['4', '6']);
     }
 
     public function test_catalog_ignores_stale_product_country_promotion_labels(): void
