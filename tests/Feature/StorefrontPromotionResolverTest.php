@@ -43,6 +43,49 @@ class StorefrontPromotionResolverTest extends TestCase
         $this->assertNull($store['lines'][0]['promotion']['scopeLabel']);
     }
 
+    public function test_commercial_channel_isolates_web_and_app_promotions_and_keeps_todo_shared(): void
+    {
+        $this->promotion(7, ['prm_origen' => 'WEB']);
+        $this->product(7, 100, 10);
+        $this->promotion(8, ['prm_origen' => 'APP']);
+        $this->product(8, 100, 20);
+        $this->promotion(9, ['prm_origen' => 'TODO']);
+        $this->product(9, 100, 15);
+
+        $lines = [['key' => 'line', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 100]];
+        $web = $this->resolver->resolve($this->context('DOMICILIO', null, $lines));
+        $android = $this->resolver->resolve([
+            ...$this->context('DOMICILIO', null, $lines),
+            'platform' => 'ANDROID',
+        ]);
+        $ios = $this->resolver->resolve([
+            ...$this->context('DOMICILIO', null, $lines),
+            'origin' => 'IOS',
+            'platform' => 'IOS',
+        ]);
+
+        $this->assertSame(9, $web['lines'][0]['promotion']['id']);
+        $this->assertSame('WEB', $web['context']['channel']);
+        $this->assertSame(8, $android['lines'][0]['promotion']['id']);
+        $this->assertSame('APP', $android['context']['channel']);
+        $this->assertSame('ANDROID', $android['context']['platform']);
+        $this->assertSame(8, $ios['lines'][0]['promotion']['id']);
+        $this->assertSame('IOS', $ios['context']['platform']);
+    }
+
+    public function test_rejects_a_platform_that_does_not_match_the_commercial_channel(): void
+    {
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+
+        $this->resolver->resolve([
+            ...$this->context('DOMICILIO', null, [
+                ['key' => 'line', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 100],
+            ]),
+            'channel' => 'WEB',
+            'platform' => 'ANDROID',
+        ]);
+    }
+
     public function test_gift_box_category_is_excluded_from_every_promotion_type(): void
     {
         DB::table('stj_productos')->insert([

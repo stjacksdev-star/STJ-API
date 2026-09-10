@@ -77,6 +77,8 @@ class StorefrontPromotionResolver
                 'countryId' => $normalized['countryId'],
                 'checkoutType' => $normalized['checkoutType'],
                 'storeId' => $normalized['storeId'],
+                'channel' => $normalized['channel'],
+                'platform' => $normalized['platform'],
                 'referenceTime' => $normalized['at']->format('Y-m-d H:i:s'),
             ],
             'lines' => $resolvedLines->all(),
@@ -98,6 +100,7 @@ class StorefrontPromotionResolver
         $checkoutType = strtoupper(trim((string) ($context['checkoutType'] ?? '')));
         $storeId = isset($context['storeId']) ? (int) $context['storeId'] : null;
         $storeName = trim((string) ($context['storeName'] ?? ''));
+        [$channel, $platform] = $this->normalizeChannel($context);
 
         if ($countryId < 1) {
             throw ValidationException::withMessages(['countryId' => 'El país es obligatorio.']);
@@ -157,6 +160,8 @@ class StorefrontPromotionResolver
             'checkoutType' => $checkoutType,
             'storeId' => $checkoutType === 'TIENDA' ? $storeId : null,
             'storeName' => $storeName,
+            'channel' => $channel,
+            'platform' => $platform,
             'currencySymbol' => (string) ($context['currencySymbol'] ?? '$'),
             'at' => $at,
             'lines' => $lines,
@@ -182,7 +187,7 @@ class StorefrontPromotionResolver
             ->where('p.prm_pais', $context['countryId'])
             ->where('p.prm_estado', 'EN-PROCESO')
             ->where('p.prm_modalidad', 'PROGRAMADO')
-            ->whereIn('p.prm_origen', ['WEB', 'TODO'])
+            ->whereIn('p.prm_origen', [$context['channel'], 'TODO'])
             ->where('h.pho_inicio', '<=', $at)
             ->where('h.pho_fin', '>', $at)
             ->whereIn('h.pho_estado', ['ACTIVO', 'PENDIENTE'])
@@ -246,6 +251,43 @@ class StorefrontPromotionResolver
             ->filter(fn (array $promotion) => $promotion['priority'] > 0)
             ->filter(fn (array $promotion) => $promotion['type'] === 'TODO' || $promotion['products']->isNotEmpty())
             ->values();
+    }
+
+    /**
+     * Normalizes the commercial channel independently from the device platform.
+     * Existing callers remain WEB until they explicitly identify themselves.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array{0: string, 1: string|null}
+     */
+    private function normalizeChannel(array $context): array
+    {
+        $platform = strtoupper(trim((string) ($context['platform'] ?? '')));
+        if ($platform !== '' && ! in_array($platform, ['WEB', 'IOS', 'ANDROID'], true)) {
+            throw ValidationException::withMessages([
+                'platform' => 'La plataforma debe ser WEB, IOS o ANDROID.',
+            ]);
+        }
+
+        $requested = strtoupper(trim((string) ($context['channel'] ?? $context['origin'] ?? '')));
+        if ($requested === '') {
+            $requested = in_array($platform, ['IOS', 'ANDROID'], true) ? 'APP' : 'WEB';
+        }
+        if (in_array($requested, ['IOS', 'ANDROID'], true)) {
+            $requested = 'APP';
+        }
+        if (! in_array($requested, ['WEB', 'APP'], true)) {
+            throw ValidationException::withMessages([
+                'channel' => 'El canal debe ser WEB o APP.',
+            ]);
+        }
+        if ($platform !== '' && (($requested === 'APP') !== in_array($platform, ['IOS', 'ANDROID'], true))) {
+            throw ValidationException::withMessages([
+                'platform' => 'La plataforma no corresponde al canal comercial.',
+            ]);
+        }
+
+        return [$requested, $platform !== '' ? $platform : null];
     }
 
     /**
