@@ -121,7 +121,8 @@ class StorefrontRecommendationService
             now()->addMinutes(self::PURCHASE_HISTORY_CACHE_MINUTES),
             fn () => $this->purchaseHistory($countryId, (int) $customer->getKey()),
         );
-        $seeds = collect($history['products'] ?? []);
+        $seeds = collect($history['products'] ?? [])
+            ->map(fn ($seed) => (array) $seed);
         if ($seeds->isEmpty()) {
             return collect();
         }
@@ -132,13 +133,13 @@ class StorefrontRecommendationService
             ->map(function ($candidate) use ($seeds) {
                 $best = ['score' => 0, 'reason' => 'PURCHASE_HISTORY'];
                 foreach ($seeds as $seed) {
-                    $character = $this->same($candidate->pro_personaje, $seed->pro_personaje)
-                        || $this->same($candidate->pro_oc_personaje, $seed->pro_oc_personaje)
-                        || $this->same($candidate->pro_oc_licencia, $seed->pro_oc_licencia);
-                    $categoryGender = (int) $candidate->pro_categoria === (int) $seed->pro_categoria
-                        && $this->same($candidate->pro_oc_genero, $seed->pro_oc_genero);
-                    $brandCollection = $this->same($candidate->pro_marca, $seed->pro_marca)
-                        || $this->same($candidate->pro_coleccion, $seed->pro_coleccion);
+                    $character = $this->same($candidate->pro_personaje, $seed['pro_personaje'] ?? null)
+                        || $this->same($candidate->pro_oc_personaje, $seed['pro_oc_personaje'] ?? null)
+                        || $this->same($candidate->pro_oc_licencia, $seed['pro_oc_licencia'] ?? null);
+                    $categoryGender = (int) $candidate->pro_categoria === (int) ($seed['pro_categoria'] ?? 0)
+                        && $this->same($candidate->pro_oc_genero, $seed['pro_oc_genero'] ?? null);
+                    $brandCollection = $this->same($candidate->pro_marca, $seed['pro_marca'] ?? null)
+                        || $this->same($candidate->pro_coleccion, $seed['pro_coleccion'] ?? null);
                     $score = ($character ? 300 : 0) + ($categoryGender ? 200 : 0) + ($brandCollection ? 100 : 0);
                     $reason = $character ? 'PURCHASE_CHARACTER' : ($categoryGender ? 'PURCHASE_CATEGORY_GENDER' : ($brandCollection ? 'PURCHASE_BRAND_COLLECTION' : 'PURCHASE_HISTORY'));
                     if ($score > $best['score']) {
@@ -189,13 +190,14 @@ class StorefrontRecommendationService
             'products' => DB::table('stj_productos as p')
                 ->whereIn('p.pro_id', $productIds->all())
                 ->get(['p.pro_id', 'p.pro_categoria', 'p.pro_coleccion', 'p.pro_marca', 'p.pro_personaje', 'p.pro_oc_personaje', 'p.pro_oc_licencia', 'p.pro_oc_genero'])
+                ->map(fn ($product) => (array) $product)
                 ->all(),
         ];
     }
 
     private static function purchaseHistoryCacheKey(int $customerId, int $countryId): string
     {
-        return "storefront:recommendations:purchase_history:{$customerId}:{$countryId}";
+        return "storefront:recommendations:purchase_history:v2:{$customerId}:{$countryId}";
     }
 
     private function recentlyViewed(int $countryId, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, ?StorefrontCart $cart, int $limit): array
