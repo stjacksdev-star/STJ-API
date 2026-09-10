@@ -84,6 +84,7 @@ class StorefrontAssetService
             'left' => [],
             'center' => [],
             'right' => [],
+            'mobileExtra' => [],
         ];
 
         collect($assets)
@@ -95,13 +96,15 @@ class StorefrontAssetService
             ->each(function (array $asset) use (&$columns, $country) {
                 $column = $this->positionColumn($asset['position'] ?? null);
                 $image = $this->assetUrl($asset['image'] ?? null);
+                $mobileImage = $this->assetUrl($asset['mobileImage'] ?? null);
 
-                if (! $image) {
+                if (! $image && ! $mobileImage) {
                     return;
                 }
 
                 $columns[$column][] = [
                     'image' => $image,
+                    'mobileImage' => $mobileImage,
                     'href' => $this->linkUrl($asset['link'] ?? null),
                     'collection' => $this->collectionLink($asset['link'] ?? null, $country),
                     'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
@@ -140,6 +143,7 @@ class StorefrontAssetService
         return match ($this->positionRank($position)) {
             2 => 'center',
             3 => 'right',
+            4 => 'mobileExtra',
             default => 'left',
         };
     }
@@ -151,6 +155,7 @@ class StorefrontAssetService
         return match ($position) {
             '2', '02', 'CENTER', 'CENTRO', 'DROP 02', 'DROP02' => 2,
             '3', '03', 'RIGHT', 'DERECHA', 'DROP 03', 'DROP03' => 3,
+            '4', '04', 'MOBILE EXTRA', 'MOBILE-EXTRA', 'MOVIL EXTRA', 'MOVIL-EXTRA' => 4,
             default => 1,
         };
     }
