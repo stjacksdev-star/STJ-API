@@ -42,7 +42,7 @@ class CollectionAssetService
     /**
      * @param array<string, mixed> $data
      */
-    public function create(int $collectionId, array $data, UploadedFile $image, ?UploadedFile $mobileImage = null): array
+    public function create(int $collectionId, array $data, ?UploadedFile $image = null, ?UploadedFile $mobileImage = null): array
     {
         $collection = $this->collection($collectionId);
         $type = strtoupper((string) $data['type']);
@@ -55,7 +55,9 @@ class CollectionAssetService
             'ast_posicion' => $data['position'] ?? null,
             'ast_orden' => $data['order'] ?? 1,
             'ast_estado' => $data['status'] ?? 'PENDIENTE',
-            'ast_imagen' => $this->storeImage($image, $type, $countryCode, $collectionId, 'desktop'),
+            'ast_imagen' => $image
+                ? $this->storeImage($image, $type, $countryCode, $collectionId, 'desktop')
+                : null,
             'ast_imagen_movil' => $mobileImage
                 ? $this->storeImage($mobileImage, $type, $countryCode, $collectionId, 'mobile')
                 : null,

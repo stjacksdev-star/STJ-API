@@ -32,7 +32,10 @@ class CollectionAssetController extends BaseController
             return $this->error('Token sin permiso dashboard', 403);
         }
 
-        $validated = $request->validate($this->rules(imageRequired: true));
+        $validated = $request->validate($this->rules(
+            imageRequired: true,
+            mobileExtra: strtoupper((string) $request->input('position')) === 'MOVIL-EXTRA',
+        ));
 
         return $this->success(
             $this->assets->create(
@@ -67,12 +70,12 @@ class CollectionAssetController extends BaseController
     /**
      * @return array<string, mixed>
      */
-    private function rules(bool $imageRequired): array
+    private function rules(bool $imageRequired, bool $mobileExtra = false): array
     {
         return [
             'type' => ['required', Rule::in(['CUPON', 'LO-MAS-NUEVO', 'BANNER', 'MODAL', 'SLIDER'])],
             'platform' => ['nullable', Rule::in(['TODO', 'WEB', 'APP'])],
-            'position' => ['nullable', Rule::in(['DERECHA', 'IZQUIERDA', 'CENTRO'])],
+            'position' => ['nullable', Rule::in(['DERECHA', 'IZQUIERDA', 'CENTRO', 'MOVIL-EXTRA'])],
             'order' => ['nullable', 'integer', 'min:0'],
             'status' => ['nullable', Rule::in(['ACTIVO', 'PENDIENTE', 'CANCELADO', 'FINALIZADO'])],
             'startAt' => ['required', 'date'],
@@ -80,8 +83,8 @@ class CollectionAssetController extends BaseController
             'title' => ['nullable', 'string', 'max:45'],
             'actionType' => ['nullable', 'integer'],
             'promotionId' => ['nullable', 'integer'],
-            'image' => [$imageRequired ? 'required' : 'nullable', 'image', 'max:5120'],
-            'mobileImage' => ['nullable', 'image', 'max:5120'],
+            'image' => [$imageRequired && ! $mobileExtra ? 'required' : 'nullable', 'image', 'max:5120'],
+            'mobileImage' => [$imageRequired && $mobileExtra ? 'required' : 'nullable', 'image', 'max:5120'],
         ];
     }
 }
