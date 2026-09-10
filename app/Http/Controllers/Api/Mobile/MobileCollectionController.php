@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\StorefrontCollectionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class MobileCollectionController extends Controller
@@ -17,6 +18,8 @@ class MobileCollectionController extends Controller
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
+            'tipoServicio' => ['nullable', Rule::in(['Domicilio', 'Tienda', 'DOMICILIO', 'TIENDA'])],
+            'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID'])],
         ]);
 
         $countryCode = DB::table('stj_paises')
@@ -33,6 +36,12 @@ class MobileCollectionController extends Controller
             (string) $countryCode,
             $collection,
             (string) $data['codigoTienda'],
+            [
+                'checkoutType' => strtoupper((string) ($data['tipoServicio'] ?? 'DOMICILIO')),
+                'storeCode' => (string) $data['codigoTienda'],
+                'channel' => 'APP',
+                'platform' => strtoupper((string) ($data['plataforma'] ?? '')),
+            ],
         );
 
         if (! $result) {

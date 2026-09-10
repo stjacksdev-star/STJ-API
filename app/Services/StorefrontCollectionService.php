@@ -14,7 +14,7 @@ class StorefrontCollectionService
         private readonly ?StorefrontProductPromotionPresenter $promotionPresenter = null,
     ) {}
 
-    public function find(string $countryCode, int $collectionId, ?string $storeCode = null): ?array
+    public function find(string $countryCode, int $collectionId, ?string $storeCode = null, array $context = []): ?array
     {
         $collection = DB::table('stj_coleccion as collection')
             ->join('stj_paises as country', 'country.pai_id', '=', 'collection.col_pais')
@@ -84,6 +84,7 @@ class StorefrontCollectionService
             $rows,
             (int) $collection->pai_id,
             (string) $collection->pai_codigo,
+            $context,
         );
 
         $products = $rows

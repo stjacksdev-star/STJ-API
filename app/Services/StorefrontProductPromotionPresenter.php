@@ -21,6 +21,8 @@ class StorefrontProductPromotionPresenter
         }
 
         $resolution = $this->resolver->resolve([
+            'channel' => $context['channel'] ?? 'WEB',
+            'platform' => $context['platform'] ?? 'WEB',
             'countryId' => $countryId,
             'checkoutType' => in_array(strtoupper(trim((string) ($context['checkoutType'] ?? 'DOMICILIO'))), ['T', 'TIENDA'], true) ? 'TIENDA' : 'DOMICILIO',
             'storeCode' => $context['storeCode'] ?? null,

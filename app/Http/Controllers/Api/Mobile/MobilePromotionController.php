@@ -7,6 +7,7 @@ use App\Services\Mobile\MobilePromotionService;
 use App\Services\StorefrontPromotionLandingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class MobilePromotionController extends Controller
@@ -20,6 +21,7 @@ class MobilePromotionController extends Controller
     {
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'exists:stj_paises,pai_id'],
+            'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID'])],
         ]);
 
         return response()->json([
@@ -33,6 +35,7 @@ class MobilePromotionController extends Controller
             'countryId' => ['required', 'integer', 'exists:stj_paises,pai_id'],
             'codigoTienda' => ['required', 'string', 'max:30'],
             'tipoServicio' => ['nullable', 'string', 'max:30'],
+            'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID'])],
         ]);
         $countryCode = DB::table('stj_paises')->where('pai_id', $data['countryId'])->value('pai_codigo');
         $result = $this->landing->find((string) $countryCode, $promotion, [
@@ -40,6 +43,8 @@ class MobilePromotionController extends Controller
             'perPage' => 48,
             'checkoutType' => strtoupper((string) ($data['tipoServicio'] ?? 'DOMICILIO')),
             'storeCode' => (string) $data['codigoTienda'],
+            'channel' => 'APP',
+            'platform' => strtoupper((string) ($data['plataforma'] ?? '')),
         ]);
 
         if (! $result) {

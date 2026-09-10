@@ -119,6 +119,8 @@ class StorefrontPromotionLandingService
         $resolvedByProduct = collect();
         if ($paginator->getCollection()->isNotEmpty()) {
             $resolution = $this->promotionResolver->resolve([
+                'channel' => $filters['channel'] ?? 'WEB',
+                'platform' => $filters['platform'] ?? 'WEB',
                 'countryId' => (int) $promotion->pai_id,
                 'checkoutType' => $checkoutType,
                 'storeCode' => $filters['storeCode'] ?? null,

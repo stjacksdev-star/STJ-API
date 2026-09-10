@@ -14,10 +14,23 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontCartCouponService
 {
+    /** @var array{channel: string, platform?: string} */
+    private array $promotionContext = ['channel' => 'WEB', 'platform' => 'WEB'];
+
     public function __construct(
         private StorefrontCouponResolver $coupons,
         private StorefrontPromotionResolver $promotions,
     ) {}
+
+    public function usePromotionContext(string $channel, ?string $platform = null): self
+    {
+        $this->promotionContext = array_filter([
+            'channel' => strtoupper(trim($channel)),
+            'platform' => $platform !== null ? strtoupper(trim($platform)) : null,
+        ], fn ($value) => $value !== null && $value !== '');
+
+        return $this;
+    }
 
     /** @return array<string, mixed> */
     public function add(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
@@ -205,6 +218,7 @@ class StorefrontCartCouponService
         }
 
         $promotion = $this->promotions->resolve([
+            ...$this->promotionContext,
             'countryId' => (int) $cart->car_pais_id,
             'checkoutType' => (string) $cart->car_tipo,
             'storeId' => $cart->car_tipo === 'TIENDA' ? (int) $cart->car_tienda_id : null,

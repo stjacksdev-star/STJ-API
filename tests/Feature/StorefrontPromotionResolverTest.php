@@ -86,6 +86,122 @@ class StorefrontPromotionResolverTest extends TestCase
         ]);
     }
 
+    public function test_app_channel_respects_delivery_all_store_and_selected_store_scopes(): void
+    {
+        $this->promotion(60, [
+            'prm_origen' => 'APP',
+            'prm_tipo_checkout' => 'D',
+            'prm_alcance_tienda' => null,
+        ]);
+        $this->product(60, 100, 10);
+        $this->promotion(61, [
+            'prm_origen' => 'APP',
+            'prm_tipo_checkout' => 'T',
+            'prm_alcance_tienda' => 'TODAS',
+        ]);
+        $this->product(61, 101, 20);
+        $this->promotion(62, [
+            'prm_origen' => 'APP',
+            'prm_tipo_checkout' => 'TODO',
+            'prm_alcance_tienda' => 'SELECCIONADAS',
+        ]);
+        $this->product(62, 102, 30);
+        DB::table('stj_promociones_tienda')->insert(['prt_promocion' => 62, 'prt_tienda' => 2]);
+
+        $delivery = $this->resolver->resolve([
+            ...$this->context('DOMICILIO', null, [
+                ['key' => 'delivery', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'all-stores', 'productId' => 101, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'selected-store', 'productId' => 102, 'quantity' => 1, 'unitPrice' => 100],
+            ]),
+            'channel' => 'APP',
+        ]);
+        $selectedStore = $this->resolver->resolve([
+            ...$this->context('TIENDA', 2, [
+                ['key' => 'delivery', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'all-stores', 'productId' => 101, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'selected-store', 'productId' => 102, 'quantity' => 1, 'unitPrice' => 100],
+            ]),
+            'channel' => 'APP',
+        ]);
+        $otherStore = $this->resolver->resolve([
+            ...$this->context('TIENDA', 3, [
+                ['key' => 'selected-store', 'productId' => 102, 'quantity' => 1, 'unitPrice' => 100],
+            ]),
+            'channel' => 'APP',
+        ]);
+
+        $deliveryLines = collect($delivery['lines'])->keyBy('key');
+        $storeLines = collect($selectedStore['lines'])->keyBy('key');
+        $this->assertSame(60, $deliveryLines['delivery']['promotion']['id']);
+        $this->assertNull($deliveryLines['all-stores']['promotion']);
+        $this->assertNull($deliveryLines['selected-store']['promotion']);
+        $this->assertNull($storeLines['delivery']['promotion']);
+        $this->assertSame(61, $storeLines['all-stores']['promotion']['id']);
+        $this->assertSame(62, $storeLines['selected-store']['promotion']['id']);
+        $this->assertNull($otherStore['lines'][0]['promotion']);
+    }
+
+    public function test_app_channel_calculates_every_supported_benefit_type(): void
+    {
+        $this->promotion(70, ['prm_origen' => 'APP', 'prm_tipo_promocion' => 'DESCUENTO']);
+        DB::table('stj_promociones')->where('prm_id', 70)->update(['prm_tipo' => 'TODO', 'prm_porcentaje' => 10]);
+        $this->promotion(71, ['prm_origen' => 'APP', 'prm_tipo_promocion' => 'DESCUENTO-SKU']);
+        $this->product(71, 101, 20);
+        $this->promotion(72, ['prm_origen' => 'APP', 'prm_tipo_promocion' => 'PUNTO-PRECIO']);
+        $this->product(72, 102, null, 25);
+        $this->promotion(73, [
+            'prm_origen' => 'APP',
+            'prm_tipo_promocion' => 'CONDICION-SKU',
+            'prm_restriccion' => '2x1',
+        ]);
+        $this->product(73, 103);
+
+        $result = $this->resolver->resolve([
+            ...$this->context('DOMICILIO', null, [
+                ['key' => 'country', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'sku', 'productId' => 101, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'point', 'productId' => 102, 'quantity' => 1, 'unitPrice' => 100],
+                ['key' => 'condition', 'productId' => 103, 'quantity' => 2, 'unitPrice' => 50],
+            ]),
+            'platform' => 'ANDROID',
+        ]);
+        $lines = collect($result['lines'])->keyBy('key');
+
+        $this->assertSame('10.00', $lines['country']['discount']);
+        $this->assertSame('20.00', $lines['sku']['discount']);
+        $this->assertSame('75.00', $lines['point']['discount']);
+        $this->assertSame('50.00', $lines['condition']['discount']);
+        $this->assertSame('155.00', $result['totals']['discount']);
+    }
+
+    public function test_selected_app_store_scope_has_priority_over_a_shared_all_store_promotion(): void
+    {
+        $this->promotion(80, [
+            'prm_origen' => 'TODO',
+            'prm_tipo_checkout' => 'T',
+            'prm_alcance_tienda' => 'TODAS',
+        ]);
+        $this->product(80, 100, 80);
+        $this->promotion(81, [
+            'prm_origen' => 'APP',
+            'prm_tipo_checkout' => 'T',
+            'prm_alcance_tienda' => 'SELECCIONADAS',
+        ]);
+        $this->product(81, 100, 10);
+        DB::table('stj_promociones_tienda')->insert(['prt_promocion' => 81, 'prt_tienda' => 2]);
+
+        $result = $this->resolver->resolve([
+            ...$this->context('TIENDA', 2, [
+                ['key' => 'line', 'productId' => 100, 'quantity' => 1, 'unitPrice' => 100],
+            ]),
+            'platform' => 'IOS',
+        ]);
+
+        $this->assertSame(81, $result['lines'][0]['promotion']['id']);
+        $this->assertSame('10.00', $result['totals']['discount']);
+    }
+
     public function test_gift_box_category_is_excluded_from_every_promotion_type(): void
     {
         DB::table('stj_productos')->insert([

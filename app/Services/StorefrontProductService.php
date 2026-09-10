@@ -175,6 +175,8 @@ class StorefrontProductService
             ? 'TIENDA'
             : 'DOMICILIO';
         $resolution = $this->promotionResolver->resolve([
+            'channel' => $context['channel'] ?? 'WEB',
+            'platform' => $context['platform'] ?? 'WEB',
             'countryId' => $countryId,
             'checkoutType' => $checkoutType,
             'storeCode' => $context['storeCode'] ?? null,

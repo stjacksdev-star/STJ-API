@@ -192,6 +192,10 @@ class StorefrontOrderService
                 ? DB::table('stj_tiendas')->where('tie_pais', $country->pai_id)->where('tie_codigo', $storeCode)->first(['tie_id', 'tie_nombre'])
                 : null;
             $resolution = ($this->promotionResolver ?? app(StorefrontPromotionResolver::class))->resolve([
+                'channel' => strtoupper((string) ($payload['origin'] ?? 'WEB')) === 'APP' ? 'APP' : 'WEB',
+                'platform' => strtoupper((string) ($payload['origin'] ?? 'WEB')) === 'APP'
+                    ? strtoupper((string) ($payload['platform'] ?? ''))
+                    : 'WEB',
                 'countryId' => (int) $country->pai_id,
                 'checkoutType' => $checkoutType,
                 'storeId' => $store?->tie_id,

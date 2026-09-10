@@ -371,8 +371,11 @@ class MobileCartController extends Controller
         }
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
-            'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID', 'WEB'])],
+            'plataforma' => ['nullable', Rule::in(['IOS', 'ANDROID'])],
         ]);
+        $platform = strtoupper((string) ($data['plataforma'] ?? ''));
+        $this->carts->usePromotionContext('APP', $platform !== '' ? $platform : null);
+        $this->coupons->usePromotionContext('APP', $platform !== '' ? $platform : null);
         $country = DB::table('stj_paises')->where('pai_id', $data['countryId'])->first(['pai_id', 'pai_id_world', 'pai_codigo']);
         if (! $country) {
             throw ValidationException::withMessages(['countryId' => 'Pais no soportado.']);

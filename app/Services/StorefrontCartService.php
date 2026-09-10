@@ -18,6 +18,9 @@ use Illuminate\Validation\ValidationException;
 
 class StorefrontCartService
 {
+    /** @var array{channel: string, platform?: string} */
+    private array $promotionContext = ['channel' => 'WEB', 'platform' => 'WEB'];
+
     public function __construct(
         private ProductDetailAvailabilityService $availability,
         private StorefrontProductPricingService $pricing,
@@ -28,6 +31,20 @@ class StorefrontCartService
         private ?WebPushDeliveryCancellationService $pushDeliveryCancellation = null,
         private ?StorefrontCartCouponService $cartCoupons = null,
     ) {}
+
+    public function usePromotionContext(string $channel, ?string $platform = null): self
+    {
+        $this->promotionContext = array_filter([
+            'channel' => strtoupper(trim($channel)),
+            'platform' => $platform !== null ? strtoupper(trim($platform)) : null,
+        ], fn ($value) => $value !== null && $value !== '');
+
+        if ($this->cartCoupons !== null) {
+            $this->cartCoupons->usePromotionContext($channel, $platform);
+        }
+
+        return $this;
+    }
 
     public function startCheckout(string $countryCode, StorefrontVisitor $visitor, ?StorefrontCustomer $customer, array $input): array
     {
@@ -86,6 +103,7 @@ class StorefrontCartService
                 })->values();
                 $store = $this->context($cart);
                 $resolution = ($this->promotionResolver ?? app(StorefrontPromotionResolver::class))->resolve([
+                    ...$this->promotionContext,
                     'countryId' => (int) $cart->car_pais_id,
                     'checkoutType' => (string) $cart->car_tipo,
                     'storeId' => $cart->car_tipo === 'TIENDA' ? (int) $cart->car_tienda_id : null,
@@ -129,7 +147,7 @@ class StorefrontCartService
                 $shippingAmount = (float) $shipping['shipping_amount'];
                 $couponResolution = ['applications' => [], 'totals' => ['shipping' => $shippingAmount, 'couponDiscount' => '0.00']];
                 if (Schema::hasTable('stj_carrito_cupones')) {
-                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, (string) ($input['email'] ?? ''), $shippingAmount);
+                    $couponResolution = $this->cartCouponService()->revalidate($cart, (string) ($input['email'] ?? ''), $shippingAmount);
                     if (collect($couponResolution['applications'] ?? [])->contains(fn (array $application) => $application['status'] === 'PENDIENTE_CORREO')) {
                         throw ValidationException::withMessages(['coupons' => 'Hay cupones pendientes de validar con el correo del checkout.']);
                     }
@@ -161,7 +179,7 @@ class StorefrontCartService
                     // las mismas filas de cupon dentro de esta transaccion no cambia
                     // el resultado y puede provocar SQLSTATE 1020 bajo concurrencia.
                     if ($cart->car_tipo !== 'TIENDA') {
-                        $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart, (string) ($input['email'] ?? ''), (float) $shipping['shipping_amount']);
+                        $couponResolution = $this->cartCouponService()->revalidate($cart, (string) ($input['email'] ?? ''), (float) $shipping['shipping_amount']);
                     }
                     $shippingAmount = (float) data_get($couponResolution, 'totals.shipping', $shipping['shipping_amount']);
                     $shipping['shipping_amount'] = number_format($shippingAmount, 2, '.', '');
@@ -585,7 +603,7 @@ class StorefrontCartService
             return $cart;
         } $now = now();
         $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, ['fulfillment_type' => 'DOMICILIO']);
-        $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_usu_id' => $customer?->getKey(), 'car_pais_id' => $country->pai_id, 'car_tipo' => 'DOMICILIO', 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource'], 'car_estado' => 'ACTIVO', 'car_origen' => 'WEB', 'car_moneda' => $this->currency(strtolower($country->pai_codigo)), 'car_version' => 1, 'car_ultima_actividad_en' => $now, 'car_expira_en' => $now->copy()->addDays(30), 'car_creado_en' => $now, 'car_actualizado_en' => $now]);
+        $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_usu_id' => $customer?->getKey(), 'car_pais_id' => $country->pai_id, 'car_tipo' => 'DOMICILIO', 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource'], 'car_estado' => 'ACTIVO', 'car_origen' => $this->promotionContext['channel'], 'car_moneda' => $this->currency(strtolower($country->pai_codigo)), 'car_version' => 1, 'car_ultima_actividad_en' => $now, 'car_expira_en' => $now->copy()->addDays(30), 'car_creado_en' => $now, 'car_actualizado_en' => $now]);
         $this->audit($cart, null, $visitor, $customer, 'CART_CREATED', null, ['state' => 'ACTIVO']);
 
         return $cart;
@@ -699,6 +717,7 @@ class StorefrontCartService
                 'unitPrice' => $proposed ? (float) $item['commercial']['regular'] : (float) $cart->items->firstWhere('cad_id', $item['id'])->cad_precio_unitario,
             ])->values()->all();
             $resolvePromotions = fn (array $fulfillment, bool $proposed) => collect($resolver->resolve([
+                ...$this->promotionContext,
                 'countryId' => (int) $cart->car_pais_id,
                 'checkoutType' => (string) $fulfillment['type'],
                 'storeId' => $fulfillment['type'] === 'TIENDA' ? (int) $fulfillment['storeId'] : null,
@@ -835,6 +854,7 @@ class StorefrontCartService
 
         if ($eligibleItems->isNotEmpty()) {
             $resolution = ($this->promotionResolver ?? app(StorefrontPromotionResolver::class))->resolve([
+                ...$this->promotionContext,
                 'countryId' => (int) $cart->car_pais_id,
                 'checkoutType' => (string) $cart->car_tipo,
                 'storeId' => $cart->car_tipo === 'TIENDA' ? (int) $cart->car_tienda_id : null,
@@ -849,7 +869,7 @@ class StorefrontCartService
             ]);
             $resolvedLines = collect($resolution['lines'])->keyBy('key');
             if (Schema::hasTable('stj_carrito_cupones')) {
-                $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate($cart);
+                $couponResolution = $this->cartCouponService()->revalidate($cart);
                 $couponLines = collect($couponResolution['lines'] ?? [])->keyBy('key');
             }
         }
@@ -913,6 +933,17 @@ class StorefrontCartService
             'DOP' => 'RD$',
             default => '$',
         };
+    }
+
+    private function cartCouponService(): StorefrontCartCouponService
+    {
+        $service = $this->cartCoupons ?? app(StorefrontCartCouponService::class);
+        $service->usePromotionContext(
+            $this->promotionContext['channel'],
+            $this->promotionContext['platform'] ?? null,
+        );
+
+        return $service;
     }
 
     private function country(string $code): object

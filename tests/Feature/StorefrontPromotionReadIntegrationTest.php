@@ -51,6 +51,35 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertNotSame('GLOBAL INCORRECTO', $result['products'][0]['promoName']);
     }
 
+    public function test_promotion_landing_propagates_the_commercial_channel_to_the_resolver(): void
+    {
+        DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_origen' => 'APP']);
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->twice()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+        $service = app(StorefrontPromotionLandingService::class);
+
+        $mobile = $service->find('SV', 10, [
+            'checkoutType' => 'DOMICILIO',
+            'channel' => 'APP',
+            'platform' => 'ANDROID',
+        ]);
+        $web = $service->find('SV', 10, [
+            'checkoutType' => 'DOMICILIO',
+            'channel' => 'WEB',
+            'platform' => 'WEB',
+        ]);
+
+        $this->assertSame(10, $mobile['products'][0]['promotion']['id']);
+        $this->assertSame(75.0, $mobile['products'][0]['price']);
+        $this->assertNull($web['products'][0]['promotion']);
+        $this->assertSame(100.0, $web['products'][0]['price']);
+    }
+
     public function test_catalog_ignores_stale_product_country_promotion_labels(): void
     {
         DB::table('stj_producto_pais')

@@ -247,6 +247,8 @@ class ProductDetailAvailabilityService
 
         $resolver = $this->promotionResolver ?? app(StorefrontPromotionResolver::class);
         $resolution = $resolver->resolve([
+            'channel' => 'WEB',
+            'platform' => 'WEB',
             'countryId' => $countryId,
             'checkoutType' => in_array(strtoupper(trim((string) $checkoutType)), ['T', 'TIENDA'], true) ? 'TIENDA' : 'DOMICILIO',
             'storeCode' => $storeCode,

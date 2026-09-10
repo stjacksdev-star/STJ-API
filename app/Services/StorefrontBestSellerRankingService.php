@@ -157,6 +157,8 @@ class StorefrontBestSellerRankingService
 
         $resolver = $this->promotionResolver ?? app(StorefrontPromotionResolver::class);
         $resolution = $resolver->resolve([
+            'channel' => 'WEB',
+            'platform' => 'WEB',
             'countryId' => $countryId,
             'checkoutType' => 'DOMICILIO',
             'includeUntriggered' => true,
