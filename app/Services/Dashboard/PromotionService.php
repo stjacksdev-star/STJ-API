@@ -468,8 +468,6 @@ class PromotionService
                     ->where('ppr_promocion', $id)
                     ->count();
 
-                $this->resetPromotionProductFields($lockedPromotion);
-
                 if ((string) $lockedPromotion->prm_tipo !== 'TODO') {
                     DB::table('stj_promociones_producto')
                         ->where('ppr_promocion', $id)
@@ -497,7 +495,6 @@ class PromotionService
                     throw new RuntimeException('El conteo de productos insertados no coincide con el Excel.');
                 }
 
-                $this->activatePromotionProductFields($lockedPromotion);
                 $this->history->record(
                     $id,
                     'PRODUCTOS',
@@ -516,119 +513,6 @@ class PromotionService
         }
 
         return [...$result, 'promotion' => $this->find($id)];
-    }
-
-    private function resetPromotionProductFields(object $promotion): void
-    {
-        $query = DB::table('stj_producto_pais')->where('ppa_pais', (int) $promotion->prm_pais);
-
-        if ((string) $promotion->prm_tipo !== 'TODO') {
-            $productIds = DB::table('stj_promociones_producto')
-                ->where('ppr_promocion', (int) $promotion->prm_id)
-                ->select('ppr_producto');
-            $query->whereIn('ppa_producto', $productIds);
-        }
-
-        $query->update([
-            'ppa_origen_descuento' => null,
-            'ppa_tipo_descuento' => null,
-            'ppa_descuento' => null,
-            'ppa_precio_tienda' => null,
-            'ppa_promo_logo' => null,
-            'ppa_promo_nombre' => null,
-        ]);
-    }
-
-    private function activatePromotionProductFields(object $promotion): void
-    {
-        $promotionId = (int) $promotion->prm_id;
-        $countryId = (int) $promotion->prm_pais;
-        $origin = (string) $promotion->prm_origen;
-        $symbol = match ($countryId) {
-            1, 5 => '$',
-            2 => 'Q',
-            3 => 'C',
-            7 => 'L',
-            default => '',
-        };
-
-        if ((string) $promotion->prm_tipo_promocion === 'DESCUENTO') {
-            $discount = (float) $promotion->prm_porcentaje;
-            DB::table('stj_producto_pais')->where('ppa_pais', $countryId)->update([
-                'ppa_origen_descuento' => $origin,
-                'ppa_tipo_descuento' => $promotion->prm_aplica,
-                'ppa_descuento' => $discount,
-                'ppa_promo_nombre' => round($discount).'% DE DESCUENTO',
-            ]);
-
-            return;
-        }
-
-        $query = DB::table('stj_producto_pais as pp')
-            ->join('stj_promociones_producto as pr', 'pr.ppr_producto', '=', 'pp.ppa_producto')
-            ->where('pr.ppr_promocion', $promotionId)
-            ->where('pp.ppa_pais', $countryId);
-
-        if ((string) $promotion->prm_tipo_promocion === 'DESCUENTO-SKU') {
-            if ((float) $promotion->prm_porcentaje > 0) {
-                $discount = (float) $promotion->prm_porcentaje;
-                $query->update([
-                    'ppa_origen_descuento' => $origin,
-                    'ppa_tipo_descuento' => $promotion->prm_aplica,
-                    'ppa_descuento' => $discount,
-                    'ppa_promo_nombre' => round($discount).'% DE DESCUENTO',
-                ]);
-            } else {
-                $query->update([
-                    'ppa_origen_descuento' => $origin,
-                    'ppa_tipo_descuento' => $promotion->prm_aplica,
-                    'ppa_descuento' => DB::raw('pr.ppr_descuento'),
-                    'ppa_promo_nombre' => DB::raw("CONCAT(ROUND(pr.ppr_descuento, 0), '% DE DESCUENTO')"),
-                ]);
-            }
-
-            return;
-        }
-
-        if ((string) $promotion->prm_tipo_promocion === 'PUNTO-PRECIO') {
-            $price = $promotion->prm_precio !== null ? (float) $promotion->prm_precio : 0.0;
-            $priceExpression = $price > 0
-                ? ($countryId === 5 ? round($price / 1.07) : $price)
-                : DB::raw($countryId === 5 ? 'ROUND(pr.ppr_precio / 1.07, 0)' : 'pr.ppr_precio');
-            $nameExpression = $price > 0
-                ? 'Llevatelo a '.$symbol.round((float) $priceExpression)
-                : DB::raw("CONCAT('Llevatelo a {$symbol}', ROUND(".($countryId === 5 ? 'pr.ppr_precio / 1.07' : 'pr.ppr_precio').', 0))');
-            $query->update([
-                'ppa_origen_descuento' => $origin,
-                'ppa_tipo_descuento' => 'PRECIO_TODO',
-                'ppa_precio_tienda' => $priceExpression,
-                'ppa_promo_nombre' => $nameExpression,
-            ]);
-
-            return;
-        }
-
-        if ((string) $promotion->prm_tipo_promocion !== 'CONDICION-SKU') {
-            return;
-        }
-
-        $restriction = (string) $promotion->prm_restriccion;
-        $name = match ($restriction) {
-            '2xPP' => 'Aplica 2x'.$symbol.round((float) $promotion->prm_precio),
-            '21/2' => '2da prenda con el 50% desc',
-            '2doPrecio' => 'Aplica 2da Prenda a '.$symbol.round((float) $promotion->prm_precio),
-            '2x1' => 'Promocion 2x1',
-            default => null,
-        };
-
-        if ($name !== null) {
-            $query->update([
-                'ppa_origen_descuento' => $restriction === '2x1' ? 'TODO' : $origin,
-                'ppa_tipo_descuento' => $restriction === '2x1' ? 'TODO' : 'PRECIO_TODO',
-                'ppa_descuento' => null,
-                'ppa_promo_nombre' => $name,
-            ]);
-        }
     }
 
     private function dashboardDateTime(mixed $value): Carbon
