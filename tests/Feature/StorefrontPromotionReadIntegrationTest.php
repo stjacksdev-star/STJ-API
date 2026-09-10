@@ -143,6 +143,67 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
         $this->assertNotSame('GLOBAL INCORRECTO', $product['badge']);
     }
 
+    public function test_catalog_paginates_all_products_in_a_gender_group(): void
+    {
+        DB::table('stj_categorias')->insert([
+            'cat_id' => 2,
+            'cat_nombre' => 'Niños',
+        ]);
+
+        $products = [];
+        $countryProducts = [];
+
+        foreach (range(1, 25) as $position) {
+            $productId = 2000 + $position;
+            $products[] = [
+                'pro_id' => $productId,
+                'pro_codigo' => "BOYS-{$position}",
+                'pro_nombre' => "Producto niños {$position}",
+                'pro_categoria' => 2,
+                'pro_estatus' => 'ACTIVO',
+                'pro_registro' => now()->subSeconds($position),
+            ];
+            $countryProducts[] = [
+                'ppa_id' => 2000 + $position,
+                'ppa_pais' => 1,
+                'ppa_producto' => $productId,
+                'ppa_estado' => 'ACTIVO',
+                'ppa_precio' => 10 + $position,
+                'ppa_es_popular' => 0,
+            ];
+        }
+
+        DB::table('stj_productos')->insert($products);
+        DB::table('stj_producto_pais')->insert($countryProducts);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->twice()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => null,
+        ]);
+        $this->app->instance(ProductListAvailabilityService::class, $availability);
+
+        $firstPage = app(StorefrontCatalogService::class)->forCountry('SV', null, ['group' => 'boys']);
+        $secondPage = app(StorefrontCatalogService::class)->forCountry('SV', null, ['group' => 'boys', 'page' => 2]);
+
+        $this->assertCount(24, $firstPage['products']);
+        $this->assertCount(1, $secondPage['products']);
+        $this->assertSame(25, $firstPage['search']['total']);
+        $this->assertSame([
+            'currentPage' => 2,
+            'lastPage' => 2,
+            'perPage' => 24,
+            'total' => 25,
+        ], $secondPage['pagination']);
+        $this->assertEmpty(
+            array_intersect(
+                collect($firstPage['products'])->pluck('id')->all(),
+                collect($secondPage['products'])->pluck('id')->all(),
+            )
+        );
+    }
+
     public function test_catalog_container_category_includes_configured_subcategories_and_uses_its_header(): void
     {
         DB::table('stj_categorias')->insert([

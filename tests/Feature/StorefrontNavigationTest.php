@@ -79,6 +79,25 @@ class StorefrontNavigationTest extends TestCase
         $this->assertSame(10, $result['filters']['active']['subcategory']);
     }
 
+    public function test_newest_catalog_only_includes_products_activated_for_the_country_in_the_last_30_days(): void
+    {
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn([
+            'availabilityBySku' => [],
+            'activeStoreCode' => null,
+            'usedSource' => 'test',
+        ]);
+
+        $result = (new StorefrontCatalogService($availability))->forCountry('zz', null, [
+            'group' => 'girls',
+            'sort' => 'newest',
+        ]);
+
+        $this->assertSame([1], array_column($result['products'], 'id'));
+        $this->assertSame(1, $result['search']['total']);
+        $this->assertSame(1, $result['pagination']['total']);
+    }
+
     private function createSchema(): void
     {
         Schema::create('stj_paises', function (Blueprint $table) {

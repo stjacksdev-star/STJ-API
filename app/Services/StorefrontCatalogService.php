@@ -10,6 +10,8 @@ use Illuminate\Support\Str;
 
 class StorefrontCatalogService
 {
+    private const PRODUCTS_PER_PAGE = 24;
+
     private const CONTAINER_PARENT_CATEGORY_IDS = [
         19 => [3, 5],
         20 => [4, 6],
@@ -40,6 +42,7 @@ class StorefrontCatalogService
         $activeFit = trim((string) ($filters['fit'] ?? ''));
         $activeSort = trim((string) ($filters['sort'] ?? 'featured'));
         $activeStore = trim((string) ($filters['store'] ?? ''));
+        $requestedPage = max(1, (int) ($filters['page'] ?? 1));
         $promoOnly = filter_var($filters['promo'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         if (! $country) {
@@ -62,6 +65,12 @@ class StorefrontCatalogService
                 'categoryHero' => null,
                 'search' => [
                     'query' => $trimmedQuery,
+                    'total' => 0,
+                ],
+                'pagination' => [
+                    'currentPage' => 1,
+                    'lastPage' => 1,
+                    'perPage' => self::PRODUCTS_PER_PAGE,
                     'total' => 0,
                 ],
             ];
@@ -89,6 +98,10 @@ class StorefrontCatalogService
         $this->applyDenimFitFilter($productsQuery, $activeFit);
         $this->applySort($productsQuery, $activeSort);
 
+        $total = (clone $productsQuery)->count('p.pro_id');
+        $lastPage = max(1, (int) ceil($total / self::PRODUCTS_PER_PAGE));
+        $currentPage = min($requestedPage, $lastPage);
+
         $rawProducts = $productsQuery
             ->select([
                 'p.pro_id',
@@ -106,7 +119,7 @@ class StorefrontCatalogService
             ])
             ->orderByDesc('pp.ppa_es_popular')
             ->orderByDesc('p.pro_registro')
-            ->limit(24)
+            ->forPage($currentPage, self::PRODUCTS_PER_PAGE)
             ->get();
 
         $availability = $this->productListAvailabilityService->summarize(
@@ -206,7 +219,13 @@ class StorefrontCatalogService
             'categoryHero' => $this->categoryHero($activeGroup, $activeCategory),
             'search' => [
                 'query' => $trimmedQuery,
-                'total' => count($products),
+                'total' => $total,
+            ],
+            'pagination' => [
+                'currentPage' => $currentPage,
+                'lastPage' => $lastPage,
+                'perPage' => self::PRODUCTS_PER_PAGE,
+                'total' => $total,
             ],
             'availability' => [
                 'activeStoreCode' => $availability['activeStoreCode'] ?? null,
@@ -311,7 +330,9 @@ class StorefrontCatalogService
     private function applySort($query, string $sort): void
     {
         match ($sort) {
-            'newest' => $query->orderByDesc('p.pro_registro'),
+            'newest' => $query
+                ->whereDate('pp.ppa_fecha_activo', '>=', now()->subDays(30)->toDateString())
+                ->orderByDesc('pp.ppa_fecha_activo'),
             'price_asc' => $query->orderBy('pp.ppa_precio'),
             'price_desc' => $query->orderByDesc('pp.ppa_precio'),
             default => $query

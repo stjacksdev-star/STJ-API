@@ -22,6 +22,7 @@ class StorefrontCatalogController extends BaseController
                 'sort' => $request->string('sort')->toString(),
                 'promo' => $request->boolean('promo'),
                 'store' => $request->string('store')->toString(),
+                'page' => max(1, $request->integer('page', 1)),
             ]),
             'Catalogo del storefront obtenido'
         );
