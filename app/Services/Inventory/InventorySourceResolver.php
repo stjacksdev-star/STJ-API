@@ -24,13 +24,13 @@ class InventorySourceResolver
         $sources = config('inventory.sources', []);
 
         if ($rule && in_array((string) $rule->isr_source, $sources, true)) {
+            $source = (string) $rule->isr_source;
+
             return [
                 'country' => $countryCode,
                 'scope' => $scope,
-                'source' => (string) $rule->isr_source,
-                'fallback_source' => in_array((string) $rule->isr_fallback_source, $sources, true)
-                    ? (string) $rule->isr_fallback_source
-                    : null,
+                'source' => $source,
+                'fallback_source' => $this->fallbackSource($source, $rule->isr_fallback_source, $sources),
                 'from_rule' => true,
             ];
         }
@@ -97,11 +97,17 @@ class InventorySourceResolver
                     : null;
 
                 if ($rule) {
+                    $source = (string) $rule->isr_source;
+
                     return [
                         'country' => $countryCode,
                         'scope' => $scope,
-                        'source' => (string) $rule->isr_source,
-                        'fallback_source' => $rule->isr_fallback_source ?: null,
+                        'source' => $source,
+                        'fallback_source' => $this->fallbackSource(
+                            $source,
+                            $rule->isr_fallback_source,
+                            config('inventory.sources', []),
+                        ),
                         'from_rule' => true,
                     ];
                 }
@@ -117,5 +123,19 @@ class InventorySourceResolver
                 ];
             }
         );
+    }
+
+    private function fallbackSource(string $source, mixed $configuredFallback, array $sources): ?string
+    {
+        $fallback = trim((string) $configuredFallback);
+        if ($fallback === '') {
+            return null;
+        }
+        if ($fallback !== $source && in_array($fallback, $sources, true)) {
+            return $fallback;
+        }
+
+        return collect($sources)
+            ->first(fn (string $candidate) => $candidate !== $source);
     }
 }
