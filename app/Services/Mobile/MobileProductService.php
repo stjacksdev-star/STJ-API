@@ -5,6 +5,7 @@ namespace App\Services\Mobile;
 use App\Services\Inventory\ExternalInventoryProvider;
 use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
+use App\Services\StorefrontProductPromotionPresenter;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -13,6 +14,9 @@ use Illuminate\Validation\ValidationException;
 
 class MobileProductService
 {
+    /** @var array{channel: string, checkoutType: string, platform?: string} */
+    private array $promotionContext = ['channel' => 'APP', 'checkoutType' => 'DOMICILIO'];
+
     private const RELATED_GENDERS = [
         'TEEN CHICOS' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
         'CABALLEROS JUVENIL' => ['TEEN CHICOS', 'CABALLEROS JUVENIL', 'CABALLERO', 'CABALLERO JUVENI', 'CABALLEROS'],
@@ -37,7 +41,32 @@ class MobileProductService
         private readonly ProductListAvailabilityService $availability,
         private readonly ProductDetailAvailabilityService $detailAvailability,
         private readonly ExternalInventoryProvider $externalInventory,
+        private readonly StorefrontProductPromotionPresenter $promotionPresenter,
     ) {}
+
+    public function usePromotionContext(?string $checkoutType, ?string $platform = null): self
+    {
+        $checkout = strtoupper(trim((string) $checkoutType));
+        $platform = strtoupper(trim((string) $platform));
+        if (in_array($checkout, ['T', 'TIENDA'], true)) {
+            $checkout = 'TIENDA';
+        } elseif (in_array($checkout, ['', 'D', 'DOMICILIO'], true)) {
+            $checkout = 'DOMICILIO';
+        } else {
+            throw ValidationException::withMessages(['tipoServicio' => 'La modalidad debe ser Domicilio o Tienda.']);
+        }
+        if ($platform !== '' && ! in_array($platform, ['IOS', 'ANDROID'], true)) {
+            throw ValidationException::withMessages(['plataforma' => 'La plataforma debe ser IOS o ANDROID.']);
+        }
+
+        $this->promotionContext = array_filter([
+            'channel' => 'APP',
+            'checkoutType' => $checkout,
+            'platform' => $platform !== '' ? $platform : null,
+        ], fn ($value) => $value !== null);
+
+        return $this;
+    }
 
     public function barcode(int $countryId, string $barcode, string $storeCode): array
     {
@@ -140,18 +169,17 @@ class MobileProductService
 
         $query = $this->productQuery($countryId);
         $this->applyCategory($query, $category, []);
-        $query->orderByDesc('pp.ppa_promo_logo')
-            ->orderByDesc('pp.ppa_tipo_descuento')
-            ->orderByDesc('p.pro_id')
+        $query->orderByDesc('p.pro_id')
             ->orderByDesc('p.pro_nombre');
 
         $products = $this->getProducts($query);
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
         return $products
             ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
-            ->map(fn (object $product) => $this->legacyProduct($product, $bySku, true))
+            ->map(fn (object $product) => $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id), true))
             ->values()
             ->all();
     }
@@ -192,27 +220,26 @@ class MobileProductService
         }
 
         $query->where(function (Builder $search) use ($terms, $hasTags) {
-                foreach ($terms as $term) {
-                    $pattern = '%'.$term.'%';
-                    $search->orWhereRaw('LOWER(p.pro_nombre) LIKE ?', [$pattern])
-                        ->orWhereRaw('LOWER(p.pro_codigo) LIKE ?', [$pattern]);
-                    if ($hasTags) {
-                        $search->orWhereRaw('LOWER(p.pro_tags) LIKE ?', [$pattern]);
-                    }
+            foreach ($terms as $term) {
+                $pattern = '%'.$term.'%';
+                $search->orWhereRaw('LOWER(p.pro_nombre) LIKE ?', [$pattern])
+                    ->orWhereRaw('LOWER(p.pro_codigo) LIKE ?', [$pattern]);
+                if ($hasTags) {
+                    $search->orWhereRaw('LOWER(p.pro_tags) LIKE ?', [$pattern]);
                 }
-            })
-            ->orderByDesc('pp.ppa_promo_logo')
-            ->orderByDesc('pp.ppa_tipo_descuento')
+            }
+        })
             ->orderByDesc('p.pro_id');
 
         $products = $this->getProducts($query, 100);
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
         return $products
             ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
             ->take(13)
-            ->map(fn (object $product) => $this->legacyProduct($product, $bySku, true))
+            ->map(fn (object $product) => $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id), true))
             ->values()
             ->all();
     }
@@ -244,10 +271,22 @@ class MobileProductService
             throw ValidationException::withMessages(['product' => 'Producto no encontrado para el pais seleccionado.']);
         }
 
+        $country = DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo']);
+        $resolved = $this->commercial(collect([$product]), $country, $storeCode)->get($productId);
+        $promotion = $resolved['promotion'] ?? null;
+        $regularPrice = (float) $product->ppa_precio;
+        $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
+
         return [
             'id' => $product->pro_id,
             'nombre' => mb_convert_case(mb_strtolower((string) $product->pro_nombre, 'UTF-8'), MB_CASE_TITLE, 'UTF-8'),
-            'preciov2' => number_format((float) $product->ppa_precio, 2),
+            'preciov2' => number_format($finalPrice, 2, '.', ''),
+            'precio' => number_format($regularPrice, 2, '.', ''),
+            'precioCD' => number_format($finalPrice, 2, '.', ''),
+            'descuento' => $this->resolvedDiscountPercentage($resolved),
+            'origen' => (string) ($promotion['origin'] ?? ''),
+            'sello' => (string) ($promotion['logoUrl'] ?? ''),
+            'ppa_promo_nombre' => (string) ($promotion['displayLabel'] ?? ''),
             'descripcion' => str_replace('-', '<br/>-', (string) $product->pro_descripcion),
             'categoria' => (int) $product->pro_categoria,
             'subCategoria' => (int) $product->pro_sub_categoria,
@@ -339,19 +378,33 @@ class MobileProductService
         $products = $query->inRandomOrder()->limit(30)->get([
             'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca', 'p.pro_oc_marca',
             'p.pro_categoria', 'p.pro_sub_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
-            'pp.ppa_precio', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre',
-            'pp.ppa_promo_logo', 'pp.ppa_tipo_descuento', 'pp.ppa_precio_tienda',
+            'pp.ppa_precio',
         ]);
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
         $popular = $products
             ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
             ->take(10)
-            ->map(function (object $product) use ($bySku): array {
+            ->map(function (object $product) use ($bySku, $commercial): array {
                 $sku = trim((string) $product->pro_codigo);
+                $resolved = $commercial->get((int) $product->pro_id);
+                $promotion = $resolved['promotion'] ?? null;
+                $regularPrice = (float) $product->ppa_precio;
+                $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
+                $discountPercentage = $this->resolvedDiscountPercentage($resolved);
 
                 return [
+                    'id' => $product->pro_id,
+                    'sku' => $sku,
+                    'nombre' => $product->pro_nombre,
+                    'precio' => number_format($regularPrice, 2, '.', ''),
+                    'precioCD' => number_format($finalPrice, 2, '.', ''),
+                    'descuento' => $discountPercentage,
+                    'origen' => (string) ($promotion['origin'] ?? ''),
+                    'sello' => (string) ($promotion['logoUrl'] ?? ''),
+                    'ppa_promo_nombre' => (string) ($promotion['displayLabel'] ?? ''),
                     'pro_id' => $product->pro_id,
                     'pro_codigo' => $sku,
                     'pro_nombre' => $product->pro_nombre,
@@ -365,12 +418,11 @@ class MobileProductService
                     'sca_nombre' => $product->sca_nombre,
                     'foto' => rtrim((string) config('mobile.legacy_product_image_url'), '/').'/'.rawurlencode($sku).'.jpg?'.rawurlencode((string) $product->pro_nombre),
                     'ppa_precio' => $product->ppa_precio,
-                    'ppa_descuento' => $product->ppa_descuento,
-                    'ppa_origen_descuento' => $product->ppa_origen_descuento,
-                    'ppa_promo_nombre' => $product->ppa_promo_nombre,
-                    'ppa_promo_logo' => $product->ppa_promo_logo,
-                    'ppa_tipo_descuento' => $product->ppa_tipo_descuento,
-                    'ppa_precio_tienda' => $product->ppa_precio_tienda,
+                    'ppa_descuento' => $discountPercentage,
+                    'ppa_origen_descuento' => (string) ($promotion['origin'] ?? ''),
+                    'ppa_promo_logo' => (string) ($promotion['logoUrl'] ?? ''),
+                    'ppa_tipo_descuento' => $promotion['type'] ?? null,
+                    'ppa_precio_tienda' => number_format($finalPrice, 2, '.', ''),
                     'availableSizes' => $bySku[$sku]['availableSizes'] ?? [],
                     'hasStock' => true,
                 ];
@@ -574,9 +626,10 @@ class MobileProductService
         $products = $productIds->map(fn (int $id) => $productsById->get($id))->filter()->values();
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
-        return $products->map(function (object $product) use ($bySku): array {
-            $item = $this->legacyProduct($product, $bySku);
+        return $products->map(function (object $product) use ($bySku, $commercial): array {
+            $item = $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id));
             $item['favorito'] = true;
 
             return $item;
@@ -658,11 +711,12 @@ class MobileProductService
 
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
         return [
             'records' => $products
                 ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
-                ->map(fn (object $product) => $this->legacyProduct($product, $bySku))
+                ->map(fn (object $product) => $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id)))
                 ->values()
                 ->all(),
             'existenciaTalla' => $availability['availabilityRows'] ?? [],
@@ -689,11 +743,12 @@ class MobileProductService
         $products = $this->getProducts($query);
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
         return $products
             ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
-            ->map(function (object $product) use ($bySku): array {
-                $item = $this->legacyProduct($product, $bySku);
+            ->map(function (object $product) use ($bySku, $commercial): array {
+                $item = $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id));
                 $item['sello'] = 'https://stjacks.com/img/v2/icons/Icon%20awesome-tag.svg';
 
                 return $item;
@@ -722,11 +777,12 @@ class MobileProductService
         $products = $this->getProducts($query);
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
+        $commercial = $this->commercial($products, $country, $storeCode);
 
         return $products
             ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
-            ->map(function (object $product) use ($bySku): array {
-                $item = $this->legacyProduct($product, $bySku);
+            ->map(function (object $product) use ($bySku, $commercial): array {
+                $item = $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id));
                 $item['sello'] = 'https://stjacks.com/img/v2/icons/Icon%20awesome-tag.svg';
 
                 return $item;
@@ -754,8 +810,7 @@ class MobileProductService
         return $query->get([
             'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca',
             'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_sub_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
-            'pp.ppa_precio', 'pp.ppa_descuento', 'pp.ppa_origen_descuento', 'pp.ppa_promo_nombre',
-            'pp.ppa_promo_logo', 'pp.ppa_tipo_descuento', 'pp.ppa_precio_tienda',
+            'pp.ppa_precio',
         ]);
     }
 
@@ -765,6 +820,19 @@ class MobileProductService
             strtolower((string) $country->pai_codigo),
             $products->map(fn (object $product) => ['pro_codigo' => $product->pro_codigo])->all(),
             $storeCode,
+        );
+    }
+
+    private function commercial($products, object $country, string $storeCode)
+    {
+        return $this->promotionPresenter->resolve(
+            collect($products),
+            (int) $country->pai_id,
+            (string) $country->pai_codigo,
+            [
+                ...$this->promotionContext,
+                'storeCode' => trim($storeCode),
+            ],
         );
     }
 
@@ -856,15 +924,12 @@ class MobileProductService
         };
     }
 
-    private function legacyProduct(object $product, array $availabilityBySku, bool $includeSeal = false): array
+    private function legacyProduct(object $product, array $availabilityBySku, ?array $commercial = null, bool $includeSeal = false): array
     {
         $price = (float) $product->ppa_precio;
-        $discount = (float) ($product->ppa_descuento ?? 0);
-        $discountedPrice = $discount > 0 ? $price * (1 - ($discount / 100)) : $price;
-        if ((trim((string) $product->ppa_promo_logo) !== '' || $product->ppa_tipo_descuento === 'PRECIO_TODO')
-            && (float) $product->ppa_precio_tienda > 0) {
-            $discountedPrice = (float) $product->ppa_precio_tienda;
-        }
+        $promotion = $commercial['promotion'] ?? null;
+        $discount = $this->resolvedDiscountPercentage($commercial);
+        $discountedPrice = (float) ($commercial['finalTotal'] ?? $price);
         $sku = trim((string) $product->pro_codigo);
 
         return [
@@ -874,10 +939,8 @@ class MobileProductService
             'nombre' => mb_convert_case(mb_strtolower((string) $product->pro_nombre, 'UTF-8'), MB_CASE_TITLE, 'UTF-8'),
             'precio' => number_format($price, 2, '.', ''),
             'descuento' => $discount,
-            'origen' => (string) ($product->ppa_origen_descuento ?? ''),
-            'sello' => $includeSeal && trim((string) $product->ppa_promo_logo) !== ''
-                ? 'https://stjacks.com/img/logos/'.trim((string) $product->ppa_promo_logo)
-                : '',
+            'origen' => (string) ($promotion['origin'] ?? ''),
+            'sello' => $includeSeal ? (string) ($promotion['logoUrl'] ?? '') : '',
             'precioCD' => number_format($discountedPrice, 2, '.', ''),
             'descripcion' => str_replace('-', '<br/>-', (string) $product->pro_descripcion),
             'categoria' => $product->pro_categoria,
@@ -888,7 +951,7 @@ class MobileProductService
             'envioGratis' => 'NO',
             'Domicilio' => true,
             'Tienda' => true,
-            'ppa_promo_nombre' => (string) ($product->ppa_promo_nombre ?? ''),
+            'ppa_promo_nombre' => (string) ($promotion['displayLabel'] ?? $promotion['commercialName'] ?? ''),
             'pro_tallas_list' => $product->pro_tallas ? explode(',', (string) $product->pro_tallas) : [],
             'availableSizes' => $availabilityBySku[$sku]['availableSizes'] ?? [],
             'hasStock' => (bool) ($availabilityBySku[$sku]['hasStock'] ?? false),
@@ -911,5 +974,15 @@ class MobileProductService
         }
 
         return '';
+    }
+
+    private function resolvedDiscountPercentage(?array $commercial): float
+    {
+        $base = (float) ($commercial['baseTotal'] ?? 0);
+        $discount = (float) ($commercial['discount'] ?? 0);
+
+        return $base > 0 && $discount > 0
+            ? round(($discount / $base) * 100, 2)
+            : 0.0;
     }
 }

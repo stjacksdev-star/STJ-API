@@ -194,6 +194,7 @@ class StorefrontPromotionResolver
             ->when($context['promotionId'], fn ($query, $promotionId) => $query->where('p.prm_id', $promotionId))
             ->get([
                 'p.prm_id',
+                'p.prm_origen',
                 'p.prm_nombre',
                 'p.prm_nombre_comercial',
                 'p.prm_tipo',
@@ -226,6 +227,7 @@ class StorefrontPromotionResolver
                 $promotionProducts = $products->get($promotion->prm_id, collect());
                 $data = [
                     'id' => (int) $promotion->prm_id,
+                    'origin' => (string) $promotion->prm_origen,
                     'name' => trim((string) $promotion->prm_nombre),
                     'commercialName' => trim((string) $promotion->prm_nombre_comercial),
                     'type' => (string) $promotion->prm_tipo,
@@ -507,6 +509,7 @@ class StorefrontPromotionResolver
 
         return [
             'id' => $selected['id'],
+            'origin' => $selected['origin'],
             'type' => $selected['promotionType'],
             'restriction' => $selected['restriction'],
             'name' => $selected['name'],

@@ -15,6 +15,7 @@ class MobileProductController extends Controller
 
     public function index(Request $request)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'categoryId' => ['required', 'integer', 'min:1'],
@@ -32,6 +33,7 @@ class MobileProductController extends Controller
 
     public function search(Request $request)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
@@ -66,6 +68,7 @@ class MobileProductController extends Controller
 
     public function show(Request $request, int $product)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
@@ -94,6 +97,7 @@ class MobileProductController extends Controller
 
     public function suggestions(Request $request, int $product)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
@@ -167,6 +171,7 @@ class MobileProductController extends Controller
 
     public function favorites(Request $request)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
@@ -198,6 +203,7 @@ class MobileProductController extends Controller
 
     public function filter(Request $request)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'categoria' => ['required', 'integer', 'min:1'],
@@ -218,6 +224,7 @@ class MobileProductController extends Controller
 
     public function filterJackCo(Request $request)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
@@ -237,6 +244,7 @@ class MobileProductController extends Controller
 
     public function filterBasikos(Request $request)
     {
+        $this->configurePromotionContext($request);
         $data = $request->validate([
             'countryId' => ['required', 'integer', 'min:1'],
             'codigoTienda' => ['required', 'string', 'max:30'],
@@ -253,5 +261,13 @@ class MobileProductController extends Controller
         return response()->json([
             'records' => $this->products->filterBasikos((int) $data['countryId'], $data),
         ]);
+    }
+
+    private function configurePromotionContext(Request $request): void
+    {
+        $this->products->usePromotionContext(
+            $request->query('tipoServicio'),
+            $request->query('plataforma'),
+        );
     }
 }

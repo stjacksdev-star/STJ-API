@@ -2,9 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Services\Inventory\ExternalInventoryProvider;
 use App\Services\ProductDetailAvailabilityService;
 use App\Services\ProductListAvailabilityService;
-use App\Services\Inventory\ExternalInventoryProvider;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -64,6 +64,43 @@ class MobileProductEndpointTest extends TestCase
             $table->string('ppa_tipo_descuento')->nullable();
             $table->decimal('ppa_precio_tienda')->nullable();
         });
+        Schema::create('stj_promociones', function (Blueprint $table) {
+            $table->id('prm_id');
+            $table->unsignedBigInteger('prm_pais');
+            $table->string('prm_origen');
+            $table->string('prm_nombre');
+            $table->string('prm_nombre_comercial')->nullable();
+            $table->string('prm_modalidad');
+            $table->string('prm_tipo');
+            $table->string('prm_estado');
+            $table->string('prm_tipo_promocion');
+            $table->string('prm_restriccion')->nullable();
+            $table->decimal('prm_porcentaje')->nullable();
+            $table->decimal('prm_precio')->nullable();
+            $table->string('prm_tipo_checkout')->nullable();
+            $table->string('prm_alcance_tienda')->nullable();
+            $table->string('prm_aplica')->nullable();
+        });
+        Schema::create('stj_promociones_horario', function (Blueprint $table) {
+            $table->id('pho_id');
+            $table->string('pho_tipo');
+            $table->unsignedBigInteger('pho_promocion');
+            $table->dateTime('pho_inicio');
+            $table->dateTime('pho_fin');
+            $table->string('pho_estado');
+        });
+        Schema::create('stj_promociones_producto', function (Blueprint $table) {
+            $table->id('ppr_id');
+            $table->unsignedBigInteger('ppr_promocion');
+            $table->unsignedBigInteger('ppr_producto');
+            $table->decimal('ppr_descuento')->nullable();
+            $table->decimal('ppr_precio')->nullable();
+        });
+        Schema::create('stj_promociones_tienda', function (Blueprint $table) {
+            $table->id('prt_id');
+            $table->unsignedBigInteger('prt_promocion');
+            $table->unsignedBigInteger('prt_tienda');
+        });
         Schema::create('stj_productos_fotos', function (Blueprint $table) {
             $table->id('pfo_id');
             $table->unsignedBigInteger('pfo_producto');
@@ -119,11 +156,23 @@ class MobileProductEndpointTest extends TestCase
         foreach ([100, 101, 102, 200, 300] as $productId) {
             DB::table('stj_producto_pais')->insert([
                 'ppa_pais' => 1, 'ppa_producto' => $productId, 'ppa_estado' => 'ACTIVO',
-                'ppa_precio' => 20, 'ppa_descuento' => 10, 'ppa_origen_descuento' => 'WEB',
-                'ppa_promo_nombre' => 'Oferta', 'ppa_promo_logo' => null,
+                'ppa_precio' => 20, 'ppa_descuento' => 70, 'ppa_origen_descuento' => 'WEB',
+                'ppa_promo_nombre' => 'Dato legacy que no debe usarse', 'ppa_promo_logo' => null,
                 'ppa_tipo_descuento' => null, 'ppa_precio_tienda' => null,
             ]);
         }
+        DB::table('stj_promociones')->insert([
+            'prm_id' => 1, 'prm_pais' => 1, 'prm_origen' => 'APP',
+            'prm_nombre' => 'Oferta APP', 'prm_nombre_comercial' => '10% en la app',
+            'prm_modalidad' => 'PROGRAMADO', 'prm_tipo' => 'TODO', 'prm_estado' => 'EN-PROCESO',
+            'prm_tipo_promocion' => 'DESCUENTO', 'prm_restriccion' => null,
+            'prm_porcentaje' => 10, 'prm_precio' => null, 'prm_tipo_checkout' => 'TODO',
+            'prm_alcance_tienda' => 'TODAS', 'prm_aplica' => 'TODO',
+        ]);
+        DB::table('stj_promociones_horario')->insert([
+            'pho_id' => 1, 'pho_tipo' => 'NORMAL', 'pho_promocion' => 1,
+            'pho_inicio' => now()->subDay(), 'pho_fin' => now()->addDay(), 'pho_estado' => 'ACTIVO',
+        ]);
         DB::table('stj_productos')->where('pro_id', 100)->update(['pro_oc_personaje' => 'MICKEY', 'pro_oc_genero' => 'NIÑOS']);
         DB::table('stj_productos')->where('pro_id', 101)->update(['pro_oc_personaje' => 'MICKEY', 'pro_oc_genero' => 'BEBOS']);
         DB::table('stj_productos')->where('pro_id', 102)->update(['pro_oc_personaje' => 'MINNIE', 'pro_oc_genero' => 'NIÑAS']);
@@ -165,6 +214,9 @@ class MobileProductEndpointTest extends TestCase
             ->assertJsonPath('records.0.sku', 'SKU-1')
             ->assertJsonPath('records.0.precio', '20.00')
             ->assertJsonPath('records.0.precioCD', '18.00')
+            ->assertJsonPath('records.0.descuento', 10)
+            ->assertJsonPath('records.0.origen', 'APP')
+            ->assertJsonPath('records.0.ppa_promo_nombre', '10% de descuento')
             ->assertJsonPath('records.0.availableSizes', ['4', '6'])
             ->assertJsonPath('existenciaTalla.1.existencia', 2);
     }
@@ -304,7 +356,7 @@ class MobileProductEndpointTest extends TestCase
             ->assertExactJson([
                 'id' => 100,
                 'nombre' => 'Vestido Rojo',
-                'preciov2' => '20.00',
+                'preciov2' => '18.00',
                 'descripcion' => 'Detalle<br/>-producto',
                 'Domicilio' => true,
                 'Tienda' => true,
