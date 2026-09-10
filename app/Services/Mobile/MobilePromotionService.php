@@ -23,7 +23,10 @@ class MobilePromotionService
             ->where(function ($query) {
                 $query->whereNull('asset.ast_idpromocion')
                     ->orWhere('asset.ast_idpromocion', 0)
-                    ->orWhere('promotion.prm_estado', 'EN-PROCESO');
+                    ->orWhere(function ($promotion) {
+                        $promotion->where('promotion.prm_estado', 'EN-PROCESO')
+                            ->whereIn('promotion.prm_origen', ['APP', 'TODO']);
+                    });
             })
             ->orderBy('asset.ast_orden')
             ->orderBy('asset.ast_id')

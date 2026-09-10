@@ -55,7 +55,7 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
     {
         DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_origen' => 'APP']);
         $availability = Mockery::mock(ProductListAvailabilityService::class);
-        $availability->shouldReceive('summarize')->twice()->andReturn([
+        $availability->shouldReceive('summarize')->once()->andReturn([
             'availabilityBySku' => [],
             'activeStoreCode' => null,
             'usedSource' => null,
@@ -76,8 +76,12 @@ class StorefrontPromotionReadIntegrationTest extends TestCase
 
         $this->assertSame(10, $mobile['products'][0]['promotion']['id']);
         $this->assertSame(75.0, $mobile['products'][0]['price']);
-        $this->assertNull($web['products'][0]['promotion']);
-        $this->assertSame(100.0, $web['products'][0]['price']);
+        $this->assertNull($web);
+
+        $this->withoutMiddleware(ResolveStorefrontVisitor::class)
+            ->getJson('/api/storefront/promotion/sv/10')
+            ->assertNotFound()
+            ->assertJsonPath('message', 'La promocion no existe o no esta activa para el pais seleccionado.');
     }
 
     public function test_mobile_promotion_endpoint_preserves_the_complete_landing_contract(): void

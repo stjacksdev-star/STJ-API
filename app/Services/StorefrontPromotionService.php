@@ -27,6 +27,7 @@ class StorefrontPromotionService
             ->join('stj_promociones_horario as h', 'h.pho_promocion', '=', 'p.prm_id')
             ->whereRaw('UPPER(c.pai_codigo) = ?', [$countryCode])
             ->where('p.prm_estado', 'EN-PROCESO')
+            ->whereIn('p.prm_origen', ['WEB', 'TODO'])
             ->where('h.pho_tipo', 'NORMAL')
             ->where('h.pho_inicio', '<=', $now)
             ->where('h.pho_fin', '>=', $now)

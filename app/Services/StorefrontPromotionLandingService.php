@@ -21,11 +21,14 @@ class StorefrontPromotionLandingService
     public function find(string $countryCode, int $promotionId, array $filters = []): ?array
     {
         $now = Carbon::now(self::TIMEZONE)->format('Y-m-d H:i:s');
+        $channel = strtoupper(trim((string) ($filters['channel'] ?? 'WEB')));
+        $channel = in_array($channel, ['APP', 'IOS', 'ANDROID'], true) ? 'APP' : 'WEB';
         $promotion = DB::table('stj_promociones as promotion')
             ->join('stj_paises as country', 'country.pai_id', '=', 'promotion.prm_pais')
             ->join('stj_promociones_horario as schedule', 'schedule.pho_promocion', '=', 'promotion.prm_id')
             ->where('promotion.prm_id', $promotionId)
             ->whereRaw('UPPER(country.pai_codigo) = ?', [strtoupper($countryCode)])
+            ->whereIn('promotion.prm_origen', [$channel, 'TODO'])
             ->where('promotion.prm_estado', 'EN-PROCESO')
             ->where('schedule.pho_tipo', 'NORMAL')
             ->where('schedule.pho_inicio', '<=', $now)
@@ -145,9 +148,12 @@ class StorefrontPromotionLandingService
                 $resolved = $resolvedByProduct->get((int) $product->pro_id);
                 $promotion = $resolved['promotion'] ?? null;
                 $finalPrice = (float) ($resolved['finalTotal'] ?? $regularPrice);
-                $discount = $regularPrice > 0 && $finalPrice < $regularPrice
-                    ? round((($regularPrice - $finalPrice) / $regularPrice) * 100, 2)
-                    : null;
+                $configuredDiscount = $promotion['discountPercentage'] ?? null;
+                $discount = $configuredDiscount !== null
+                    ? round((float) $configuredDiscount)
+                    : ($regularPrice > 0 && $finalPrice < $regularPrice
+                        ? round((($regularPrice - $finalPrice) / $regularPrice) * 100)
+                        : null);
                 $category = trim((string) ($product->cat_nombre ?: 'Promocion'));
                 $description = trim((string) $product->pro_descripcion)
                     ?: trim((string) ($product->sca_nombre ?: "Categoria {$category}"));

@@ -978,11 +978,16 @@ class MobileProductService
 
     private function resolvedDiscountPercentage(?array $commercial): float
     {
+        $configured = $commercial['promotion']['discountPercentage'] ?? null;
+        if ($configured !== null) {
+            return round((float) $configured);
+        }
+
         $base = (float) ($commercial['baseTotal'] ?? 0);
         $discount = (float) ($commercial['discount'] ?? 0);
 
         return $base > 0 && $discount > 0
-            ? round(($discount / $base) * 100, 2)
+            ? round(($discount / $base) * 100)
             : 0.0;
     }
 }
