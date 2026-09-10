@@ -2,11 +2,11 @@
 
 namespace App\Services;
 
-use App\Support\StorefrontProductExclusions;
 use App\Models\StorefrontCart;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Support\StorefrontImageUrl;
+use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -227,7 +227,7 @@ class StorefrontRecommendationService
         StorefrontProductExclusions::apply($query, 'p');
 
         return $query
-            ->select(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_categoria', 'p.pro_coleccion', 'p.pro_marca', 'p.pro_personaje', 'p.pro_oc_personaje', 'p.pro_oc_licencia', 'p.pro_oc_genero', 'p.pro_tallas', 'p.pro_thumbs', 'p.pro_registro', 'pp.ppa_precio', 'pp.ppa_precio_talla', 'pp.ppa_descuento', 'pp.ppa_es_popular', 'c.cat_nombre'])
+            ->select(['p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_categoria', 'p.pro_coleccion', 'p.pro_marca', 'p.pro_personaje', 'p.pro_oc_personaje', 'p.pro_oc_licencia', 'p.pro_oc_genero', 'p.pro_tallas', 'p.pro_thumbs', 'p.pro_registro', 'pp.ppa_precio', 'pp.ppa_precio_talla', 'pp.ppa_es_popular', 'c.cat_nombre'])
             ->selectRaw("CASE WHEN pp.ppa_precio_talla = 'SI' THEN COALESCE((SELECT MIN(pta.pta_precio) FROM stj_producto_talla pta WHERE pta.pta_pais = pp.ppa_pais AND pta.pta_producto = p.pro_id AND pta.pta_precio > 0), pp.ppa_precio) ELSE pp.ppa_precio END AS display_price");
     }
 

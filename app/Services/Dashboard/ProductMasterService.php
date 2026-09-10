@@ -3,10 +3,10 @@
 namespace App\Services\Dashboard;
 
 use Illuminate\Http\UploadedFile;
-use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
@@ -15,7 +15,9 @@ use Throwable;
 class ProductMasterService
 {
     private const MAX_PHOTO_IMPORT_ROWS = 30;
+
     private const PHOTO_IMPORT_TIMEOUT_SECONDS = 900;
+
     private const PHOTO_DOWNLOAD_TIMEOUT_SECONDS = 90;
 
     private const PRODUCT_COLUMNS = [
@@ -130,6 +132,7 @@ class ProductMasterService
 
                 if ($data['codigo'] === '') {
                     $summary['skipped']++;
+
                     continue;
                 }
 
@@ -141,6 +144,7 @@ class ProductMasterService
                         'error',
                         "Marca no permitida: {$data['marca']}. Valores validos: ST JACKS, BUNGEE, BASICS, BASIKOS, FITONE, JACK & CO.",
                     );
+
                     continue;
                 }
 
@@ -149,6 +153,7 @@ class ProductMasterService
                 if (! $category) {
                     $summary['failed']++;
                     $log[] = $this->rowLog($row, $data['codigo'], 'error', "No existe la categoria {$data['categoria']}.");
+
                     continue;
                 }
 
@@ -157,6 +162,7 @@ class ProductMasterService
                 if (! $subcategory) {
                     $summary['failed']++;
                     $log[] = $this->rowLog($row, $data['codigo'], 'error', "No existe la subcategoria {$data['subcategoria']} para {$data['categoria']}.");
+
                     continue;
                 }
 
@@ -328,10 +334,7 @@ class ProductMasterService
                 'pp.ppa_leyenda',
                 'pp.ppa_precio_talla',
                 'pp.ppa_precio',
-                'pp.ppa_precio_tienda',
                 'pp.ppa_precio_domicilio',
-                'pp.ppa_descuento',
-                'pp.ppa_promo_nombre',
                 'pp.ppa_es_popular',
                 'country.pai_id',
                 'country.pai_codigo',
@@ -352,10 +355,7 @@ class ProductMasterService
                 'legend' => $row->ppa_leyenda,
                 'priceBySize' => $row->ppa_precio_talla,
                 'price' => $row->ppa_precio !== null ? (float) $row->ppa_precio : null,
-                'storePrice' => $row->ppa_precio_tienda !== null ? (float) $row->ppa_precio_tienda : null,
                 'deliveryPrice' => $row->ppa_precio_domicilio !== null ? (float) $row->ppa_precio_domicilio : null,
-                'discount' => $row->ppa_descuento !== null ? (float) $row->ppa_descuento : null,
-                'promoName' => $row->ppa_promo_nombre,
                 'isPopular' => (bool) $row->ppa_es_popular,
             ])
             ->values()
@@ -405,12 +405,14 @@ class ProductMasterService
 
                 if ($data['codigo'] === '' && $data['url'] === '') {
                     $summary['skipped']++;
+
                     continue;
                 }
 
                 if ($data['codigo'] === '' || $data['orden'] < 1 || $data['url'] === '') {
                     $summary['failed']++;
                     $log[] = $this->rowLog($row, $data['codigo'], 'error', 'Debe indicar codigo, orden y url.');
+
                     continue;
                 }
 
@@ -422,6 +424,7 @@ class ProductMasterService
                 if (! $product) {
                     $summary['failed']++;
                     $log[] = $this->rowLog($row, $data['codigo'], 'error', 'No existe el producto.');
+
                     continue;
                 }
 
@@ -535,7 +538,7 @@ class ProductMasterService
     }
 
     /**
-     * @param array<string, string> $data
+     * @param  array<string, string>  $data
      * @return array<string, mixed>
      */
     private function productPayload(array $data, int $categoryId, int $subcategoryId): array

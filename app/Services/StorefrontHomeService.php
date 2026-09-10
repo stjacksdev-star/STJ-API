@@ -11,8 +11,7 @@ class StorefrontHomeService
 
     public function __construct(
         private readonly StorefrontBestSellerRankingService $bestSellerRankings,
-    ) {
-    }
+    ) {}
 
     public function forCountry(string $country): array
     {
@@ -85,26 +84,6 @@ class StorefrontHomeService
             ->all();
     }
 
-    private function mapBestSellers(array $items): array
-    {
-        return collect($items)
-            ->map(fn (array $item) => [
-                'id' => (int) Arr::get($item, 'pro_id'),
-                'sku' => trim((string) Arr::get($item, 'pro_codigo', '')),
-                'name' => trim((string) Arr::get($item, 'pro_nombre', '')),
-                'brand' => trim((string) Arr::get($item, 'pro_marca', '')),
-                'category' => trim((string) Arr::get($item, 'cat_nombre', '')),
-                'subcategory' => trim((string) Arr::get($item, 'sca_nombre', '')),
-                'price' => (float) Arr::get($item, 'ppa_precio', 0),
-                'promoName' => trim((string) Arr::get($item, 'ppa_promo_nombre', '')),
-                'isPopular' => (string) Arr::get($item, 'ppa_es_popular') === '1',
-                'imageUrl' => $this->productImageUrl(Arr::get($item, 'pro_thumbs')),
-            ])
-            ->filter(fn (array $item) => $item['id'] > 0 && $item['name'] !== '')
-            ->values()
-            ->all();
-    }
-
     private function assetUrl(?string $path): ?string
     {
         if (! $path) {
@@ -116,15 +95,6 @@ class StorefrontHomeService
         }
 
         return StorefrontImageUrl::asset($path);
-    }
-
-    private function productImageUrl(?string $filename): ?string
-    {
-        if (! $filename) {
-            return null;
-        }
-
-        return StorefrontImageUrl::image($filename, 'p400');
     }
 
     private function linkUrl(?string $path): ?string

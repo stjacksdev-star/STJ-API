@@ -57,12 +57,6 @@ class MobileProductEndpointTest extends TestCase
             $table->unsignedBigInteger('ppa_producto');
             $table->string('ppa_estado');
             $table->decimal('ppa_precio');
-            $table->decimal('ppa_descuento')->nullable();
-            $table->string('ppa_origen_descuento')->nullable();
-            $table->string('ppa_promo_nombre')->nullable();
-            $table->string('ppa_promo_logo')->nullable();
-            $table->string('ppa_tipo_descuento')->nullable();
-            $table->decimal('ppa_precio_tienda')->nullable();
         });
         Schema::create('stj_promociones', function (Blueprint $table) {
             $table->id('prm_id');
@@ -156,9 +150,7 @@ class MobileProductEndpointTest extends TestCase
         foreach ([100, 101, 102, 200, 300] as $productId) {
             DB::table('stj_producto_pais')->insert([
                 'ppa_pais' => 1, 'ppa_producto' => $productId, 'ppa_estado' => 'ACTIVO',
-                'ppa_precio' => 20, 'ppa_descuento' => 70, 'ppa_origen_descuento' => 'WEB',
-                'ppa_promo_nombre' => 'Dato legacy que no debe usarse', 'ppa_promo_logo' => null,
-                'ppa_tipo_descuento' => null, 'ppa_precio_tienda' => null,
+                'ppa_precio' => 20,
             ]);
         }
         DB::table('stj_promociones')->insert([

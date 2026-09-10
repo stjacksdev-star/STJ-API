@@ -625,7 +625,7 @@ class PromotionService
             $query->update([
                 'ppa_origen_descuento' => $restriction === '2x1' ? 'TODO' : $origin,
                 'ppa_tipo_descuento' => $restriction === '2x1' ? 'TODO' : 'PRECIO_TODO',
-                'ppa_descuento' => $restriction === '2x1' ? null : DB::raw('pp.ppa_descuento'),
+                'ppa_descuento' => null,
                 'ppa_promo_nombre' => $name,
             ]);
         }
