@@ -84,9 +84,13 @@ class StorefrontOrderConfirmationEmailService
     private function customerContent(object $order, $items): string
     {
         $name = e(trim($order->ped_nombres.' '.$order->ped_apellidos));
-        $destination = strtoupper((string) $order->ped_checkout) === 'DOMICILIO'
+        $isHomeDelivery = strtoupper((string) $order->ped_checkout) === 'DOMICILIO';
+        $destination = $isHomeDelivery
             ? e(implode(', ', array_filter([$order->dir_direccion, $order->dir_municipio_txt, $order->dir_departamento_txt])))
             : 'Retiro en tienda: '.e((string) $order->tie_nombre);
+        $deliveryNotice = $isHomeDelivery
+            ? $this->infoRow('Entrega', 'Entrega en 7 días hábiles')
+            : '';
         $currency = $this->currency((string) $order->pai_codigo);
         $rows = $items->map(function ($item) use ($currency) {
             $price = (float) $item->car_precio * (1 - ((float) $item->car_descuento_final / 100));
@@ -107,6 +111,7 @@ class StorefrontOrderConfirmationEmailService
             .'<table role="presentation" width="100%" style="margin:22px 0;border-collapse:collapse;font-size:14px">'
             .$this->infoRow('Comprobante', e((string) $order->ppa_ref))
             .$this->infoRow('Destino', $destination)
+            .$deliveryNotice
             .$this->infoRow('Método de pago', $payment)
             .$this->infoRow('Teléfono', e($this->phone($order)))
             .'</table><table role="presentation" width="100%" style="margin:18px 0;border-collapse:collapse;font-size:14px;border-top:1px solid #e5e7eb">'
