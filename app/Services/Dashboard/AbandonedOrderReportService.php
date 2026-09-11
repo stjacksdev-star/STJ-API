@@ -39,7 +39,10 @@ class AbandonedOrderReportService
                     ->orWhereRaw("CONCAT(COALESCE(orders.ped_nombres, ''), ' ', COALESCE(orders.ped_apellidos, '')) LIKE ?", [$term]));
             });
 
-        $summaryRows = (clone $base)->selectRaw("COALESCE(payment.ppa_estado, 'SIN_PAGO') as status, COUNT(*) as total")->groupByRaw("COALESCE(payment.ppa_estado, 'SIN_PAGO')")->pluck('total', 'status');
+        $summaryRows = (clone $base)
+            ->selectRaw("COALESCE(payment.ppa_estado, 'SIN_PAGO') as status, COUNT(*) as total")
+            ->groupBy('payment.ppa_estado')
+            ->pluck('total', 'status');
         $page = (clone $base)->select([
             'orders.ped_id as orderId', 'orders.ped_fecha as createdAt', 'orders.ped_estatus as orderStatus', 'orders.ped_checkout as checkout',
             'orders.ped_origen as origin', 'orders.ped_nombres as firstName', 'orders.ped_apellidos as lastName', 'orders.ped_email as email',
