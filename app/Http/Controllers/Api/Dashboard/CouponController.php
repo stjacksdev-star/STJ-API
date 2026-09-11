@@ -76,7 +76,7 @@ class CouponController extends BaseController
         abort_unless($request->user()?->tokenCan('dashboard'), 403);
         $data = $request->validate([
             'country' => ['required', 'string', 'max:3'], 'name' => ['required', 'string', 'max:100'],
-            'commercialName' => ['nullable', 'string', 'max:250'], 'channel' => ['required', Rule::in(['TODO', 'WEB'])],
+            'commercialName' => ['nullable', 'string', 'max:250'], 'channel' => ['required', Rule::in(['TODO', 'WEB', 'APP'])],
             'type' => ['required', Rule::in(['PRECIO', 'DESCUENTO', 'ENVIO_GRATIS'])],
             'checkout' => ['required', Rule::in(['TODO', 'DOMICILIO', 'TIENDA'])],
             'generic' => ['required', Rule::in(['SI', 'NO'])], 'code' => ['nullable', 'required_if:generic,SI', 'string', 'max:100'],

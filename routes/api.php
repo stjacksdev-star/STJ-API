@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CheckoutEventController;
 use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
+use App\Http\Controllers\Api\Dashboard\AbandonedOrderReportController as DashboardAbandonedOrderReportController;
 use App\Http\Controllers\Api\Dashboard\AppointmentController as DashboardAppointmentController;
 use App\Http\Controllers\Api\Dashboard\AssetPublicationController as DashboardAssetPublicationController;
 use App\Http\Controllers\Api\Dashboard\ClaimController as DashboardClaimController;
@@ -388,6 +389,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
         Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);
         Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
+        Route::get('/orders/abandoned', DashboardAbandonedOrderReportController::class);
         Route::get('/orders/refunds', [DashboardOrderReferenceController::class, 'refunds']);
         Route::get('/orders/product', [DashboardOrderReferenceController::class, 'product']);
         Route::post('/orders/data', [DashboardOrderReferenceController::class, 'updateData']);
