@@ -57,6 +57,17 @@ class StorefrontCouponResolverTest extends TestCase
         $this->assertCount(2, $result['lines'][0]['coupons']);
     }
 
+    public function test_commercial_percentage_preserves_coupon_value_after_cent_rounding(): void
+    {
+        $this->coupon(1, [], ['cup_descuento' => 50]);
+
+        $result = $this->resolve([1], [['productId' => 100, 'quantity' => 1, 'unitPrice' => 14.95]]);
+
+        $this->assertSame(50.033445, $result['lines'][0]['effectiveDiscountPercentage']);
+        $this->assertSame(50.0, $result['lines'][0]['commercialDiscountPercentage']);
+        $this->assertSame(50.0, $result['lines'][0]['coupons'][0]['percentage']);
+    }
+
     public function test_regular_coupons_accumulate_only_on_lines_without_promotions(): void
     {
         $this->coupon(1, ['che_aplica_promo' => 'REGULAR'], ['cup_descuento' => 20]);

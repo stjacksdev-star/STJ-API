@@ -65,6 +65,9 @@ class StorefrontCouponResolver
                         'code' => $coupon['code'],
                         'type' => $coupon['type'],
                         'discount' => $this->decimal($lineBenefit),
+                        'percentage' => $coupon['type'] === 'DESCUENTO'
+                            ? $this->couponPercentage($coupon, $productRules->get($line['productId']))
+                            : null,
                     ];
                     $lines[$key] = $line;
                     $benefit += $lineBenefit;
@@ -80,6 +83,15 @@ class StorefrontCouponResolver
             $effectiveDiscount = $line['baseTotalCents'] > 0
                 ? (($line['baseTotalCents'] - $line['currentTotalCents']) * 100) / $line['baseTotalCents']
                 : 0;
+            $percentageCoupons = collect($line['coupons'])
+                ->filter(fn (array $coupon) => $coupon['type'] === 'DESCUENTO' && $coupon['percentage'] !== null);
+            $configuredCouponPercentage = $percentageCoupons->sum('percentage');
+            $commercialDiscount = $line['promotionDiscountCents'] === 0
+                && $percentageCoupons->count() === count($line['coupons'])
+                && $percentageCoupons->isNotEmpty()
+                && $configuredCouponPercentage < 100
+                    ? $configuredCouponPercentage
+                    : $effectiveDiscount;
 
             return [
                 'key' => $line['key'],
@@ -90,6 +102,7 @@ class StorefrontCouponResolver
                 'promotionDiscount' => $this->decimal($line['promotionDiscountCents']),
                 'couponDiscount' => $this->decimal($line['couponDiscountCents']),
                 'effectiveDiscountPercentage' => round($effectiveDiscount, 6),
+                'commercialDiscountPercentage' => round($commercialDiscount, 6),
                 'finalTotal' => $this->decimal($line['currentTotalCents']),
                 'coupons' => $line['coupons'],
             ];
@@ -307,7 +320,7 @@ class StorefrontCouponResolver
         // Every line must retain at least one cent, which guarantees an effective discount below 100%.
         $maximumBenefit = max(0, $line['currentTotalCents'] - 1);
         if ($coupon['type'] === 'DESCUENTO') {
-            $percentage = (float) ($productRule?->cpr_descuento ?? $coupon['detailDiscount'] ?? $coupon['headerDiscount'] ?? 0);
+            $percentage = $this->couponPercentage($coupon, $productRule);
             if ($percentage <= 0 || $percentage >= 100) {
                 return 0;
             }
@@ -324,6 +337,11 @@ class StorefrontCouponResolver
         $targetTotal = $targetUnit * $line['quantity'];
 
         return min($maximumBenefit, max(0, $line['currentTotalCents'] - $targetTotal));
+    }
+
+    private function couponPercentage(array $coupon, ?object $productRule): float
+    {
+        return (float) ($productRule?->cpr_descuento ?? $coupon['detailDiscount'] ?? $coupon['headerDiscount'] ?? 0);
     }
 
     /** @return array<string, mixed> */

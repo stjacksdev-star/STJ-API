@@ -251,14 +251,14 @@ class StorefrontOrderService
                         if (! $couponLine) {
                             return $item;
                         }
-                        $promotionDiscount = $this->cents($item['discount']);
-                        $couponDiscount = $this->cents((string) $couponLine['couponDiscount']);
                         $finalTotal = (string) $couponLine['finalTotal'];
+                        $totalDiscount = max(0, $this->cents($item['baseTotal']) - $this->cents($finalTotal));
 
                         return [
                             ...$item,
-                            'discount' => $this->decimal($promotionDiscount + $couponDiscount),
+                            'discount' => $this->decimal($totalDiscount),
                             'couponDiscount' => (string) $couponLine['couponDiscount'],
+                            'discountPercentage' => (float) ($couponLine['commercialDiscountPercentage'] ?? $couponLine['effectiveDiscountPercentage'] ?? 0),
                             'finalTotal' => $finalTotal,
                             'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
                             'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
@@ -426,9 +426,11 @@ class StorefrontOrderService
             $pagoId = DB::table('stj_pedidos_pago')->insertGetId($paymentRow);
 
             $detailRows = collect($items)->map(function (array $item) use ($country, $checkoutType, $payload, $paymentRef, $now) {
-                $effectivePercentage = $this->cents($item['baseTotal']) > 0
-                    ? round($this->cents($item['discount']) * 100 / $this->cents($item['baseTotal']), 2)
-                    : 0;
+                $effectivePercentage = array_key_exists('discountPercentage', $item)
+                    ? round((float) $item['discountPercentage'], 2)
+                    : ($this->cents($item['baseTotal']) > 0
+                        ? round($this->cents($item['discount']) * 100 / $this->cents($item['baseTotal']), 2)
+                        : 0);
                 $promotion = $item['promotion'];
 
                 return [
