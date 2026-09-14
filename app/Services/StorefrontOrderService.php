@@ -78,6 +78,9 @@ class StorefrontOrderService
             if ($cart->car_tipo === 'DOMICILIO' && trim((string) data_get($payload, 'delivery.addressLine1')) === '') {
                 throw ValidationException::withMessages(['delivery.addressLine1' => 'La direccion es obligatoria para entrega a domicilio.']);
             }
+            if ($cart->car_tipo === 'DOMICILIO' && trim((string) data_get($payload, 'delivery.reference')) === '') {
+                throw ValidationException::withMessages(['delivery.reference' => 'La referencia es obligatoria para entrega a domicilio.']);
+            }
             $paymentType = strtoupper((string) ($payload['payment_type'] ?? 'TARJETA'));
             if (! in_array($paymentType, ['TARJETA', 'EFECTIVO'], true)) {
                 throw ValidationException::withMessages(['payment_type' => 'El metodo de pago no es valido.']);
