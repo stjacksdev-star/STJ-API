@@ -2339,6 +2339,8 @@ class OrderReferenceService
         $hasSubstitute = filled($product->car_estilo_final)
             && ((string) $product->pro_codigo !== (string) $product->car_estilo_final
                 || (string) $product->car_talla !== (string) $product->car_talla_final);
+        $chargedSubtotal = $this->subtotalAfterPercentageDiscount($price, $quantity, $discount);
+        $billedSubtotal = $this->subtotalAfterPercentageDiscount($price, $billedQuantity ?? 0, $billedDiscount);
 
         return [
             'id' => (int) $product->car_id,
@@ -2352,8 +2354,8 @@ class OrderReferenceService
             'price' => $price,
             'discount' => $discount,
             'billedDiscount' => $billedDiscount,
-            'chargedSubtotal' => $quantity * ($price * (1 - ($discount / 100))),
-            'billedSubtotal' => ($billedQuantity ?? 0) * ($price * (1 - ($billedDiscount / 100))),
+            'chargedSubtotal' => $chargedSubtotal,
+            'billedSubtotal' => $billedSubtotal,
             'promotionId' => $product->car_promocion_id !== null ? (int) $product->car_promocion_id : null,
             'promotion' => (string) ($product->car_promocion ?? ''),
             'substitute' => [
@@ -2363,6 +2365,14 @@ class OrderReferenceService
                 'size' => (string) ($product->car_talla_final ?? ''),
             ],
         ];
+    }
+
+    private function subtotalAfterPercentageDiscount(float $unitPrice, int $quantity, float $percentage): float
+    {
+        $base = round($unitPrice * $quantity, 2);
+        $discount = round($base * $percentage / 100, 2, PHP_ROUND_HALF_UP);
+
+        return round(max(0, $base - $discount), 2);
     }
 
     /**
