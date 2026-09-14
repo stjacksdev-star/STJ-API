@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Services\Mail\Smtp2GoMailer;
+use App\Services\Mail\StorefrontMailTemplate;
 use App\Support\CouponProductScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -11,7 +12,11 @@ use Throwable;
 
 class CouponAudienceEmailService
 {
-    public function __construct(private readonly Smtp2GoMailer $mailer, private readonly CouponEmailConditions $conditions) {}
+    public function __construct(
+        private readonly Smtp2GoMailer $mailer,
+        private readonly CouponEmailConditions $conditions,
+        private readonly StorefrontMailTemplate $mailTemplate,
+    ) {}
 
     /** @return array{pending:int,sent:int,failed:int,skipped:int} */
     public function sendPending(int $limit = 25): array
@@ -22,7 +27,7 @@ class CouponAudienceEmailService
             ->leftJoin('stj_paises as p', 'p.pai_id', '=', 'h.che_pais')
             ->leftJoin('stj_categorias as category', 'category.cat_id', '=', 'h.che_genero')
             ->leftJoin('stj_coleccion as collection', 'collection.col_id', '=', 'h.che_coleccion')
-            ->whereIn('h.che_para', ['VIP', 'PLA'])
+            ->whereIn('h.che_para', ['VIP', 'PLA', 'CUMPLE'])
             ->where('h.che_estado', 'ACTIVO')->where('c.cup_estado', 'ACTIVO')
             ->where('c.cup_correo_enviado', 0)->whereNotNull('c.cup_correo')->where('c.cup_correo', '<>', '')
             ->where(fn ($q) => $q->whereNull('h.che_inicio')->orWhere('h.che_inicio', '<=', now()))
@@ -33,7 +38,7 @@ class CouponAudienceEmailService
                     ->whereRaw('LOWER(TRIM(bounced.correo)) = LOWER(TRIM(c.cup_correo))');
             }))
             ->orderBy('c.cup_id')->limit(max(1, min($limit, 25)))
-            ->get(['c.cup_id', 'c.cup_codigo', 'c.cup_correo', 'c.cup_descuento', 'c.cup_monto', 'h.che_id as headerId', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_descuento', 'h.che_monto', 'h.che_final', 'h.che_aplica as channel', 'h.che_checkout as checkout', 'h.che_aplica_promo as promotionRule', 'h.che_aplica_monto_minimo as minimumEnabled', 'h.che_monto_minimo as minimumAmount', 'h.che_solo_primera_compra as firstPurchaseOnly', 'h.che_tipo_productos as productScope', 'h.che_multiple as multiple', 'h.che_coleccion as collectionId', 'category.cat_nombre as categoryName', 'collection.col_nombre as collectionName', 'p.pai_codigo']);
+            ->get(['c.cup_id', 'c.cup_codigo', 'c.cup_correo', 'c.cup_descuento', 'c.cup_monto', 'h.che_id as headerId', 'h.che_nombre', 'h.che_nombre_comercial', 'h.che_tipo', 'h.che_descuento', 'h.che_monto', 'h.che_final', 'h.che_para as audience', 'h.che_aplica as channel', 'h.che_checkout as checkout', 'h.che_aplica_promo as promotionRule', 'h.che_aplica_monto_minimo as minimumEnabled', 'h.che_monto_minimo as minimumAmount', 'h.che_solo_primera_compra as firstPurchaseOnly', 'h.che_tipo_productos as productScope', 'h.che_multiple as multiple', 'h.che_coleccion as collectionId', 'category.cat_nombre as categoryName', 'collection.col_nombre as collectionName', 'p.pai_codigo']);
 
         $summary['pending'] = $rows->count();
         foreach ($rows as $coupon) {
@@ -42,7 +47,10 @@ class CouponAudienceEmailService
             if ($claimed !== 1) { $summary['skipped']++; continue; }
 
             try {
-                $this->mailer->sendHtml((string) $coupon->cup_correo, 'Tienes un cupón disponible en St. Jack\'s', $this->html($coupon));
+                $birthday = strtoupper((string) $coupon->audience) === 'CUMPLE';
+                $subject = $birthday ? '🎉 ¡Feliz cumpleaños! 🎁 Tu cupón de regalo' : 'Tienes un cupón disponible en St. Jack\'s';
+                $html = $birthday ? $this->birthdayHtml($coupon) : $this->html($coupon);
+                $this->mailer->sendHtml((string) $coupon->cup_correo, $subject, $html);
                 DB::table('stj_cupones')->where('cup_id', $coupon->cup_id)->where('cup_correo_enviado', 2)->update(['cup_correo_enviado' => 1]);
                 $summary['sent']++;
             } catch (Throwable $exception) {
@@ -85,6 +93,29 @@ class CouponAudienceEmailService
     }
 
     private function number(mixed $value): string { return rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.'); }
+
+    private function birthdayHtml(object $coupon): string
+    {
+        $customerName = DB::table('stj_usuarios')
+            ->whereRaw('LOWER(TRIM(COALESCE(usu_correo, usu_usuario))) = ?', [strtolower(trim((string) $coupon->cup_correo))])
+            ->value('usu_nombre');
+        $name = htmlspecialchars(ucwords(mb_strtolower(trim((string) ($customerName ?: 'cliente')))), ENT_QUOTES, 'UTF-8');
+        $code = htmlspecialchars((string) $coupon->cup_codigo, ENT_QUOTES, 'UTF-8');
+        $discount = $this->number($coupon->cup_descuento ?? $coupon->che_descuento);
+        $countryCode = strtolower((string) $coupon->pai_codigo);
+        $shopUrl = htmlspecialchars($this->localizedStorefrontUrl($countryCode), ENT_QUOTES, 'UTF-8');
+        $content = '<h2 style="margin:0 0 18px;text-align:center;color:#0070c9">🎉 ¡Feliz cumpleaños, '.$name.'!</h2>'
+            .'<p style="font-size:16px;line-height:1.6">Hoy es un día especial y queremos celebrarlo contigo 🎂</p>'
+            .'<p style="font-size:16px;line-height:1.6">Te regalamos un cupón de <strong>'.$discount.' % de descuento</strong> para tu próxima compra.</p>'
+            .'<div style="margin:24px 0;padding:22px;background:#eef8ff;border:2px dashed #0070c9;border-radius:8px;text-align:center">'
+            .'<div style="font-size:28px;font-weight:bold;color:#ED174C">'.$code.'</div>'
+            .'<p style="margin:12px 0 0;font-size:14px;color:#475569">Válido hasta '.date('d/m/Y', strtotime((string) $coupon->che_final)).'</p></div>'
+            .$this->conditions->html($coupon)
+            .'<p style="text-align:center;margin:26px 0 10px"><a href="'.$shopUrl.'" style="display:inline-block;background:#ED174C;color:#fff;padding:13px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Usar mi cupón</a></p>'
+            .'<p style="margin-top:28px;font-size:16px">Gracias por ser parte de nuestra comunidad 🥳</p>';
+
+        return $this->mailTemplate->render($content, $countryCode);
+    }
 
     private function localizedStorefrontUrl(string $countryCode): string
     {

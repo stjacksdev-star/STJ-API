@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use App\Services\AbandonedCartReportService;
+use App\Services\BirthdayCouponService;
 use App\Services\CouponAudienceEmailService;
 use App\Services\Dashboard\AssetPublicationService;
 use App\Services\PushNotificationService;
@@ -121,12 +122,14 @@ Artisan::command('assets:put', function (AssetPublicationService $assets) {
     return self::SUCCESS;
 })->purpose('Activa/finaliza assets y publica storage/app/storefront/assets.json');
 
-Artisan::command('coupons:send-pending-emails {--limit=25 : Máximo de correos por ejecución (límite duro: 25)}', function (CouponAudienceEmailService $emails) {
+Artisan::command('coupons:send-pending-emails {--limit=25 : Máximo de correos por ejecución (límite duro: 25)}', function (BirthdayCouponService $birthdays, CouponAudienceEmailService $emails) {
+    $birthdaySummary = $birthdays->generateToday();
     $summary = $emails->sendPending((int) $this->option('limit'));
+    $this->info("Cumpleaños: {$birthdaySummary['generated']} generados | {$birthdaySummary['duplicates']} existentes | {$birthdaySummary['withoutTemplate']} sin plantilla");
     $this->info("Pendientes: {$summary['pending']} | Enviados: {$summary['sent']} | Fallidos: {$summary['failed']} | Omitidos: {$summary['skipped']}");
 
     return $summary['failed'] > 0 ? self::FAILURE : self::SUCCESS;
-})->purpose('Envía correos pendientes de cupones personales VIP y cargados por archivo');
+})->purpose('Genera cupones de cumpleaños y envía correos pendientes de cupones personales');
 
 Artisan::command('customers:update-vip', function (VipCustomerService $customers) {
     $summary = $customers->refresh();

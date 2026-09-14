@@ -20,6 +20,7 @@ class CouponAudienceEmailServiceTest extends TestCase
         Schema::create('stj_coleccion', fn (Blueprint $t) => [$t->id('col_id'), $t->string('col_nombre')]);
         Schema::create('stj_cupones', function (Blueprint $t) { $t->id('cup_id'); $t->unsignedBigInteger('cup_header'); $t->string('cup_codigo'); $t->string('cup_correo')->nullable(); $t->string('cup_estado'); $t->decimal('cup_descuento')->nullable(); $t->decimal('cup_monto')->nullable(); $t->unsignedTinyInteger('cup_correo_enviado')->default(0); });
         Schema::create('correos_rebotados', function (Blueprint $t) { $t->id(); $t->string('correo'); });
+        Schema::create('stj_usuarios', function (Blueprint $t) { $t->id('usu_id'); $t->string('usu_nombre'); $t->string('usu_usuario'); $t->string('usu_correo')->nullable(); });
         config()->set('services.smtp2go.url', 'https://smtp.test/send'); config()->set('services.smtp2go.key', 'key'); config()->set('services.smtp2go.sender', 'test@example.com');
         config()->set('services.fcm.web_home_url', 'http://localhost/stj-ecommerce/public/sv');
         DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV']);
@@ -44,6 +45,22 @@ class CouponAudienceEmailServiceTest extends TestCase
         $summary = app(CouponAudienceEmailService::class)->sendPending();
         $this->assertSame(1, $summary['failed']);
         $this->assertDatabaseHas('stj_cupones', ['cup_id' => 1, 'cup_correo_enviado' => 0]);
+    }
+
+    public function test_birthday_coupon_uses_the_shared_storefront_email_template(): void
+    {
+        config()->set('services.storefront.web_url', 'https://stjecommerce.stjacks.com/{country}');
+        DB::table('stj_cupones_header')->where('che_id', 1)->update(['che_para' => 'CUMPLE']);
+        DB::table('stj_usuarios')->insert(['usu_id' => 1, 'usu_nombre' => 'Ana', 'usu_usuario' => 'vip@example.com', 'usu_correo' => 'vip@example.com']);
+        Http::fake(['*' => Http::response(['data' => ['failed' => 0, 'succeeded' => 1]])]);
+
+        $summary = app(CouponAudienceEmailService::class)->sendPending();
+
+        $this->assertSame(1, $summary['sent']);
+        Http::assertSent(fn ($request) => str_contains($request['subject'], 'Feliz cumpleaños')
+            && str_contains($request['html_body'], 'header-stjonline.png')
+            && str_contains($request['html_body'], 'footer-stjonline.png')
+            && str_contains($request['html_body'], '¡Feliz cumpleaños, Ana!'));
     }
 
     public function test_bounced_addresses_are_excluded_before_the_batch_limit(): void
