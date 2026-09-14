@@ -11,6 +11,7 @@ class AssetPublicationService
         'CUPON',
         'LO-MAS-NUEVO',
         'BANNER',
+        'MODAL',
         'SLIDER',
     ];
 
@@ -49,7 +50,7 @@ class AssetPublicationService
                 'id' => (int) $country->pai_id,
                 'code' => strtoupper((string) $country->pai_codigo),
                 'name' => trim((string) $country->pai_nombre),
-                'assets' => $this->assetsByType((int) $country->pai_id),
+                'assets' => $this->assetsByType((int) $country->pai_id, $now),
             ];
         }
 
@@ -75,7 +76,7 @@ class AssetPublicationService
     /**
      * @return array<string, array<int, array<string, mixed>>>
      */
-    private function assetsByType(int $countryId): array
+    private function assetsByType(int $countryId, Carbon $now): array
     {
         $assets = [];
 
@@ -85,6 +86,8 @@ class AssetPublicationService
                 ->where('ast_estado', 'ACTIVO')
                 ->where('ast_pais', $countryId)
                 ->whereIn('ast_plataforma', ['TODO', 'WEB'])
+                ->where('ast_inicio', '<=', $now->toDateTimeString())
+                ->where('ast_fin', '>=', $now->toDateTimeString())
                 ->orderBy('ast_orden')
                 ->orderBy('ast_id')
                 ->get()

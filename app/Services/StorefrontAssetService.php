@@ -20,6 +20,7 @@ class StorefrontAssetService
             'banners' => $this->mapBanners($assets['banner'] ?? [], $country),
             'newArrivals' => $this->mapNewArrivals($assets['lo-mas-nuevo'] ?? [], $country),
             'coupons' => $this->mapCoupons($assets['cupon'] ?? [], $country),
+            'modals' => $this->mapModals($assets['modal'] ?? [], $country),
         ];
     }
 
@@ -132,6 +133,30 @@ class StorefrontAssetService
                 'collection' => $this->collectionLink($asset['link'] ?? null, $country),
                 'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
                 'order' => $asset['order'] ?? null,
+            ])
+            ->filter(fn (array $asset) => $asset['image'] || $asset['mobileImage'])
+            ->values()
+            ->all();
+    }
+
+    private function mapModals(array $assets, string $country): array
+    {
+        return collect($assets)
+            ->sortBy([
+                fn (array $asset) => (int) ($asset['order'] ?? 0),
+                fn (array $asset) => (int) ($asset['id'] ?? 0),
+            ])
+            ->map(fn (array $asset) => [
+                'id' => $asset['id'] ?? null,
+                'title' => $asset['title'] ?? null,
+                'image' => $this->assetUrl($asset['image'] ?? $asset['desktopImage'] ?? null),
+                'mobileImage' => $this->assetUrl($asset['mobileImage'] ?? null),
+                'href' => $this->linkUrl($asset['link'] ?? null),
+                'collection' => $this->collectionLink($asset['link'] ?? null, $country),
+                'promotion' => $this->promotionLink($asset['link'] ?? null, $country),
+                'order' => $asset['order'] ?? null,
+                'startAt' => $asset['startAt'] ?? null,
+                'endAt' => $asset['endAt'] ?? null,
             ])
             ->filter(fn (array $asset) => $asset['image'] || $asset['mobileImage'])
             ->values()
