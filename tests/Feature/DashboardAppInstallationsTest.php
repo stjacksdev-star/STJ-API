@@ -6,6 +6,7 @@ use App\Services\Dashboard\SalesKpiService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class DashboardAppInstallationsTest extends TestCase
@@ -55,5 +56,27 @@ class DashboardAppInstallationsTest extends TestCase
         $this->assertSame(1, $result['range']['rows'][0]['ios']);
         $this->assertSame(0, $result['range']['rows'][1]['android']);
         $this->assertSame(0, $result['range']['rows'][1]['ios']);
+    }
+
+    public function test_it_exports_daily_installations_and_platform_totals_to_excel(): void
+    {
+        $export = app(SalesKpiService::class)->exportAppInstallations(1, '2026-01-09', '2026-01-12');
+        $path = tempnam(sys_get_temp_dir(), 'stj-app-export-test-').'.xlsx';
+
+        try {
+            file_put_contents($path, $export['contents']);
+            $sheet = IOFactory::load($path)->getActiveSheet();
+
+            $this->assertSame('instalaciones-app-sv-2026-01-09-2026-01-12.xlsx', $export['filename']);
+            $this->assertEquals(['09/01/2026', 0, 0, 0], $sheet->rangeToArray('A6:D6', null, true, true, false)[0]);
+            $this->assertEquals(['10/01/2026', 1, 0, 1], $sheet->rangeToArray('A7:D7', null, true, true, false)[0]);
+            $this->assertEquals(['11/01/2026', 0, 1, 1], $sheet->rangeToArray('A8:D8', null, true, true, false)[0]);
+            $this->assertEquals(['12/01/2026', 0, 0, 0], $sheet->rangeToArray('A9:D9', null, true, true, false)[0]);
+            $this->assertEquals(['TOTAL', 1, 1, 2], $sheet->rangeToArray('A10:D10', null, true, true, false)[0]);
+        } finally {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
     }
 }

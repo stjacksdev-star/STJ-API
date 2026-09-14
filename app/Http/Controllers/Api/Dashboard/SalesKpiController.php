@@ -212,6 +212,23 @@ class SalesKpiController extends BaseController
         );
     }
 
+    public function appExport(Request $request)
+    {
+        abort_unless($request->user()?->tokenCan('dashboard'), 403);
+        $validated = $request->validate([
+            'country' => ['required', 'integer', Rule::exists('stj_paises', 'pai_id')],
+            'startDate' => ['required', 'date'],
+            'endDate' => ['required', 'date', 'after_or_equal:startDate'],
+        ]);
+        $export = $this->sales->exportAppInstallations((int) $validated['country'], $validated['startDate'], $validated['endDate']);
+
+        return response($export['contents'], 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$export['filename'].'"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
+    }
+
     public function orders(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {

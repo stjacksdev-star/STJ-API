@@ -5,6 +5,8 @@ namespace App\Services\Dashboard;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class SalesKpiService
 {
@@ -975,6 +977,74 @@ class SalesKpiService
                 'rows' => $weeklyRows,
             ],
         ];
+    }
+
+    /** @return array{filename:string,contents:string} */
+    public function exportAppInstallations(int $countryId, string $startDate, string $endDate): array
+    {
+        $report = $this->appInstallations(null, $countryId, $startDate, $endDate);
+        $start = Carbon::parse($report['range']['filters']['startDate'])->startOfDay();
+        $end = Carbon::parse($report['range']['filters']['endDate'])->endOfDay();
+        $dateExpression = DB::getDriverName() === 'sqlite' ? 'date(vis_primera_visita)' : 'DATE(vis_primera_visita)';
+        $counts = DB::table('stj_visitantes')
+            ->whereIn('vis_origen', ['APP-IOS', 'APP-ANDROID'])
+            ->where('vis_pais_id', $countryId)
+            ->whereBetween('vis_primera_visita', [$start, $end])
+            ->groupByRaw($dateExpression)
+            ->orderByRaw($dateExpression.' ASC')
+            ->selectRaw("{$dateExpression} AS installation_date,
+                COUNT(DISTINCT CASE WHEN vis_origen = 'APP-ANDROID' THEN vis_uuid END) AS android,
+                COUNT(DISTINCT CASE WHEN vis_origen = 'APP-IOS' THEN vis_uuid END) AS ios")
+            ->get()
+            ->keyBy('installation_date');
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Instalaciones por día');
+        $sheet->setCellValue('A1', 'Instalaciones APP por día');
+        $sheet->setCellValue('A2', 'País');
+        $sheet->setCellValue('B2', (string) $report['filters']['countryName']);
+        $sheet->setCellValue('A3', 'Rango');
+        $sheet->setCellValue('B3', $start->format('d/m/Y').' - '.$end->format('d/m/Y'));
+        $sheet->fromArray(['Fecha', 'Android', 'iOS', 'Total'], null, 'A5');
+
+        $rowNumber = 6;
+        $androidTotal = 0;
+        $iosTotal = 0;
+        for ($date = $start->copy()->startOfDay(); $date->lte($end); $date->addDay()) {
+            $count = $counts->get($date->toDateString());
+            $android = (int) ($count->android ?? 0);
+            $ios = (int) ($count->ios ?? 0);
+            $sheet->setCellValue('A'.$rowNumber, $date->format('d/m/Y'));
+            $sheet->setCellValue('B'.$rowNumber, $android);
+            $sheet->setCellValue('C'.$rowNumber, $ios);
+            $sheet->setCellValue('D'.$rowNumber, $android + $ios);
+            $rowNumber++;
+            $androidTotal += $android;
+            $iosTotal += $ios;
+        }
+        $sheet->setCellValue('A'.$rowNumber, 'TOTAL');
+        $sheet->setCellValue('B'.$rowNumber, $androidTotal);
+        $sheet->setCellValue('C'.$rowNumber, $iosTotal);
+        $sheet->setCellValue('D'.$rowNumber, $androidTotal + $iosTotal);
+        $sheet->getStyle('A1:D1')->getFont()->setBold(true)->setSize(14);
+        $sheet->getStyle('A5:D5')->getFont()->setBold(true);
+        $sheet->getStyle('A'.$rowNumber.':D'.$rowNumber)->getFont()->setBold(true);
+        $sheet->freezePane('A6');
+        $sheet->setAutoFilter('A5:D'.($rowNumber - 1));
+        foreach (range('A', 'D') as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
+
+        $path = tempnam(sys_get_temp_dir(), 'stj-app-installations-');
+        try {
+            (new Xlsx($spreadsheet))->save($path);
+            return [
+                'filename' => 'instalaciones-app-'.strtolower((string) $report['filters']['countryCode']).'-'.$start->toDateString().'-'.$end->toDateString().'.xlsx',
+                'contents' => (string) file_get_contents($path),
+            ];
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+            if (is_file($path)) unlink($path);
+        }
     }
 
     private function summary(int $countryId, string $start, string $end): array
