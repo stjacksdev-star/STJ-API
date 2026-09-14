@@ -860,19 +860,33 @@ class SalesKpiService
         ];
     }
 
-    public function appInstallations(?int $year = null): array
+    public function appInstallations(?int $year = null, ?int $countryId = null): array
     {
         $selectedYear = $year ?: now()->year;
+        $country = $countryId
+            ? DB::table('stj_paises')->where('pai_id', $countryId)->first(['pai_id', 'pai_codigo', 'pai_nombre'])
+            : null;
 
-        $rows = DB::table('stj_push_suscripciones')
-            ->whereIn('psu_plataforma', ['IOS', 'ANDROID'])
-            ->whereYear('psu_creado_en', $selectedYear)
-            ->groupByRaw('MONTH(psu_creado_en)')
-            ->orderByRaw('MONTH(psu_creado_en) ASC')
+        if ($countryId && ! $country) {
+            throw ValidationException::withMessages(['country' => 'El país seleccionado no existe.']);
+        }
+        $monthExpression = DB::getDriverName() === 'sqlite'
+            ? "CAST(strftime('%m', vis_primera_visita) AS INTEGER)"
+            : 'MONTH(vis_primera_visita)';
+        $yearExpression = DB::getDriverName() === 'sqlite'
+            ? "CAST(strftime('%Y', vis_primera_visita) AS INTEGER)"
+            : 'YEAR(vis_primera_visita)';
+
+        $rows = DB::table('stj_visitantes')
+            ->whereIn('vis_origen', ['APP-IOS', 'APP-ANDROID'])
+            ->when($countryId, fn ($query) => $query->where('vis_pais_id', $countryId))
+            ->whereYear('vis_primera_visita', $selectedYear)
+            ->groupByRaw($monthExpression)
+            ->orderByRaw($monthExpression.' ASC')
             ->selectRaw("
-                MONTH(psu_creado_en) AS month,
-                COUNT(DISTINCT CASE WHEN psu_plataforma = 'ANDROID' THEN psu_instalacion_uuid END) AS android,
-                COUNT(DISTINCT CASE WHEN psu_plataforma = 'IOS' THEN psu_instalacion_uuid END) AS ios
+                {$monthExpression} AS month,
+                COUNT(DISTINCT CASE WHEN vis_origen = 'APP-ANDROID' THEN vis_uuid END) AS android,
+                COUNT(DISTINCT CASE WHEN vis_origen = 'APP-IOS' THEN vis_uuid END) AS ios
             ")
             ->get()
             ->map(fn (object $row) => [
@@ -889,10 +903,11 @@ class SalesKpiService
             'ios' => (int) array_sum(array_column($rows, 'ios')),
         ];
 
-        $years = DB::table('stj_push_suscripciones')
-            ->selectRaw('DISTINCT YEAR(psu_creado_en) AS year')
-            ->whereIn('psu_plataforma', ['IOS', 'ANDROID'])
-            ->whereNotNull('psu_creado_en')
+        $years = DB::table('stj_visitantes')
+            ->selectRaw("DISTINCT {$yearExpression} AS year")
+            ->whereIn('vis_origen', ['APP-IOS', 'APP-ANDROID'])
+            ->when($countryId, fn ($query) => $query->where('vis_pais_id', $countryId))
+            ->whereNotNull('vis_primera_visita')
             ->orderByDesc('year')
             ->pluck('year')
             ->map(fn ($year) => (int) $year)
@@ -902,6 +917,9 @@ class SalesKpiService
         return [
             'filters' => [
                 'year' => $selectedYear,
+                'countryId' => $countryId,
+                'countryCode' => $country?->pai_codigo,
+                'countryName' => $country?->pai_nombre,
             ],
             'years' => $years,
             'platforms' => [

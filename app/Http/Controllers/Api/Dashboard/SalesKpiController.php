@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Dashboard;
 use App\Http\Controllers\Api\BaseController;
 use App\Services\Dashboard\SalesKpiService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class SalesKpiController extends BaseController
 {
@@ -195,10 +196,11 @@ class SalesKpiController extends BaseController
 
         $validated = $request->validate([
             'year' => ['nullable', 'integer', 'min:2020', 'max:2100'],
+            'country' => ['nullable', 'integer', Rule::exists('stj_paises', 'pai_id')],
         ]);
 
         return $this->success(
-            $this->sales->appInstallations($validated['year'] ?? null),
+            $this->sales->appInstallations($validated['year'] ?? null, $validated['country'] ?? null),
             'Instalaciones APP obtenidas'
         );
     }
