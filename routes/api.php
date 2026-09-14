@@ -2,8 +2,9 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CheckoutEventController;
-use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
+use App\Http\Controllers\Api\CorePosOrderController;
 use App\Http\Controllers\Api\Dashboard\AbandonedOrderReportController as DashboardAbandonedOrderReportController;
+use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
 use App\Http\Controllers\Api\Dashboard\AppointmentController as DashboardAppointmentController;
 use App\Http\Controllers\Api\Dashboard\AssetPublicationController as DashboardAssetPublicationController;
 use App\Http\Controllers\Api\Dashboard\ClaimController as DashboardClaimController;
@@ -45,7 +46,6 @@ use App\Http\Controllers\Api\StorefrontBestSellerController;
 use App\Http\Controllers\Api\StorefrontBrandController;
 use App\Http\Controllers\Api\StorefrontCartController;
 use App\Http\Controllers\Api\StorefrontCatalogController;
-use App\Http\Controllers\Api\StorefrontProductSearchController;
 use App\Http\Controllers\Api\StorefrontCheckoutCatalogController;
 use App\Http\Controllers\Api\StorefrontCheckoutValidationController;
 use App\Http\Controllers\Api\StorefrontCollectionController;
@@ -61,6 +61,7 @@ use App\Http\Controllers\Api\StorefrontOrderController;
 use App\Http\Controllers\Api\StorefrontOrderTrackingController;
 use App\Http\Controllers\Api\StorefrontProductAvailabilityController;
 use App\Http\Controllers\Api\StorefrontProductController;
+use App\Http\Controllers\Api\StorefrontProductSearchController;
 use App\Http\Controllers\Api\StorefrontPromotionController;
 use App\Http\Controllers\Api\StorefrontPromotionLandingController;
 use App\Http\Controllers\Api\StorefrontRecommendationController;
@@ -70,6 +71,10 @@ use App\Http\Controllers\Api\StorefrontSubscriberController;
 use App\Http\Controllers\Api\StorefrontWebPushSubscriptionController;
 use App\Http\Controllers\Api\WebPushClickController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/v1/sv/billing/orders/{stj}', CorePosOrderController::class)
+    ->where('stj', '[A-Za-z0-9_-]+')
+    ->middleware('throttle:120,1');
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
