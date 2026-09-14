@@ -112,6 +112,7 @@ class StorefrontCouponResolverTest extends TestCase
         $this->assertSame('20.00', $result['lines'][0]['couponDiscount']);
         $this->assertSame('50.00', $result['lines'][0]['finalTotal']);
         $this->assertSame(50.0, $result['lines'][0]['effectiveDiscountPercentage']);
+        $this->assertSame(50.0, $result['lines'][0]['commercialDiscountPercentage']);
     }
 
     public function test_discounts_can_never_reach_one_hundred_percent(): void

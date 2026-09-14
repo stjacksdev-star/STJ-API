@@ -49,6 +49,7 @@ class StorefrontCouponResolver
                     // An extra coupon preserves the promotion and adds its benefit over regular price.
                     if ($coupon['extraDiscount'] !== 'SI' && $line['promotionDiscountCents'] > 0) {
                         $line['promotionDiscountCents'] = 0;
+                        $line['promotionPercentage'] = null;
                         $line['currentTotalCents'] = $line['baseTotalCents'] - $line['couponDiscountCents'];
                     }
 
@@ -86,11 +87,12 @@ class StorefrontCouponResolver
             $percentageCoupons = collect($line['coupons'])
                 ->filter(fn (array $coupon) => $coupon['type'] === 'DESCUENTO' && $coupon['percentage'] !== null);
             $configuredCouponPercentage = $percentageCoupons->sum('percentage');
-            $commercialDiscount = $line['promotionDiscountCents'] === 0
-                && $percentageCoupons->count() === count($line['coupons'])
+            $configuredCommercialPercentage = (float) ($line['promotionPercentage'] ?? 0) + $configuredCouponPercentage;
+            $commercialDiscount = $percentageCoupons->count() === count($line['coupons'])
                 && $percentageCoupons->isNotEmpty()
-                && $configuredCouponPercentage < 100
-                    ? $configuredCouponPercentage
+                && ($line['promotionDiscountCents'] === 0 || $line['promotionPercentage'] !== null)
+                && $configuredCommercialPercentage < 100
+                    ? $configuredCommercialPercentage
                     : $effectiveDiscount;
 
             return [
@@ -165,6 +167,7 @@ class StorefrontCouponResolver
                 'unitPriceCents' => $unitPrice,
                 'baseTotalCents' => $base,
                 'promotionDiscountCents' => $promotionDiscount,
+                'promotionPercentage' => data_get($line, 'promotion.discountPercentage'),
                 'couponDiscountCents' => 0,
                 'currentTotalCents' => $base - $promotionDiscount,
                 'hasPromotion' => $promotionDiscount > 0 || ! empty($line['promotion']),
