@@ -860,7 +860,7 @@ class SalesKpiService
         ];
     }
 
-    public function appInstallations(?int $year = null, ?int $countryId = null): array
+    public function appInstallations(?int $year = null, ?int $countryId = null, ?string $startDate = null, ?string $endDate = null): array
     {
         $selectedYear = $year ?: now()->year;
         $country = $countryId
@@ -914,6 +914,44 @@ class SalesKpiService
             ->values()
             ->all();
 
+        $rangeStart = Carbon::parse($startDate ?: now()->subWeeks(7)->startOfWeek()->toDateString())->startOfDay();
+        $rangeEnd = Carbon::parse($endDate ?: now()->toDateString())->endOfDay();
+        if ($rangeStart->gt($rangeEnd)) {
+            throw ValidationException::withMessages(['endDate' => 'La fecha final debe ser igual o posterior a la fecha inicial.']);
+        }
+        if ($rangeStart->diffInDays($rangeEnd) > 366) {
+            throw ValidationException::withMessages(['startDate' => 'El rango personalizado no puede superar 366 días.']);
+        }
+
+        $weekly = [];
+        for ($week = $rangeStart->copy()->startOfWeek(); $week->lte($rangeEnd); $week->addWeek()) {
+            $weekEnd = $week->copy()->endOfWeek();
+            $weekly[$week->toDateString()] = [
+                'weekStart' => $week->toDateString(),
+                'weekEnd' => $weekEnd->toDateString(),
+                'weekLabel' => $week->format('d/m').' - '.$weekEnd->format('d/m'),
+                'android' => 0,
+                'ios' => 0,
+            ];
+        }
+
+        DB::table('stj_visitantes')
+            ->whereIn('vis_origen', ['APP-IOS', 'APP-ANDROID'])
+            ->when($countryId, fn ($query) => $query->where('vis_pais_id', $countryId))
+            ->whereBetween('vis_primera_visita', [$rangeStart, $rangeEnd])
+            ->get(['vis_uuid', 'vis_origen', 'vis_primera_visita'])
+            ->unique('vis_uuid')
+            ->each(function (object $visitor) use (&$weekly) {
+                $key = Carbon::parse($visitor->vis_primera_visita)->startOfWeek()->toDateString();
+                $platform = $visitor->vis_origen === 'APP-ANDROID' ? 'android' : 'ios';
+                if (isset($weekly[$key])) $weekly[$key][$platform]++;
+            });
+        $weeklyRows = array_values($weekly);
+        $weeklyTotals = [
+            'android' => (int) array_sum(array_column($weeklyRows, 'android')),
+            'ios' => (int) array_sum(array_column($weeklyRows, 'ios')),
+        ];
+
         return [
             'filters' => [
                 'year' => $selectedYear,
@@ -931,6 +969,11 @@ class SalesKpiService
                 'total' => array_sum($totals),
             ],
             'rows' => $rows,
+            'range' => [
+                'filters' => ['startDate' => $rangeStart->toDateString(), 'endDate' => $rangeEnd->toDateString()],
+                'summary' => [...$weeklyTotals, 'total' => array_sum($weeklyTotals)],
+                'rows' => $weeklyRows,
+            ],
         ];
     }
 

@@ -42,4 +42,18 @@ class DashboardAppInstallationsTest extends TestCase
         $this->assertSame(2, $result['summary']['total']);
         $this->assertSame([2026], $result['years']);
     }
+
+    public function test_it_groups_custom_range_installations_by_monday_to_sunday_weeks(): void
+    {
+        $result = app(SalesKpiService::class)->appInstallations(2026, 1, '2026-01-05', '2026-01-18');
+
+        $this->assertSame('2026-01-05', $result['range']['filters']['startDate']);
+        $this->assertSame('2026-01-18', $result['range']['filters']['endDate']);
+        $this->assertCount(2, $result['range']['rows']);
+        $this->assertSame(2, $result['range']['summary']['total']);
+        $this->assertSame(1, $result['range']['rows'][0]['android']);
+        $this->assertSame(1, $result['range']['rows'][0]['ios']);
+        $this->assertSame(0, $result['range']['rows'][1]['android']);
+        $this->assertSame(0, $result['range']['rows'][1]['ios']);
+    }
 }

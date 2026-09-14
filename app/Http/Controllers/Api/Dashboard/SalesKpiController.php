@@ -197,10 +197,17 @@ class SalesKpiController extends BaseController
         $validated = $request->validate([
             'year' => ['nullable', 'integer', 'min:2020', 'max:2100'],
             'country' => ['nullable', 'integer', Rule::exists('stj_paises', 'pai_id')],
+            'startDate' => ['nullable', 'date'],
+            'endDate' => ['nullable', 'date', 'after_or_equal:startDate'],
         ]);
 
         return $this->success(
-            $this->sales->appInstallations($validated['year'] ?? null, $validated['country'] ?? null),
+            $this->sales->appInstallations(
+                $validated['year'] ?? null,
+                $validated['country'] ?? null,
+                $validated['startDate'] ?? null,
+                $validated['endDate'] ?? null,
+            ),
             'Instalaciones APP obtenidas'
         );
     }
