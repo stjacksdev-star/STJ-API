@@ -44,7 +44,7 @@ class StorefrontCartCouponService
                 ->where('h.che_pais', $cart->car_pais_id)
                 ->where('h.che_estado', 'ACTIVO')
                 ->where('c.cup_estado', 'ACTIVO')
-                ->whereIn('h.che_aplica', ['TODO', 'WEB'])
+                ->whereIn('h.che_aplica', ['TODO', $this->channel()])
                 ->orderByDesc('c.cup_id')
                 ->first(['c.cup_id', 'c.cup_codigo', 'h.che_multiple', 'h.che_generico']);
 
@@ -150,7 +150,7 @@ class StorefrontCartCouponService
             ->where('h.che_pais', $country->pai_id)
             ->where('h.che_estado', 'ACTIVO')
             ->where('c.cup_estado', 'ACTIVO')
-            ->whereIn('h.che_aplica', ['TODO', 'WEB'])
+            ->whereIn('h.che_aplica', ['TODO', $this->channel()])
             ->where(fn ($query) => $query->whereNull('h.che_inicio')->orWhere('h.che_inicio', '<=', $now))
             ->where(fn ($query) => $query->whereNull('h.che_final')->orWhere('h.che_final', '>=', $now))
             ->where(function ($query) use ($email) {
@@ -230,6 +230,7 @@ class StorefrontCartCouponService
         ]);
         $promoted = collect($promotion['lines'])->keyBy('key');
         $resolved = $this->coupons->resolve([
+            'channel' => $this->channel(),
             'countryId' => (int) $cart->car_pais_id,
             'checkoutType' => (string) $cart->car_tipo,
             'email' => $this->email($email !== '' ? $email : (string) $applications->first()->ccu_correo_snapshot),
@@ -343,6 +344,11 @@ class StorefrontCartCouponService
     private function email(string $email): string
     {
         return mb_strtolower(trim($email));
+    }
+
+    private function channel(): string
+    {
+        return ($this->promotionContext['channel'] ?? 'WEB') === 'APP' ? 'APP' : 'WEB';
     }
 
     private function hasApprovedOrder(string $email): bool

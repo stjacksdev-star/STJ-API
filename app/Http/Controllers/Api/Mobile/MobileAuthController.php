@@ -121,6 +121,7 @@ class MobileAuthController extends Controller
                 $countryCode,
                 $email,
                 trim((string) $data['nombres'].' '.(string) $data['apellidos']),
+                'APP',
             );
             $this->welcomeCoupons->sendWelcomeEmail($coupon);
         } catch (Throwable $exception) {

@@ -96,17 +96,43 @@ class StorefrontWelcomeCouponServiceTest extends TestCase
         $this->assertDatabaseCount('stj_cupones', 0);
     }
 
-    private function seedTemplate(): void
+    public function test_mobile_registration_uses_the_current_app_template_for_the_exact_country(): void
+    {
+        Carbon::setTestNow('2026-08-13 10:00:00');
+        $this->seedTemplate('REGISTRO_EMAIL', 1, 'WEB', 62);
+        $this->seedTemplate('REGISTRO_EMAIL_APP', 1, 'APP', 63);
+        $this->seedTemplate('REGISTRO_EMAIL_APP', 2, 'APP', 64);
+
+        $coupon = app(StorefrontWelcomeCouponService::class)->issue(2, 'HN', 'app@example.com', 'Cliente App', 'APP');
+
+        $this->assertNotNull($coupon);
+        $this->assertSame('APP', $coupon['channel']);
+        $this->assertDatabaseHas('stj_cupones_header', [
+            'che_id' => $coupon['headerId'], 'che_pais' => 2, 'che_aplica' => 'APP',
+        ]);
+    }
+
+    public function test_registration_does_not_use_a_template_from_another_country_or_channel(): void
+    {
+        Carbon::setTestNow('2026-08-13 10:00:00');
+        $this->seedTemplate('REGISTRO_EMAIL_APP', 1, 'APP');
+
+        $this->assertNull(app(StorefrontWelcomeCouponService::class)->issue(2, 'HN', 'hn@example.com', 'Cliente HN', 'APP'));
+        $this->assertNull(app(StorefrontWelcomeCouponService::class)->issue(1, 'SV', 'web@example.com', 'Cliente Web', 'WEB'));
+        $this->assertDatabaseCount('stj_cupones', 0);
+    }
+
+    private function seedTemplate(string $template = 'REGISTRO_EMAIL', int $countryId = 1, string $channel = 'TODO', int $id = 62): void
     {
         DB::table('stj_cupones_header')->insert([
-            'che_id' => 62, 'che_aplica' => 'TODO', 'che_tipo' => 'DESCUENTO', 'che_checkout' => 'TODO',
-            'che_generico' => 'NO', 'che_nombre' => 'Cupón de registro', 'che_regional' => 'NO', 'che_pais' => 1,
+            'che_id' => $id, 'che_aplica' => $channel, 'che_tipo' => 'DESCUENTO', 'che_checkout' => 'TODO',
+            'che_generico' => 'NO', 'che_nombre' => 'Cupón de registro', 'che_regional' => 'NO', 'che_pais' => $countryId,
             'che_inicio' => '2026-01-01', 'che_final' => '2027-12-31', 'che_monto' => 0, 'che_descuento' => 20,
             'che_aplica_monto_minimo' => 'NO', 'che_monto_minimo' => 0, 'che_multiple' => 'NO',
             'che_aplica_promo' => 'REGULAR', 'che_solo_primera_compra' => 'NO', 'che_estado' => 'ACTIVO',
-            'che_config_automatica' => 'REGISTRO_EMAIL', 'che_tipo_productos' => 'PLA', 'che_para' => 'NA',
+            'che_config_automatica' => $template, 'che_tipo_productos' => 'PLA', 'che_para' => 'NA',
         ]);
-        DB::table('stj_cupones_producto')->insert(['cpr_cupon' => 62, 'cpr_producto' => 501, 'cpr_descuento' => 20]);
+        DB::table('stj_cupones_producto')->insert(['cpr_cupon' => $id, 'cpr_producto' => 501, 'cpr_descuento' => 20]);
     }
 
     private function schema(): void

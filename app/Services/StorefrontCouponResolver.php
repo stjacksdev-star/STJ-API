@@ -134,6 +134,7 @@ class StorefrontCouponResolver
     {
         $countryId = (int) ($context['countryId'] ?? 0);
         $checkoutType = strtoupper(trim((string) ($context['checkoutType'] ?? '')));
+        $channel = strtoupper(trim((string) ($context['channel'] ?? 'WEB')));
         $email = mb_strtolower(trim((string) ($context['email'] ?? '')));
         $couponIds = collect($context['couponIds'] ?? [])->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
 
@@ -142,6 +143,9 @@ class StorefrontCouponResolver
         }
         if (! in_array($checkoutType, ['DOMICILIO', 'TIENDA'], true)) {
             throw ValidationException::withMessages(['checkoutType' => 'La modalidad debe ser DOMICILIO o TIENDA.']);
+        }
+        if (! in_array($channel, ['WEB', 'APP'], true)) {
+            throw ValidationException::withMessages(['channel' => 'El canal debe ser WEB o APP.']);
         }
         if ($couponIds === []) {
             throw ValidationException::withMessages(['couponIds' => 'Debe proporcionar al menos un cupón.']);
@@ -184,6 +188,7 @@ class StorefrontCouponResolver
         return [
             'countryId' => $countryId,
             'checkoutType' => $checkoutType,
+            'channel' => $channel,
             'email' => $email,
             'couponIds' => $couponIds,
             'at' => Carbon::parse($context['at'] ?? now(), config('app.timezone')),
@@ -263,8 +268,8 @@ class StorefrontCouponResolver
         if ($coupon['headerState'] !== 'ACTIVO' || $coupon['detailState'] !== 'ACTIVO') {
             return $invalid('CUPON_INACTIVO', 'El cupón no está activo.');
         }
-        if (! in_array($coupon['channel'], ['TODO', 'WEB'], true)) {
-            return $invalid('CANAL_NO_PERMITIDO', 'El cupón no aplica en Web.');
+        if (! in_array($coupon['channel'], ['TODO', $context['channel']], true)) {
+            return $invalid('CANAL_NO_PERMITIDO', 'El cupón no aplica en el canal actual.');
         }
         if ($coupon['countryId'] !== $context['countryId']) {
             return $invalid('PAIS_NO_PERMITIDO', 'El cupón no aplica para el país actual.');

@@ -181,6 +181,7 @@ class StorefrontAccountController extends BaseController
                 (string) $storefrontCountry->pai_codigo,
                 $email,
                 trim($data['first_name'].' '.$data['last_name']),
+                'WEB',
             );
 
             return [$customerId, $coupon];

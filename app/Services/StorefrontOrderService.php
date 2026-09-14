@@ -241,7 +241,9 @@ class StorefrontOrderService
             if (! empty($payload['cartId']) && Schema::hasTable('stj_carrito_cupones')) {
                 $couponCart = StorefrontCart::query()->whereKey($payload['cartId'])->first();
                 if ($couponCart) {
-                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate(
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))
+                        ->usePromotionContext(($payload['origin'] ?? 'WEB') === 'APP' ? 'APP' : 'WEB', $payload['platform'] ?? null)
+                        ->revalidate(
                         $couponCart,
                         (string) data_get($payload, 'customer.email', ''),
                         (float) $shipping['shipping_amount'],
@@ -272,7 +274,9 @@ class StorefrontOrderService
                     // Recalcular la regla con el subtotal final después de promociones
                     // y cupones; el envío no forma parte del monto mínimo evaluado.
                     $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, $checkoutType, data_get($payload, 'fulfillment.city_id'), $subtotal);
-                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))->revalidate(
+                    $couponResolution = ($this->cartCoupons ?? app(StorefrontCartCouponService::class))
+                        ->usePromotionContext(($payload['origin'] ?? 'WEB') === 'APP' ? 'APP' : 'WEB', $payload['platform'] ?? null)
+                        ->revalidate(
                         $couponCart,
                         (string) data_get($payload, 'customer.email', ''),
                         (float) $shipping['shipping_amount'],

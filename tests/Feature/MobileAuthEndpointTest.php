@@ -145,7 +145,7 @@ class MobileAuthEndpointTest extends TestCase
     public function test_it_registers_a_mobile_customer_with_the_validated_registration_country(): void
     {
         $welcome = Mockery::mock(StorefrontWelcomeCouponService::class);
-        $welcome->shouldReceive('issue')->once()->with(1, 'SV', 'nuevo@example.com', 'Nuevo Cliente')->andReturn(null);
+        $welcome->shouldReceive('issue')->once()->with(1, 'SV', 'nuevo@example.com', 'Nuevo Cliente', 'APP')->andReturn(null);
         $welcome->shouldReceive('sendWelcomeEmail')->once()->with(null);
         $this->app->instance(StorefrontWelcomeCouponService::class, $welcome);
 

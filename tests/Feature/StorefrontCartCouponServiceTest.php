@@ -46,6 +46,22 @@ class StorefrontCartCouponServiceTest extends TestCase
         $this->assertDatabaseHas('stj_carrito_cupones', ['ccu_estado' => 'APLICADO', 'ccu_carrito_version' => 3]);
     }
 
+    public function test_app_coupon_is_available_and_applicable_only_in_the_app_channel(): void
+    {
+        DB::table('stj_cupones_header')->where('che_id', 1)->update(['che_aplica' => 'APP', 'che_generico' => 'SI']);
+
+        $this->assertSame([], $this->service->available('sv', null));
+
+        $this->service->usePromotionContext('APP', 'IOS');
+        $available = $this->service->available('sv', null);
+        $result = $this->service->add('sv', $this->visitor, null, [
+            'operation_uuid' => (string) Str::uuid(), 'code' => 'WELCOME10', 'email' => 'client@example.com',
+        ]);
+
+        $this->assertSame(1, $available[0]['id']);
+        $this->assertSame('APLICADO', $result['applications'][0]['status']);
+    }
+
     public function test_personal_coupon_with_wrong_email_is_kept_as_not_applicable(): void
     {
         $result = $this->service->add('sv', $this->visitor, null, [

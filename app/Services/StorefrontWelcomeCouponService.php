@@ -11,34 +11,42 @@ use Throwable;
 
 class StorefrontWelcomeCouponService
 {
-    private const TEMPLATE = 'REGISTRO_EMAIL';
+    private const TEMPLATES = [
+        'WEB' => 'REGISTRO_EMAIL',
+        'APP' => 'REGISTRO_EMAIL_APP',
+    ];
 
     private const VALIDITY_DAYS = 15;
 
     public function __construct(private readonly Smtp2GoMailer $mailer, private readonly CouponEmailConditions $conditions) {}
 
     /** @return array<string, mixed>|null */
-    public function issue(int $countryId, string $countryCode, string $email, string $customerName): ?array
+    public function issue(int $countryId, string $countryCode, string $email, string $customerName, string $channel = 'WEB'): ?array
     {
         $email = strtolower(trim($email));
+        $channel = strtoupper(trim($channel));
+        $templateCode = self::TEMPLATES[$channel] ?? null;
+        if ($templateCode === null) {
+            throw new RuntimeException("Canal de cupón de registro no soportado: {$channel}.");
+        }
         $now = now();
         $template = DB::table('stj_cupones_header')
-            ->where('che_config_automatica', self::TEMPLATE)
+            ->where('che_config_automatica', $templateCode)
             ->where('che_estado', 'ACTIVO')
             ->where('che_inicio', '<=', $now)
             ->where('che_final', '>=', $now)
-            ->where(function ($query) use ($countryId) {
-                $query->where('che_pais', $countryId)->orWhere('che_regional', 'SI');
-            })
-            ->orderByRaw('che_pais = ? desc', [$countryId])
+            ->where('che_pais', $countryId)
+            ->whereIn('che_aplica', [$channel, 'TODO'])
+            ->orderByDesc('che_inicio')
             ->orderByDesc('che_id')
             ->lockForUpdate()
             ->first();
 
         if (! $template) {
             Log::warning('No se encontró la plantilla automática de cupón de registro.', [
-                'template' => self::TEMPLATE,
+                'template' => $templateCode,
                 'country_id' => $countryId,
+                'channel' => $channel,
                 'email' => $email,
             ]);
 

@@ -75,6 +75,15 @@ class CouponService
             throw ValidationException::withMessages(['automaticTemplate' => 'Una plantilla automática solo define reglas; no puede generar códigos al guardarse.']);
         }
 
+        $automaticTemplate = strtoupper(trim((string) ($data['automaticTemplate'] ?? '')));
+        $channel = strtoupper(trim((string) ($data['channel'] ?? '')));
+        if ($automaticTemplate === 'REGISTRO_EMAIL' && ! in_array($channel, ['WEB', 'TODO'], true)) {
+            throw ValidationException::withMessages(['channel' => 'REGISTRO_EMAIL solo admite el canal WEB o TODO.']);
+        }
+        if ($automaticTemplate === 'REGISTRO_EMAIL_APP' && ! in_array($channel, ['APP', 'TODO'], true)) {
+            throw ValidationException::withMessages(['channel' => 'REGISTRO_EMAIL_APP solo admite el canal APP o TODO.']);
+        }
+
         return DB::transaction(function () use ($data, $id, $productsFile, $customersFile) {
             $isNew = $id === null;
             $country = DB::table('stj_paises')->where('pai_codigo', strtoupper($data['country']))->first(['pai_id']);
