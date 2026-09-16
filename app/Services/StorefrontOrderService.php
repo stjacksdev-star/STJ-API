@@ -7,6 +7,7 @@ use App\Models\CustomerEvent;
 use App\Models\StorefrontCart;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
+use App\Support\CustomerPhoneNumber;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -292,7 +293,7 @@ class StorefrontOrderService
             $delivery = $payload['fulfillment'];
             $paymentType = $payload['paymentType'] ?? 'TARJETA';
             $orderStatus = $paymentType === 'EFECTIVO' ? 'RECIBIDO' : 'PENDIENTE_PAGO';
-            $residenceCountry = DB::table('stj_world_countries')->where('id', $customer['countryId'])->first(['id', 'name', 'phonecode']);
+            $residenceCountry = DB::table('stj_world_countries')->where('id', $customer['countryId'])->first(['id', 'iso2', 'name', 'phonecode']);
             $residenceState = $residenceCountry ? DB::table('stj_world_states')
                 ->where('id', $customer['stateId'])
                 ->where('country_id', $residenceCountry->id)
@@ -304,6 +305,10 @@ class StorefrontOrderService
                 ->first(['id', 'name']) : null;
             if (! $residenceCountry || ! $residenceState || ! $residenceCity) {
                 throw ValidationException::withMessages(['customer.address' => 'La ubicación de residencia seleccionada no es válida.']);
+            }
+            $phone = CustomerPhoneNumber::digits((string) ($customer['phone'] ?? ''));
+            if (! CustomerPhoneNumber::valid((string) $residenceCountry->iso2, $phone)) {
+                throw ValidationException::withMessages(['customer.phone' => CustomerPhoneNumber::message((string) $residenceCountry->iso2)]);
             }
 
             $pedidoId = DB::table('stj_pedidos')->insertGetId([
@@ -330,9 +335,9 @@ class StorefrontOrderService
                 'ped_ciudad' => $this->limit($residenceCity->name, 50),
                 'ped_direccion' => $this->limit($customer['address'], 200),
                 'ped_telefono_pais' => ltrim((string) $residenceCountry->phonecode, '+'),
-                'ped_telefono' => $this->limit($customer['phone'] ?? '', 30),
+                'ped_telefono' => $phone,
                 'ped_whatsapp_pais' => ltrim((string) $residenceCountry->phonecode, '+'),
-                'ped_whatsapp' => $this->limit($customer['phone'] ?? '', 30),
+                'ped_whatsapp' => $phone,
                 'ped_devolucion_realizada' => 'N/A',
                 'ped_rsp_servicio' => null,
                 'ped_monto_devolucion' => null,
