@@ -6,6 +6,7 @@ use App\Services\Mail\Smtp2GoMailer;
 use App\Services\Mail\StorefrontMailTemplate;
 use App\Support\OrderCurrency;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class StorefrontOrderConfirmationEmailService
@@ -67,6 +68,10 @@ class StorefrontOrderConfirmationEmailService
 
     private function order(int $orderId, int $paymentId): ?object
     {
+        $pickupDocumentType = Schema::hasColumn('stj_pedidos_tienda', 'pti_tipo_identificacion')
+            ? 'pickup.pti_tipo_identificacion'
+            : 'NULL AS pti_tipo_identificacion';
+
         return DB::table('stj_pedidos as orders')
             ->join('stj_pedidos_pago as payment', 'payment.ppa_pedido', '=', 'orders.ped_id')
             ->join('stj_paises as country', 'country.pai_id', '=', 'orders.ped_id_pais')
@@ -79,7 +84,7 @@ class StorefrontOrderConfirmationEmailService
             ->leftJoin('stj_direcciones as address', 'address.dir_id', '=', 'shipping.pdi_direccion')
             ->where('orders.ped_id', $orderId)
             ->where('payment.ppa_id', $paymentId)
-            ->selectRaw('orders.*, payment.*, country.pai_codigo, country.pai_nombre, store.tie_nombre, store.tie_correo, pickup.pti_misma_persona, pickup.pti_persona, pickup.pti_telefono, pickup.pti_tipo_identificacion, pickup.pti_identificacion, pickup_country.phonecode as pickup_phonecode, address.dir_direccion, address.dir_referencia, address.dir_departamento_txt, address.dir_municipio_txt, shipping.pdi_costo_envio_txt')
+            ->selectRaw('orders.*, payment.*, country.pai_codigo, country.pai_nombre, store.tie_nombre, store.tie_correo, pickup.pti_misma_persona, pickup.pti_persona, pickup.pti_telefono, '.$pickupDocumentType.', pickup.pti_identificacion, pickup_country.phonecode as pickup_phonecode, address.dir_direccion, address.dir_referencia, address.dir_departamento_txt, address.dir_municipio_txt, shipping.pdi_costo_envio_txt')
             ->first();
     }
 

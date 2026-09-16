@@ -424,20 +424,23 @@ class StorefrontOrderService
                     'pdi_a_version' => 1,
                 ]);
             } else {
-                DB::table('stj_pedidos_tienda')->insert([
+                $pickupRow = [
                     'pti_pedido' => $pedidoId,
                     'pti_misma_persona' => ($payload['pickup']['samePerson'] ?? true) ? 'SI' : 'NO',
                     'pti_pais' => strtoupper((string) $country->pai_codigo),
                     'pti_tienda' => $storeCode,
                     'pti_persona' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? trim(($customer['firstName'] ?? '').' '.($customer['lastName'] ?? '')) : ($payload['pickup']['person'] ?? ''), 100),
-                    'pti_tipo_identificacion' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['documentType'] ?? '') : ($payload['pickup']['documentType'] ?? ''), 50),
                     'pti_telefono' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['phone'] ?? '') : ($payload['pickup']['phone'] ?? ''), 100),
                     'pti_identificacion' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['document'] ?? '') : ($payload['pickup']['identification'] ?? ''), 50),
                     'pti_a_usuario' => 'storefront',
                     'pti_a_ip' => request()->ip(),
                     'pti_a_fecha' => $now,
                     'pti_a_version' => 1,
-                ]);
+                ];
+                if (Schema::hasColumn('stj_pedidos_tienda', 'pti_tipo_identificacion')) {
+                    $pickupRow['pti_tipo_identificacion'] = $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['documentType'] ?? '') : ($payload['pickup']['documentType'] ?? ''), 50);
+                }
+                DB::table('stj_pedidos_tienda')->insert($pickupRow);
             }
 
             $paymentRow = [
