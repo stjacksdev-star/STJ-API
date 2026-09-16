@@ -213,6 +213,7 @@ class MobileProductController extends Controller
             'min' => ['nullable', 'numeric', 'min:0'],
             'max' => ['nullable', 'numeric', 'gte:min'],
             'talla' => ['nullable', 'string', 'max:30'],
+            'fit' => ['nullable', 'string', 'max:50'],
             'tienda' => ['required', 'string', 'max:30'],
             'pais' => ['nullable'],
         ]);

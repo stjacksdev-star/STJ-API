@@ -50,6 +50,7 @@ class MobileProductEndpointTest extends TestCase
             $table->unsignedBigInteger('pro_categoria');
             $table->unsignedBigInteger('pro_sub_categoria');
             $table->string('pro_tallas')->nullable();
+            $table->string('pro_denim_fit')->nullable();
         });
         Schema::create('stj_producto_pais', function (Blueprint $table) {
             $table->id('ppa_id');
@@ -211,6 +212,41 @@ class MobileProductEndpointTest extends TestCase
             ->assertJsonPath('records.0.ppa_promo_nombre', '10% de descuento')
             ->assertJsonPath('records.0.availableSizes', ['4', '6'])
             ->assertJsonPath('existenciaTalla.1.existencia', 2);
+    }
+
+    public function test_denim_container_uses_shared_subcategories_parent_scope_and_fit(): void
+    {
+        DB::table('stj_categorias')->insert([
+            ['cat_id' => 6, 'cat_nombre' => 'Niños', 'cat_marca' => 'ST JACKS', 'cat_si_sub_otras' => 0, 'cat_sub_otras' => null],
+            ['cat_id' => 19, 'cat_nombre' => 'Denim Niñas', 'cat_marca' => 'ST JACKS', 'cat_si_sub_otras' => 1, 'cat_sub_otras' => '81'],
+        ]);
+        DB::table('stj_sub_categorias')->insert(['sca_id' => 81, 'sca_nombre' => 'Denim']);
+        DB::table('stj_productos')->insert([
+            ['pro_id' => 400, 'pro_codigo' => 'DENIM-GIRL', 'pro_nombre' => 'WIDE LEG NIÑA', 'pro_descripcion' => null, 'pro_marca' => 'ST JACKS', 'pro_oc_marca' => null, 'pro_categoria' => 5, 'pro_sub_categoria' => 81, 'pro_tallas' => '8', 'pro_denim_fit' => 'Wideleg'],
+            ['pro_id' => 401, 'pro_codigo' => 'DENIM-BOY', 'pro_nombre' => 'WIDE LEG NIÑO', 'pro_descripcion' => null, 'pro_marca' => 'ST JACKS', 'pro_oc_marca' => null, 'pro_categoria' => 6, 'pro_sub_categoria' => 81, 'pro_tallas' => '8', 'pro_denim_fit' => 'Wideleg'],
+        ]);
+        DB::table('stj_producto_pais')->insert([
+            ['ppa_pais' => 1, 'ppa_producto' => 400, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 24.95],
+            ['ppa_pais' => 1, 'ppa_producto' => 401, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 24.95],
+        ]);
+
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')->once()->andReturn([
+                'availabilityBySku' => ['DENIM-GIRL' => ['hasStock' => true, 'availableSizes' => ['8'], 'totalQuantity' => 1]],
+            ]);
+        });
+
+        $this->postJson('/api/mobile/v1/catalog/products/filter?countryId=1', [
+            'categoria' => 19,
+            'fit' => 'Wideleg',
+            'ordenamiento' => 'Más recientes',
+            'min' => '',
+            'max' => '',
+            'talla' => '',
+            'tienda' => '019',
+        ])->assertOk()
+            ->assertJsonCount(1, 'records')
+            ->assertJsonPath('records.0.sku', 'DENIM-GIRL');
     }
 
     public function test_it_returns_products_for_a_category_using_the_selected_store(): void

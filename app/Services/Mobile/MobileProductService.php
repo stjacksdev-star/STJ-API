@@ -14,6 +14,11 @@ use Illuminate\Validation\ValidationException;
 
 class MobileProductService
 {
+    private const DENIM_CONTAINER_PARENT_CATEGORY_IDS = [
+        18 => [],
+        19 => [3, 5],
+        20 => [4, 6],
+    ];
     /** @var array{channel: string, checkoutType: string, platform?: string} */
     private array $promotionContext = ['channel' => 'APP', 'checkoutType' => 'DOMICILIO'];
 
@@ -704,6 +709,7 @@ class MobileProductService
         $query = $this->productQuery($countryId)->where('pp.ppa_precio', '>', 0.99);
 
         $this->applyCategory($query, $category, $filters);
+        $this->applyDenimFit($query, trim((string) ($filters['fit'] ?? '')));
         $this->applyPriceAndSizeFilters($query, $filters);
         $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
 
@@ -809,7 +815,7 @@ class MobileProductService
 
         return $query->get([
             'p.pro_id', 'p.pro_codigo', 'p.pro_nombre', 'p.pro_descripcion', 'p.pro_marca',
-            'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_sub_categoria', 'p.pro_tallas', 'c.cat_nombre', 'sc.sca_nombre',
+            'p.pro_oc_marca', 'p.pro_categoria', 'p.pro_sub_categoria', 'p.pro_tallas', 'p.pro_denim_fit', 'c.cat_nombre', 'sc.sca_nombre',
             'pp.ppa_precio',
         ]);
     }
@@ -864,6 +870,29 @@ class MobileProductService
 
     private function applyCategory(Builder $query, object $category, array $filters): void
     {
+        $categoryId = (int) $category->cat_id;
+        $isDenimContainer = array_key_exists($categoryId, self::DENIM_CONTAINER_PARENT_CATEGORY_IDS);
+        $denimParentCategoryIds = self::DENIM_CONTAINER_PARENT_CATEGORY_IDS[$categoryId] ?? [];
+
+        if ($isDenimContainer) {
+            $subcategoryIds = collect(explode(',', (string) $category->cat_sub_otras))
+                ->map(fn (string $id) => (int) trim($id))->filter()->unique()->all();
+
+            $query->where(function (Builder $scope) use ($category, $subcategoryIds, $denimParentCategoryIds) {
+                $scope->where('p.pro_categoria', (int) $category->cat_id);
+                if ($subcategoryIds !== []) {
+                    $scope->orWhere(function (Builder $additional) use ($subcategoryIds, $denimParentCategoryIds) {
+                        $additional->whereIn('p.pro_sub_categoria', $subcategoryIds);
+                        if ($denimParentCategoryIds !== []) {
+                            $additional->whereIn('p.pro_categoria', $denimParentCategoryIds);
+                        }
+                    });
+                }
+            });
+
+            return;
+        }
+
         if ((bool) $category->cat_si_sub_otras) {
             $subcategoryIds = collect(explode(',', (string) $category->cat_sub_otras))
                 ->map(fn (string $id) => (int) trim($id))->filter()->unique()->all();
@@ -882,6 +911,17 @@ class MobileProductService
                     : $query->where('sc.sca_nombre', $subcategory);
             }
         }
+    }
+
+    private function applyDenimFit(Builder $query, string $fit): void
+    {
+        if ($fit === '') {
+            return;
+        }
+
+        $query->whereNotNull('p.pro_denim_fit')
+            ->whereRaw("TRIM(p.pro_denim_fit) <> ''")
+            ->where('p.pro_denim_fit', $fit);
     }
 
     private function applyCategoryScope(Builder $query, object $category, array $filters): void

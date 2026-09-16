@@ -11,15 +11,23 @@ use Illuminate\Validation\ValidationException;
 
 class StandaloneAssetService
 {
+    private const LANDING_ACTIONS = [0, 5, 6, 8];
+
     public function __construct(private readonly ImageOptimizer $images) {}
 
     public function index(): array
     {
         return [
+            'actionTypes' => [
+                ['id' => 0, 'label' => 'Sin acción'],
+                ['id' => 5, 'label' => 'Landing Basiko'],
+                ['id' => 6, 'label' => 'Landing Jack & Co'],
+                ['id' => 8, 'label' => 'Landing Denim'],
+            ],
             'countries' => DB::table('stj_paises')->orderBy('pai_id')->get(['pai_id', 'pai_codigo', 'pai_nombre'])
                 ->map(fn ($country) => ['id' => (int) $country->pai_id, 'code' => strtoupper((string) $country->pai_codigo), 'name' => trim((string) $country->pai_nombre)])->all(),
             'assets' => DB::table('stj_assets as a')->leftJoin('stj_paises as p', 'p.pai_id', '=', 'a.ast_pais')
-                ->where(fn ($query) => $query->whereNull('a.ast_tipo_accion')->orWhere('a.ast_tipo_accion', 0))
+                ->where(fn ($query) => $query->whereNull('a.ast_tipo_accion')->orWhereIn('a.ast_tipo_accion', self::LANDING_ACTIONS))
                 ->where(fn ($query) => $query->whereNull('a.ast_idpromocion')->orWhere('a.ast_idpromocion', 0))
                 ->select(['a.*', 'p.pai_codigo', 'p.pai_nombre'])->orderByDesc('a.ast_id')->get()
                 ->map(fn ($asset) => $this->normalize($asset))->all(),
@@ -40,7 +48,7 @@ class StandaloneAssetService
 
     public function update(int $id, array $data, ?UploadedFile $image, ?UploadedFile $mobileImage): array
     {
-        $asset = DB::table('stj_assets')->where('ast_id', $id)->where(fn ($q) => $q->whereNull('ast_tipo_accion')->orWhere('ast_tipo_accion', 0))
+        $asset = DB::table('stj_assets')->where('ast_id', $id)->where(fn ($q) => $q->whereNull('ast_tipo_accion')->orWhereIn('ast_tipo_accion', self::LANDING_ACTIONS))
             ->where(fn ($q) => $q->whereNull('ast_idpromocion')->orWhere('ast_idpromocion', 0))->first();
         if (! $asset) {
             throw ValidationException::withMessages(['asset' => 'El asset independiente seleccionado no existe.']);
@@ -62,7 +70,7 @@ class StandaloneAssetService
             'ast_tipo' => strtoupper((string) $data['type']), 'ast_posicion' => $data['position'] ?? null,
             'ast_orden' => $data['order'] ?? 1, 'ast_estado' => $data['status'] ?? 'PENDIENTE',
             'ast_inicio' => $data['startAt'], 'ast_fin' => $data['endAt'], 'ast_link' => $data['link'] ?? null,
-            'ast_titulo' => $data['title'] ?? null, 'ast_tipo_accion' => 0, 'ast_idpromocion' => 0,
+            'ast_titulo' => $data['title'] ?? null, 'ast_tipo_accion' => (int) ($data['actionType'] ?? 0), 'ast_idpromocion' => 0,
         ];
     }
 
@@ -113,6 +121,7 @@ class StandaloneAssetService
             'order' => $asset->ast_orden !== null ? (int) $asset->ast_orden : null, 'status' => $asset->ast_estado,
             'image' => $asset->ast_imagen, 'mobileImage' => $asset->ast_imagen_movil, 'startAt' => $asset->ast_inicio,
             'endAt' => $asset->ast_fin, 'link' => $asset->ast_link, 'title' => $asset->ast_titulo,
+            'actionType' => (int) ($asset->ast_tipo_accion ?? 0),
         ];
     }
 }

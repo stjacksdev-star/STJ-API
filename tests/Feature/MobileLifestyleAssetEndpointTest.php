@@ -139,6 +139,20 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             ->assertJsonPath('right.0.promocion', 900);
     }
 
+    public function test_it_exposes_denim_landing_action_for_home_assets(): void
+    {
+        DB::table('stj_assets')->insert([
+            ...$this->asset(40, 1, 'APP', 1, '/denim-mobile.jpg', 8, 0, 'Denim'),
+            'ast_tipo' => 'BANNER',
+        ]);
+
+        $this->getJson('/api/mobile/v1/assets/banners?countryId=1&plataforma=ANDROID')
+            ->assertOk()
+            ->assertJsonPath('records.0.accion', true)
+            ->assertJsonPath('records.0.tipoAccion', 8)
+            ->assertJsonPath('records.0.title', 'Denim');
+    }
+
     /** @return array<string, mixed> */
     private function asset(int $id, int $country, string $platform, int $order, string $image, int $action, int $promotion, string $title): array
     {
