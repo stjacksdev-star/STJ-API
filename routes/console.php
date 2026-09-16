@@ -4,6 +4,7 @@ use App\Models\User;
 use App\Services\AbandonedCartReportService;
 use App\Services\BirthdayCouponService;
 use App\Services\CouponAudienceEmailService;
+use App\Services\DailySalesReportService;
 use App\Services\Dashboard\AssetPublicationService;
 use App\Services\PushNotificationService;
 use App\Services\VipCustomerService;
@@ -151,6 +152,25 @@ Artisan::command('reports:abandoned-carts', function (AbandonedCartReportService
     return self::SUCCESS;
 })->purpose('Envia el reporte diario de carritos y pagos abandonados');
 
+Artisan::command('reports:daily-sales {--date= : Fecha del reporte en formato YYYY-MM-DD} {--dry-run : Genera el reporte sin enviar correo}', function (DailySalesReportService $report) {
+    if (! config('daily_sales_report.enabled') && ! $this->option('dry-run')) {
+        $this->warn('El reporte diario de ventas está deshabilitado.');
+
+        return self::SUCCESS;
+    }
+
+    $timezone = (string) config('daily_sales_report.timezone', 'America/El_Salvador');
+    $date = filled($this->option('date'))
+        ? Carbon::createFromFormat('Y-m-d', (string) $this->option('date'), $timezone)->startOfDay()->toImmutable()
+        : Carbon::now($timezone)->subDay()->startOfDay()->toImmutable();
+    $summary = $this->option('dry-run') ? $report->generate($date) : $report->send($date);
+    $this->info("Reporte {$summary['date']} ".($this->option('dry-run') ? 'generado sin envío' : 'enviado').'.');
+    $this->line('Venta diaria USD: '.number_format((float) $summary['sales']['daily']['total'], 2, '.', ','));
+    $this->line('Devolución diaria USD: '.number_format((float) $summary['refunds']['daily']['total'], 2, '.', ','));
+
+    return self::SUCCESS;
+})->purpose('Genera y envía el reporte regional diario de ventas y devoluciones');
+
 Schedule::command('sanctum:prune-expired --hours=24')->daily();
 Schedule::command('push:send-pending')->hourly();
 Schedule::command('productos:calcular-metricas')
@@ -169,6 +189,10 @@ Schedule::command('customers:update-vip')
 Schedule::command('reports:abandoned-carts')
     ->dailyAt('08:00')
     ->timezone((string) config('abandoned_carts.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(60);
+Schedule::command('reports:daily-sales')
+    ->dailyAt((string) config('daily_sales_report.time', '00:10'))
+    ->timezone((string) config('daily_sales_report.timezone', 'America/El_Salvador'))
     ->withoutOverlapping(60);
 Schedule::command('inventory:sync')
     ->everyFiveMinutes()
