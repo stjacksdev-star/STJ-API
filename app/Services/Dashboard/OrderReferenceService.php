@@ -2304,6 +2304,7 @@ class OrderReferenceService
                 'samePerson' => (string) ($order->pti_misma_persona ?? ''),
                 'person' => (string) ($order->pti_persona ?? ''),
                 'phone' => (string) ($order->pti_telefono ?? ''),
+                'documentType' => (string) ($order->pti_tipo_identificacion ?? ''),
                 'identification' => (string) ($order->pti_identificacion ?? ''),
             ],
             'totals' => [

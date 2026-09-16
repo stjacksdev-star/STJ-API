@@ -8,6 +8,7 @@ use App\Models\StorefrontCart;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Support\CustomerPhoneNumber;
+use App\Support\CustomerDocumentNumber;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -107,7 +108,7 @@ class StorefrontOrderService
             $pickup = $payload['pickup'] ?? [];
             $samePickupPerson = (bool) ($pickup['samePerson'] ?? true);
             if ($cart->car_tipo === 'TIENDA' && ! $samePickupPerson) {
-                foreach (['person' => 'nombre', 'phone' => 'telefono', 'identification' => 'identificacion'] as $field => $label) {
+                foreach (['person' => 'nombre', 'phone' => 'telefono', 'documentType' => 'tipo de documento', 'identification' => 'identificacion'] as $field => $label) {
                     if (trim((string) ($pickup[$field] ?? '')) === '') {
                         throw ValidationException::withMessages(["pickup.{$field}" => "La {$label} de quien retirara es obligatoria."]);
                     }
@@ -116,6 +117,10 @@ class StorefrontOrderService
                 if (! CustomerPhoneNumber::valid((string) $country->pai_codigo, $pickup['phone'])) {
                     throw ValidationException::withMessages(['pickup.phone' => CustomerPhoneNumber::message((string) $country->pai_codigo)]);
                 }
+                if (! CustomerDocumentNumber::valid((string) $country->pai_codigo, (string) $pickup['documentType'], (string) $pickup['identification'])) {
+                    throw ValidationException::withMessages(['pickup.identification' => CustomerDocumentNumber::message((string) $country->pai_codigo, (string) $pickup['documentType'])]);
+                }
+                $pickup['identification'] = CustomerDocumentNumber::normalize((string) $country->pai_codigo, (string) $pickup['documentType'], (string) $pickup['identification']);
             }
             // Revalidate the complete cart again immediately before persisting the
             // order. A stale unavailable flag must never make a line disappear.
@@ -325,6 +330,10 @@ class StorefrontOrderService
             if (! $residenceCountry || ! $residenceState || ! $residenceCity) {
                 throw ValidationException::withMessages(['customer.address' => 'La ubicación de residencia seleccionada no es válida.']);
             }
+            if (! CustomerDocumentNumber::valid((string) $residenceCountry->iso2, (string) $customer['documentType'], (string) $customer['document'])) {
+                throw ValidationException::withMessages(['customer.document' => CustomerDocumentNumber::message((string) $residenceCountry->iso2, (string) $customer['documentType'])]);
+            }
+            $customer['document'] = CustomerDocumentNumber::normalize((string) $residenceCountry->iso2, (string) $customer['documentType'], (string) $customer['document']);
             $phone = CustomerPhoneNumber::digits((string) ($customer['phone'] ?? ''));
             if (! CustomerPhoneNumber::valid((string) $residenceCountry->iso2, $phone)) {
                 throw ValidationException::withMessages(['customer.phone' => CustomerPhoneNumber::message((string) $residenceCountry->iso2)]);
@@ -421,6 +430,7 @@ class StorefrontOrderService
                     'pti_pais' => strtoupper((string) $country->pai_codigo),
                     'pti_tienda' => $storeCode,
                     'pti_persona' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? trim(($customer['firstName'] ?? '').' '.($customer['lastName'] ?? '')) : ($payload['pickup']['person'] ?? ''), 100),
+                    'pti_tipo_identificacion' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['documentType'] ?? '') : ($payload['pickup']['documentType'] ?? ''), 50),
                     'pti_telefono' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['phone'] ?? '') : ($payload['pickup']['phone'] ?? ''), 100),
                     'pti_identificacion' => $this->limit(($payload['pickup']['samePerson'] ?? true) ? ($customer['document'] ?? '') : ($payload['pickup']['identification'] ?? ''), 50),
                     'pti_a_usuario' => 'storefront',

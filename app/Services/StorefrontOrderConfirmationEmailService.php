@@ -79,7 +79,7 @@ class StorefrontOrderConfirmationEmailService
             ->leftJoin('stj_direcciones as address', 'address.dir_id', '=', 'shipping.pdi_direccion')
             ->where('orders.ped_id', $orderId)
             ->where('payment.ppa_id', $paymentId)
-            ->selectRaw('orders.*, payment.*, country.pai_codigo, country.pai_nombre, store.tie_nombre, store.tie_correo, pickup.pti_misma_persona, pickup.pti_persona, pickup.pti_telefono, pickup.pti_identificacion, pickup_country.phonecode as pickup_phonecode, address.dir_direccion, address.dir_referencia, address.dir_departamento_txt, address.dir_municipio_txt, shipping.pdi_costo_envio_txt')
+            ->selectRaw('orders.*, payment.*, country.pai_codigo, country.pai_nombre, store.tie_nombre, store.tie_correo, pickup.pti_misma_persona, pickup.pti_persona, pickup.pti_telefono, pickup.pti_tipo_identificacion, pickup.pti_identificacion, pickup_country.phonecode as pickup_phonecode, address.dir_direccion, address.dir_referencia, address.dir_departamento_txt, address.dir_municipio_txt, shipping.pdi_costo_envio_txt')
             ->first();
     }
 
@@ -102,7 +102,7 @@ class StorefrontOrderConfirmationEmailService
             }
             $pickupRows = $this->infoRow('Retira', e((string) ($order->pti_persona ?? '')))
                 .$this->infoRow('Teléfono de quien retira', e($pickupPhone))
-                .$this->infoRow('Identificación de quien retira', e((string) ($order->pti_identificacion ?? '')));
+                .$this->infoRow(trim((string) ($order->pti_tipo_identificacion ?? '')) ?: 'Identificación de quien retira', e((string) ($order->pti_identificacion ?? '')));
         }
         $currency = $this->currency((string) $order->pai_codigo);
         $rows = $items->map(function ($item) use ($currency) {

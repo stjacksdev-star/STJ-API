@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\CustomerDocumentNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -15,7 +16,7 @@ class StorefrontCheckoutCatalogController extends BaseController
         abort_unless($storefrontCountry?->pai_id_world, 404);
 
         return $this->success([
-            'documentTypes' => ['DUI', 'DPI', 'Cédula', 'Carné de residente', 'Licencia de conducir', 'Pasaporte', 'Otro'],
+            'documentTypes' => CustomerDocumentNumber::types(strtoupper($country)),
             'defaultCountryId' => (int) $storefrontCountry->pai_id_world,
             'countries' => DB::table('stj_world_countries')
                 ->orderByRaw('CASE WHEN id = ? THEN 0 ELSE 1 END', [$storefrontCountry->pai_id_world])

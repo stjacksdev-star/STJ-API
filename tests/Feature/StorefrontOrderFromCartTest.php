@@ -68,7 +68,7 @@ class StorefrontOrderFromCartTest extends TestCase
         $shipping = Mockery::mock(StorefrontShippingService::class);
         $shipping->shouldReceive('quote')->times($allowed ? 1 : 0)->andReturn(['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => $type === 'DOMICILIO' ? ['id' => 11, 'name' => 'SPS', 'stateId' => 2, 'state' => 'Cortes', 'urbanId' => null] : null]);
         $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping);
-        $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '77067440', 'documentType' => 'DUI', 'document' => 'ID', 'countryId' => $countryId, 'stateId' => 2, 'cityId' => 11, 'address' => 'Residencia'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
+        $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '77067440', 'documentType' => 'Pasaporte', 'document' => 'ID12345', 'countryId' => $countryId, 'stateId' => 2, 'cityId' => 11, 'address' => 'Residencia'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
         if ($hasPromotion) {
             $payload += ['_origin' => 'APP', '_platform' => 'IOS', '_app_build' => 1];
         }
@@ -331,7 +331,7 @@ class StorefrontOrderFromCartTest extends TestCase
             $t->bigInteger('pti_id', true);
             foreach (['pti_pedido', 'pti_a_version'] as $c) {
                 $t->bigInteger($c)->nullable();
-            } foreach (['pti_misma_persona', 'pti_pais', 'pti_tienda', 'pti_persona', 'pti_telefono', 'pti_identificacion', 'pti_a_usuario', 'pti_a_ip'] as $c) {
+            } foreach (['pti_misma_persona', 'pti_pais', 'pti_tienda', 'pti_persona', 'pti_tipo_identificacion', 'pti_telefono', 'pti_identificacion', 'pti_a_usuario', 'pti_a_ip'] as $c) {
                 $t->string($c)->nullable();
             } $t->dateTime('pti_a_fecha')->nullable();
         });
