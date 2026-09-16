@@ -10,8 +10,6 @@ class StorefrontDenimController extends BaseController
 
     public function show(string $country)
     {
-        return $this->success([
-            'banner' => $this->denimService->landingBanner(),
-        ], 'Landing Denim obtenida');
+        return $this->success($this->denimService->landing(), 'Landing Denim obtenida');
     }
 }

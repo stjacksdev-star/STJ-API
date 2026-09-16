@@ -26,6 +26,44 @@ class StorefrontDenimService
         ];
     }
 
+    public function landing(): array
+    {
+        $content = config('storefront_denim');
+        $baseUrl = rtrim((string) ($content['asset_base_url'] ?? ''), '/');
+
+        return [
+            'banner' => array_merge($content['banner'] ?? [], $this->landingBanner() ?? []),
+            'heroSlider' => $this->decorateItems($content['hero_slider'] ?? [], $baseUrl),
+            'featuredFits' => [
+                'title' => $content['featured_fits']['title'] ?? 'Fits destacados',
+                'items' => $this->decorateItems($content['featured_fits']['items'] ?? [], $baseUrl),
+            ],
+            'details' => [
+                'title' => $content['details']['title'] ?? 'Detalles',
+                'columns' => array_map(fn (array $column) => $this->decorateItems($column, $baseUrl), $content['details']['columns'] ?? []),
+            ],
+            'video' => $this->decorateAssets($content['video'] ?? [], $baseUrl),
+            'audienceLinks' => $content['audience_links'] ?? [],
+        ];
+    }
+
+    private function decorateItems(array $items, string $baseUrl): array
+    {
+        return array_map(fn (array $item) => $this->decorateAssets($item, $baseUrl), $items);
+    }
+
+    private function decorateAssets(array $item, string $baseUrl): array
+    {
+        foreach (['desktopImage', 'mobileImage', 'srcDesktop', 'srcMobile', 'posterDesktop', 'posterMobile'] as $key) {
+            $value = trim((string) ($item[$key] ?? ''));
+            if ($value !== '' && ! str_starts_with($value, 'http://') && ! str_starts_with($value, 'https://')) {
+                $item[$key] = $baseUrl.'/'.ltrim($value, '/');
+            }
+        }
+
+        return $item;
+    }
+
     private function categoryAsset(mixed $path): ?string
     {
         $path = trim((string) $path);
