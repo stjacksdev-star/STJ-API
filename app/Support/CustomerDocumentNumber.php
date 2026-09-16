@@ -21,7 +21,7 @@ class CustomerDocumentNumber
     public static function normalize(string $country, string $type, string $number): string
     {
         $number = trim($number);
-        if ((strtoupper($country) === 'SV' && $type === 'DUI') || (strtoupper($country) === 'GT' && $type === 'DPI')) {
+        if (in_array(strtoupper($country).':'.$type, ['SV:DUI', 'GT:DPI', 'CR:Cédula', 'HN:DNI'], true)) {
             return preg_replace('/[\s-]+/', '', $number) ?? '';
         }
 
@@ -35,6 +35,8 @@ class CustomerDocumentNumber
         $normalized = self::normalize($country, $type, $number);
         if (strtoupper($country) === 'SV' && $type === 'DUI') return (bool) preg_match('/^\d{9}$/', $normalized);
         if (strtoupper($country) === 'GT' && $type === 'DPI') return (bool) preg_match('/^\d{13}$/', $normalized);
+        if (strtoupper($country) === 'CR' && $type === 'Cédula') return (bool) preg_match('/^\d{9}$/', $normalized);
+        if (strtoupper($country) === 'HN' && $type === 'DNI') return (bool) preg_match('/^\d{13}$/', $normalized);
 
         return $normalized !== '' && mb_strlen($normalized) <= 50;
     }
@@ -43,6 +45,8 @@ class CustomerDocumentNumber
     {
         if (strtoupper($country) === 'SV' && $type === 'DUI') return 'El DUI debe contener exactamente 9 dígitos, con o sin guion.';
         if (strtoupper($country) === 'GT' && $type === 'DPI') return 'El DPI/CUI debe contener exactamente 13 dígitos; puedes usar espacios o guiones.';
+        if (strtoupper($country) === 'CR' && $type === 'Cédula') return 'La cédula debe contener exactamente 9 dígitos; puedes usar espacios o guiones.';
+        if (strtoupper($country) === 'HN' && $type === 'DNI') return 'El DNI debe contener exactamente 13 dígitos; puedes usar espacios o guiones.';
 
         return 'Selecciona un tipo de documento válido e ingresa su número.';
     }

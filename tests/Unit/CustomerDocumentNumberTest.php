@@ -25,4 +25,20 @@ class CustomerDocumentNumberTest extends TestCase
         $this->assertContains('DNI', CustomerDocumentNumber::types('HN'));
         $this->assertNotContains('DPI', CustomerDocumentNumber::types('SV'));
     }
+
+    public function test_costa_rican_cedula_and_honduran_dni_use_national_lengths(): void
+    {
+        $this->assertTrue(CustomerDocumentNumber::valid('CR', 'Cédula', '1-2345-6789'));
+        $this->assertSame('123456789', CustomerDocumentNumber::normalize('CR', 'Cédula', '1-2345-6789'));
+        $this->assertFalse(CustomerDocumentNumber::valid('CR', 'Cédula', '12345678'));
+        $this->assertTrue(CustomerDocumentNumber::valid('HN', 'DNI', '0801-1990-12345'));
+        $this->assertSame('0801199012345', CustomerDocumentNumber::normalize('HN', 'DNI', '0801-1990-12345'));
+        $this->assertFalse(CustomerDocumentNumber::valid('HN', 'DNI', '080119901234'));
+    }
+
+    public function test_panamanian_cedula_has_no_fixed_digit_length_rule(): void
+    {
+        $this->assertTrue(CustomerDocumentNumber::valid('PA', 'Cédula', '8-123-456'));
+        $this->assertTrue(CustomerDocumentNumber::valid('PA', 'Cédula', 'E-8-12345'));
+    }
 }
