@@ -330,10 +330,10 @@ class StorefrontOrderService
             if (! $residenceCountry || ! $residenceState || ! $residenceCity) {
                 throw ValidationException::withMessages(['customer.address' => 'La ubicación de residencia seleccionada no es válida.']);
             }
-            if (! CustomerDocumentNumber::valid((string) $residenceCountry->iso2, (string) $customer['documentType'], (string) $customer['document'])) {
-                throw ValidationException::withMessages(['customer.document' => CustomerDocumentNumber::message((string) $residenceCountry->iso2, (string) $customer['documentType'])]);
+            if (! CustomerDocumentNumber::valid((string) $country->pai_codigo, (string) $customer['documentType'], (string) $customer['document'])) {
+                throw ValidationException::withMessages(['customer.document' => CustomerDocumentNumber::message((string) $country->pai_codigo, (string) $customer['documentType'])]);
             }
-            $customer['document'] = CustomerDocumentNumber::normalize((string) $residenceCountry->iso2, (string) $customer['documentType'], (string) $customer['document']);
+            $customer['document'] = CustomerDocumentNumber::normalize((string) $country->pai_codigo, (string) $customer['documentType'], (string) $customer['document']);
             $phone = CustomerPhoneNumber::digits((string) ($customer['phone'] ?? ''));
             if (! CustomerPhoneNumber::valid((string) $residenceCountry->iso2, $phone)) {
                 throw ValidationException::withMessages(['customer.phone' => CustomerPhoneNumber::message((string) $residenceCountry->iso2)]);
