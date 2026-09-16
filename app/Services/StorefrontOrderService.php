@@ -76,6 +76,21 @@ class StorefrontOrderService
             if ($cart->car_tipo === 'DOMICILIO' && $storeCode !== (string) config('inventory.domicilio_store_by_country.'.strtolower((string) $country->pai_codigo))) {
                 throw ValidationException::withMessages(['fulfillment' => 'La fuente de Domicilio no coincide con la configuracion autorizada.']);
             }
+            if ($cart->car_tipo === 'DOMICILIO') {
+                $deliveryStateId = (int) data_get($payload, 'delivery.state_id');
+                $deliveryCityId = (int) data_get($payload, 'delivery.city_id');
+                $validDeliveryState = $deliveryStateId > 0 && DB::table('stj_world_states')
+                    ->where('id', $deliveryStateId)->where('country_id', $country->pai_id_world)->exists();
+                if (! $validDeliveryState) {
+                    throw ValidationException::withMessages(['delivery.state_id' => 'Selecciona un departamento válido para el envío.']);
+                }
+                $validDeliveryCity = $deliveryCityId > 0 && DB::table('stj_world_cities')
+                    ->where('id', $deliveryCityId)->where('state_id', $deliveryStateId)
+                    ->where('country_id', $country->pai_id_world)->exists();
+                if (! $validDeliveryCity) {
+                    throw ValidationException::withMessages(['delivery.city_id' => 'Selecciona un municipio válido para el envío.']);
+                }
+            }
             if ($cart->car_tipo === 'DOMICILIO' && trim((string) data_get($payload, 'delivery.addressLine1')) === '') {
                 throw ValidationException::withMessages(['delivery.addressLine1' => 'La direccion es obligatoria para entrega a domicilio.']);
             }
