@@ -13,8 +13,10 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use App\Support\CouponProductScope;
+use App\Support\CustomerPhoneNumber;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\RateLimiter;
 
 class StorefrontAccountController extends BaseController
@@ -156,7 +158,11 @@ class StorefrontAccountController extends BaseController
             return response()->json(['ok' => false, 'message' => 'Este correo ya esta registrado.', 'errors' => ['email' => ['Este correo ya esta registrado.']]], 422);
         }
 
-        $phoneCountry = DB::table('stj_world_countries')->where('id', $data['phone_country_id'])->first(['phonecode']);
+        $phoneCountry = DB::table('stj_world_countries')->where('id', $data['phone_country_id'])->first(['iso2', 'phonecode']);
+        $data['phone'] = CustomerPhoneNumber::digits($data['phone']);
+        if (! CustomerPhoneNumber::valid((string) $phoneCountry->iso2, $data['phone'])) {
+            throw ValidationException::withMessages(['phone' => CustomerPhoneNumber::message((string) $phoneCountry->iso2)]);
+        }
         [$customerId, $welcomeCoupon] = DB::transaction(function () use ($data, $email, $phoneCountry, $storefrontCountry) {
             $customerId = DB::table('stj_usuarios')->insertGetId([
                 'usu_usuario' => $email,
@@ -353,12 +359,21 @@ class StorefrontAccountController extends BaseController
             'whatsapp' => ['nullable', 'string', 'max:30'],
         ]);
 
-        $country = DB::table('stj_world_countries')->where('id', $data['country_id'])->first(['name', 'phonecode']);
+        $country = DB::table('stj_world_countries')->where('id', $data['country_id'])->first(['iso2', 'name', 'phonecode']);
         $state = DB::table('stj_world_states')->where('id', $data['state_id'])->where('country_id', $data['country_id'])->first(['id', 'name']);
         $city = $state ? DB::table('stj_world_cities')->where('id', $data['city_id'])->where('state_id', $data['state_id'])->first(['id', 'name']) : null;
 
         if (! $country || ! $state || ! $city) {
             return $this->error('La ubicacion seleccionada no es valida.', 422);
+        }
+
+        $data['phone'] = CustomerPhoneNumber::digits($data['phone']);
+        $data['whatsapp'] = CustomerPhoneNumber::digits((string) ($data['whatsapp'] ?? ''));
+        if (! CustomerPhoneNumber::valid((string) $country->iso2, $data['phone'])) {
+            throw ValidationException::withMessages(['phone' => CustomerPhoneNumber::message((string) $country->iso2)]);
+        }
+        if ($data['whatsapp'] !== '' && ! CustomerPhoneNumber::valid((string) $country->iso2, $data['whatsapp'])) {
+            throw ValidationException::withMessages(['whatsapp' => CustomerPhoneNumber::message((string) $country->iso2)]);
         }
 
         $phoneCode = '+'.ltrim((string) $country->phonecode, '+');
@@ -375,9 +390,9 @@ class StorefrontAccountController extends BaseController
             'usu_departamento_txt' => $state->name,
             'usu_municipio_txt' => $city->name,
             'usu_telefono_pais' => $phoneCode,
-            'usu_telefono' => trim($data['phone']),
+            'usu_telefono' => $data['phone'],
             'usu_telefono_w_pais' => $data['whatsapp'] ? $phoneCode : '',
-            'usu_telefono_w' => trim((string) ($data['whatsapp'] ?? '')),
+            'usu_telefono_w' => $data['whatsapp'],
         ])->save();
 
         return $this->success($this->profile($customer->refresh()), 'Datos actualizados');
@@ -390,7 +405,7 @@ class StorefrontAccountController extends BaseController
         return $this->success(DB::table('stj_world_countries')
             ->orderByRaw("FIELD(iso2, 'DO', 'VE', 'HN', 'PA', 'US', 'CR', 'GT', 'SV') DESC")
             ->orderBy('name')
-            ->get(['id', 'name', 'phonecode']));
+            ->get(['id', 'iso2', 'name', 'phonecode']));
     }
 
     public function states(Request $request, int $country)
@@ -407,12 +422,13 @@ class StorefrontAccountController extends BaseController
         return $this->success(DB::table('stj_world_cities')->where('state_id', $state)->orderBy('name')->get(['id', 'name']));
     }
 
-    public function storeAddress(Request $request)
+    public function storeAddress(Request $request, string $country)
     {
         $customer = $this->storefrontCustomer($request);
         if (! $customer) return $this->error('No autorizado.', 403);
 
         $data = $this->validatedAddress($request);
+        if (! $this->addressMatchesStorefrontCountry($data, $country)) return $this->error('La direccion de entrega debe pertenecer al pais de esta tienda.', 422);
         $location = $this->addressLocation($data);
         if (! $location) return $this->error('La ubicacion seleccionada no es valida.', 422);
 
@@ -429,12 +445,13 @@ class StorefrontAccountController extends BaseController
         return $this->success($this->addresses($customer), 'Direccion agregada');
     }
 
-    public function updateAddress(Request $request, int $address)
+    public function updateAddress(Request $request, string $country, int $address)
     {
         $customer = $this->storefrontCustomer($request);
         if (! $customer || ! $this->ownsAddress($customer, $address)) return $this->error('Direccion no encontrada.', 404);
 
         $data = $this->validatedAddress($request);
+        if (! $this->addressMatchesStorefrontCountry($data, $country)) return $this->error('La direccion de entrega debe pertenecer al pais de esta tienda.', 422);
         $location = $this->addressLocation($data);
         if (! $location) return $this->error('La ubicacion seleccionada no es valida.', 422);
 
@@ -499,9 +516,19 @@ class StorefrontAccountController extends BaseController
     private function addressLocation(array $data): ?array
     {
         $country = DB::table('stj_world_countries')->where('id', $data['country_id'])->first(['id', 'name']);
-        $state = DB::table('stj_world_states')->where('id', $data['state_id'])->where('country_id', $data['country_id'])->first(['id', 'name']);
+        $state = DB::table('stj_world_states')->where('id', $data['state_id'])->where('country_id', $data['country_id'])->where('estado', 1)->first(['id', 'name']);
         $city = $state ? DB::table('stj_world_cities')->where('id', $data['city_id'])->where('state_id', $data['state_id'])->first(['id', 'name']) : null;
         return $country && $state && $city ? compact('country', 'state', 'city') : null;
+    }
+
+    private function addressMatchesStorefrontCountry(array $data, string $countryCode): bool
+    {
+        $country = DB::table('stj_world_countries')
+            ->where('id', $data['country_id'])
+            ->where('iso2', strtoupper($countryCode))
+            ->first(['id']);
+
+        return $country !== null;
     }
 
     private function addressValues(StorefrontCustomer $customer, array $data, array $location, bool $primary): array
