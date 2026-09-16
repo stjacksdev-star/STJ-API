@@ -73,11 +73,13 @@ class StorefrontOrderConfirmationEmailService
             ->leftJoin('stj_tiendas as store', function ($join) {
                 $join->on('store.tie_codigo', '=', 'orders.ped_tienda')->on('store.tie_pais', '=', 'orders.ped_id_pais');
             })
+            ->leftJoin('stj_pedidos_tienda as pickup', 'pickup.pti_pedido', '=', 'orders.ped_id')
+            ->leftJoin('stj_world_countries as pickup_country', 'pickup_country.id', '=', 'country.pai_id_world')
             ->leftJoin('stj_pedidos_direccion as shipping', 'shipping.pdi_pedido', '=', 'orders.ped_id')
             ->leftJoin('stj_direcciones as address', 'address.dir_id', '=', 'shipping.pdi_direccion')
             ->where('orders.ped_id', $orderId)
             ->where('payment.ppa_id', $paymentId)
-            ->selectRaw('orders.*, payment.*, country.pai_codigo, country.pai_nombre, store.tie_nombre, store.tie_correo, address.dir_direccion, address.dir_referencia, address.dir_departamento_txt, address.dir_municipio_txt, shipping.pdi_costo_envio_txt')
+            ->selectRaw('orders.*, payment.*, country.pai_codigo, country.pai_nombre, store.tie_nombre, store.tie_correo, pickup.pti_misma_persona, pickup.pti_persona, pickup.pti_telefono, pickup.pti_identificacion, pickup_country.phonecode as pickup_phonecode, address.dir_direccion, address.dir_referencia, address.dir_departamento_txt, address.dir_municipio_txt, shipping.pdi_costo_envio_txt')
             ->first();
     }
 
@@ -90,7 +92,18 @@ class StorefrontOrderConfirmationEmailService
             : 'Retiro en tienda: '.e((string) $order->tie_nombre);
         $deliveryNotice = $isHomeDelivery
             ? $this->infoRow('Entrega', 'Entrega en 7 días hábiles')
-            : '';
+            : '<tr><td colspan="2" style="padding:12px 0;color:#92400e;font-weight:600">Tu pedido estará reservado durante 48 horas para retirarlo en la tienda elegida.</td></tr>';
+        $pickupRows = '';
+        if (! $isHomeDelivery && strtoupper((string) ($order->pti_misma_persona ?? 'SI')) === 'NO') {
+            $pickupPhone = trim((string) ($order->pti_telefono ?? ''));
+            $pickupPrefix = ltrim(trim((string) ($order->pickup_phonecode ?? '')), '+');
+            if ($pickupPhone !== '' && $pickupPrefix !== '' && ! str_starts_with(preg_replace('/\D+/', '', $pickupPhone) ?: '', $pickupPrefix)) {
+                $pickupPhone = '+'.$pickupPrefix.' '.$pickupPhone;
+            }
+            $pickupRows = $this->infoRow('Retira', e((string) ($order->pti_persona ?? '')))
+                .$this->infoRow('Teléfono de quien retira', e($pickupPhone))
+                .$this->infoRow('Identificación de quien retira', e((string) ($order->pti_identificacion ?? '')));
+        }
         $currency = $this->currency((string) $order->pai_codigo);
         $rows = $items->map(function ($item) use ($currency) {
             $price = (float) $item->car_precio * (1 - ((float) $item->car_descuento_final / 100));
@@ -112,6 +125,7 @@ class StorefrontOrderConfirmationEmailService
             .$this->infoRow('Comprobante', e((string) $order->ppa_ref))
             .$this->infoRow('Destino', $destination)
             .$deliveryNotice
+            .$pickupRows
             .$this->infoRow('Método de pago', $payment)
             .$this->infoRow('Teléfono', e($this->phone($order)))
             .'</table><table role="presentation" width="100%" style="margin:18px 0;border-collapse:collapse;font-size:14px;border-top:1px solid #e5e7eb">'

@@ -162,6 +162,7 @@ class StorefrontPasswordResetService
         $content = <<<HTML
         <h1 style="font-size:26px;line-height:1.25;margin:0 0 16px;color:#0f172a">Crea una nueva contraseña</h1>
         <p style="font-size:16px;line-height:1.65;margin:0 0 12px;color:#475569">Hola <strong>{$name}</strong>, recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+        <p style="font-size:16px;line-height:1.65;margin:0 0 12px;color:#475569">Para crear tu nueva contraseña, haz clic en el botón <strong>Restablecer contraseña</strong> que aparece a continuación.</p>
         <p style="margin:28px 0"><a href="{$safeUrl}" style="display:inline-block;background:#020617;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:14px 24px;border-radius:10px">Restablecer contraseña</a></p>
         <p style="font-size:14px;line-height:1.65;margin:0;color:#64748b">Este enlace vence en {$minutes} minutos y solo puede utilizarse una vez. Si no solicitaste el cambio, ignora este correo; tu contraseña seguirá siendo la misma.</p>
         HTML;
