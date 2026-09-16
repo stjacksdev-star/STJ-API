@@ -112,6 +112,10 @@ class StorefrontOrderService
                         throw ValidationException::withMessages(["pickup.{$field}" => "La {$label} de quien retirara es obligatoria."]);
                     }
                 }
+                $pickup['phone'] = CustomerPhoneNumber::digits((string) $pickup['phone']);
+                if (! CustomerPhoneNumber::valid((string) $country->pai_codigo, $pickup['phone'])) {
+                    throw ValidationException::withMessages(['pickup.phone' => CustomerPhoneNumber::message((string) $country->pai_codigo)]);
+                }
             }
             // Revalidate the complete cart again immediately before persisting the
             // order. A stale unavailable flag must never make a line disappear.
