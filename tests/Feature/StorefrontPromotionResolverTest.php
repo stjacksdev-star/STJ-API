@@ -352,6 +352,38 @@ class StorefrontPromotionResolverTest extends TestCase
         $this->assertSame('Aplica 2x1', $result['lines'][1]['promotion']['benefitLabel']);
     }
 
+    public function test_pair_promotion_reports_one_missing_item_without_changing_the_cart_total(): void
+    {
+        foreach (['2x1', '21/2'] as $index => $restriction) {
+            $id = 160 + $index;
+            $this->promotion($id, [
+                'prm_tipo_promocion' => 'CONDICION-SKU',
+                'prm_restriccion' => $restriction,
+            ]);
+            $this->product($id, 200 + $index);
+
+            $context = [
+                ...$this->context('DOMICILIO', null, [
+                    ['key' => 'single', 'productId' => 200 + $index, 'quantity' => 1, 'unitPrice' => 20],
+                ]),
+                'includePending' => true,
+            ];
+            $single = $this->resolver->resolve($context);
+            $this->assertSame('0.00', $single['totals']['discount']);
+            $this->assertNull($single['lines'][0]['promotion']);
+            $this->assertSame($id, $single['lines'][0]['pendingPromotion']['id']);
+            $this->assertSame($restriction, $single['lines'][0]['pendingPromotion']['restriction']);
+
+            $pair = $this->resolver->resolve([
+                ...$context,
+                'lines' => [['key' => 'pair', 'productId' => 200 + $index, 'quantity' => 2, 'unitPrice' => 20]],
+            ]);
+            $this->assertNull($pair['lines'][0]['pendingPromotion']);
+            $this->assertSame($id, $pair['lines'][0]['promotion']['id']);
+            $this->assertGreaterThan(0, (float) $pair['totals']['discount']);
+        }
+    }
+
     public function test_conditional_promotions_calculate_quantities(): void
     {
         $cases = [

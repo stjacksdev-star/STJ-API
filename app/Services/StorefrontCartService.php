@@ -860,6 +860,7 @@ class StorefrontCartService
                 'storeId' => $cart->car_tipo === 'TIENDA' ? (int) $cart->car_tienda_id : null,
                 'storeName' => $fulfillment['storeName'] ?? null,
                 'currencySymbol' => $this->currencySymbol((string) $cart->car_moneda),
+                'includePending' => true,
                 'lines' => $eligibleItems->map(fn ($item) => [
                     'key' => (string) $item->getKey(),
                     'productId' => (int) $item->cad_producto_id,
@@ -911,6 +912,7 @@ class StorefrontCartService
                 'baseSubtotal' => round($baseTotal, 2),
                 'lineSubtotal' => round($lineSubtotal, 2),
                 'promotion' => $resolved['promotion'] ?? null,
+                'pendingPromotion' => $resolved['pendingPromotion'] ?? null,
                 'coupons' => $couponLine['coupons'] ?? [],
                 'currency' => $cart->car_moneda,
             ];

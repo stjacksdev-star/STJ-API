@@ -26,15 +26,17 @@ class StorefrontPromotionResolver
     public function resolve(array $context): array
     {
         $normalized = $this->normalizeContext($context);
+        $includePending = (bool) ($context['includePending'] ?? false);
         $promotions = $this->eligiblePromotions($normalized);
-        $evaluations = $promotions
-            ->map(fn (array $promotion) => $this->evaluate($promotion, $normalized))
+        $allEvaluations = $promotions
+            ->map(fn (array $promotion) => $this->evaluate($promotion, $normalized));
+        $evaluations = $allEvaluations
             ->filter(fn (array $evaluation) => $evaluation['totalBenefitCents'] > 0
                 || ($normalized['includeUntriggered'] && $evaluation['eligibleLineKeys'] !== []))
             ->values();
 
         $resolvedLines = collect($normalized['lines'])
-            ->map(function (array $line) use ($evaluations, $normalized) {
+            ->map(function (array $line) use ($evaluations, $allEvaluations, $normalized, $includePending) {
                 $candidates = $evaluations
                     ->filter(fn (array $evaluation) => ($evaluation['allocations'][$line['key']] ?? 0) > 0
                         || ($normalized['includeUntriggered']
@@ -55,6 +57,22 @@ class StorefrontPromotionResolver
                 $promotion = $selected === null
                     ? null
                     : $this->promotionPayload($selected, $normalized, $line, $discountCents);
+                $pendingPromotion = null;
+                if ($includePending && $promotion === null) {
+                    $pendingCandidates = $allEvaluations
+                        ->filter(fn (array $evaluation) => $evaluation['promotionType'] === 'CONDICION-SKU'
+                            && in_array($evaluation['restriction'], ['2x1', '21/2'], true)
+                            && $evaluation['totalBenefitCents'] === 0
+                            && in_array($line['key'], $evaluation['eligibleLineKeys'], true)
+                            && collect($normalized['lines'])
+                                ->whereIn('key', $evaluation['eligibleLineKeys'])
+                                ->sum('quantity') === 1)
+                        ->map(fn (array $evaluation) => [...$evaluation, 'lineBenefitCents' => 0]);
+                    $pending = $this->select($pendingCandidates);
+                    if ($pending !== null) {
+                        $pendingPromotion = $this->promotionPayload($pending, $normalized, $line, 0);
+                    }
+                }
 
                 return [
                     'key' => $line['key'],
@@ -65,6 +83,7 @@ class StorefrontPromotionResolver
                     'discount' => $this->decimal($discountCents),
                     'finalTotal' => $this->decimal(max(0, $lineBaseCents - $discountCents)),
                     'promotion' => $promotion,
+                    'pendingPromotion' => $pendingPromotion,
                 ];
             })
             ->values();
