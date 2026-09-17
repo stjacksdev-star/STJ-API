@@ -6,6 +6,7 @@ use App\Exceptions\CartOperationConflict;
 use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontPaymentEventService;
+use App\Services\StorefrontPromotionResolver;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -166,7 +167,7 @@ class PowerTranzPaymentService
     private function assertAuthorizedAmount(int $orderId, object $payment): void
     {
         $details = DB::table('stj_pedidos_detalle')->where('car_ref', $payment->ppa_ref)
-            ->get(['car_precio', 'car_cantidad', 'car_descuento_final', 'car_descuento']);
+            ->get(['car_id', 'car_producto', 'car_precio', 'car_cantidad', 'car_promocion_id', 'car_descuento_final', 'car_descuento']);
         $subtotal = 0;
         $roundingTolerance = 0;
         foreach ($details as $detail) {
@@ -185,9 +186,69 @@ class PowerTranzPaymentService
         $persistedSubtotal = $this->cents((string) $payment->ppa_monto_senv);
         $persistedTotal = $this->cents((string) $payment->ppa_monto);
         $detailsMatch = $details->isNotEmpty() && abs($subtotal - $persistedSubtotal) <= $roundingTolerance;
+        if (! $detailsMatch && $this->repairPendingPromotionPercentages($orderId, $payment, $details, $persistedSubtotal, $roundingTolerance)) {
+            $detailsMatch = true;
+        }
         if ($persistedTotal <= 0 || ! $detailsMatch || $persistedSubtotal + $shipping !== $persistedTotal) {
             throw ValidationException::withMessages(['payment' => 'El importe persistido no coincide con el pedido recalculado.']);
         }
+    }
+
+    private function repairPendingPromotionPercentages(int $orderId, object $payment, \Illuminate\Support\Collection $details, int $persistedSubtotal, int $roundingTolerance): bool
+    {
+        if ($details->isEmpty() || DB::table('stj_powertranz_operaciones')->where('pto_pago_id', $payment->ppa_id)->exists()) {
+            return false;
+        }
+        $order = DB::table('stj_pedidos')->where('ped_id', $orderId)
+            ->first(['ped_id_pais', 'ped_checkout', 'ped_tienda', 'ped_origen', 'ped_plataforma', 'ped_fecha']);
+        if (! $order || $details->contains(fn ($detail) => ! $detail->car_producto)) {
+            return false;
+        }
+
+        try {
+            $resolution = app(StorefrontPromotionResolver::class)->resolve([
+                'channel' => strtoupper((string) $order->ped_origen) === 'APP' ? 'APP' : 'WEB',
+                'platform' => strtoupper((string) $order->ped_origen) === 'APP' ? (string) $order->ped_plataforma : 'WEB',
+                'countryId' => (int) $order->ped_id_pais,
+                'checkoutType' => (string) $order->ped_checkout,
+                'storeCode' => (string) $order->ped_tienda,
+                'at' => $order->ped_fecha,
+                'lines' => $details->map(fn ($detail) => [
+                    'key' => (string) $detail->car_id,
+                    'productId' => (int) $detail->car_producto,
+                    'quantity' => (int) $detail->car_cantidad,
+                    'unitPrice' => (string) $detail->car_precio,
+                ])->all(),
+            ]);
+        } catch (\Throwable) {
+            return false;
+        }
+        $resolved = collect($resolution['lines'])->keyBy('key');
+        if ($this->cents((string) $resolution['totals']['final']) !== $persistedSubtotal
+            || $details->contains(fn ($detail) => (int) data_get($resolved->get((string) $detail->car_id), 'promotion.id') !== (int) $detail->car_promocion_id)) {
+            return false;
+        }
+
+        $reconstructedSubtotal = 0;
+        $percentages = [];
+        foreach ($details as $detail) {
+            $line = $resolved->get((string) $detail->car_id);
+            $base = $this->cents((string) $line['baseTotal']);
+            $percentage = $base > 0 ? round($this->cents((string) $line['discount']) * 100 / $base, 2) : 0;
+            $percentages[$detail->car_id] = $percentage;
+            $reconstructedSubtotal += (int) round($base * (100 - $percentage) / 100, 0, PHP_ROUND_HALF_UP);
+        }
+        if (abs($reconstructedSubtotal - $persistedSubtotal) > $roundingTolerance) {
+            return false;
+        }
+        foreach ($percentages as $detailId => $percentage) {
+            DB::table('stj_pedidos_detalle')->where('car_id', $detailId)->update([
+                'car_descuento' => $percentage,
+                'car_descuento_final' => $percentage,
+            ]);
+        }
+
+        return true;
     }
 
     private function cents(string $value): int

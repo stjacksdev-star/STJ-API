@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\StorefrontPromotionResolver;
+use App\Services\Payments\PowerTranzPaymentService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -453,6 +454,61 @@ class StorefrontPromotionResolverTest extends TestCase
                 $this->assertSame($expectedDiscount, $resolved[$key]['discount']);
                 $this->assertSame(95, $resolved[$key]['promotion']['id']);
             }
+        }
+    }
+
+    public function test_pending_payment_recovers_detail_percentages_only_when_the_saved_total_matches(): void
+    {
+        $this->promotion(301, ['prm_tipo_promocion' => 'CONDICION-SKU', 'prm_restriccion' => '21/2']);
+        $this->product(301, 100);
+        $this->product(301, 101);
+        Schema::create('stj_pedidos', function (Blueprint $table) {
+            $table->id('ped_id');
+            $table->unsignedBigInteger('ped_id_pais');
+            $table->string('ped_checkout');
+            $table->string('ped_tienda')->nullable();
+            $table->string('ped_origen');
+            $table->string('ped_plataforma')->nullable();
+            $table->dateTime('ped_fecha');
+        });
+        Schema::create('stj_pedidos_detalle', function (Blueprint $table) {
+            $table->id('car_id');
+            $table->string('car_ref');
+            $table->unsignedBigInteger('car_producto');
+            $table->decimal('car_precio', 12, 2);
+            $table->integer('car_cantidad');
+            $table->unsignedBigInteger('car_promocion_id')->nullable();
+            $table->decimal('car_descuento', 8, 2);
+            $table->decimal('car_descuento_final', 8, 2);
+        });
+        Schema::create('stj_pedidos_direccion', function (Blueprint $table) {
+            $table->unsignedBigInteger('pdi_pedido');
+            $table->decimal('pdi_costo_envio_final', 12, 2);
+        });
+        Schema::create('stj_powertranz_operaciones', function (Blueprint $table) {
+            $table->unsignedBigInteger('pto_pago_id');
+        });
+        DB::table('stj_pedidos')->insert(['ped_id' => 1, 'ped_id_pais' => 1, 'ped_checkout' => 'DOMICILIO', 'ped_origen' => 'WEB', 'ped_fecha' => '2026-07-29 12:00:00']);
+        DB::table('stj_pedidos_direccion')->insert(['pdi_pedido' => 1, 'pdi_costo_envio_final' => 0]);
+        DB::table('stj_pedidos_detalle')->insert([
+            ['car_id' => 1, 'car_ref' => 'STJ-PAIR', 'car_producto' => 100, 'car_precio' => 15.95, 'car_cantidad' => 2, 'car_promocion_id' => 301, 'car_descuento' => 50, 'car_descuento_final' => 50],
+            ['car_id' => 2, 'car_ref' => 'STJ-PAIR', 'car_producto' => 101, 'car_precio' => 24.95, 'car_cantidad' => 2, 'car_promocion_id' => 301, 'car_descuento' => 50, 'car_descuento_final' => 50],
+        ]);
+        $payment = (object) ['ppa_id' => 1, 'ppa_ref' => 'STJ-PAIR', 'ppa_monto_senv' => '61.34', 'ppa_monto' => '61.34'];
+        $service = (new \ReflectionClass(PowerTranzPaymentService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(PowerTranzPaymentService::class, 'assertAuthorizedAmount');
+        $method->invoke($service, 1, $payment);
+
+        $this->assertEqualsWithDelta(25.02, DB::table('stj_pedidos_detalle')->where('car_id', 1)->value('car_descuento_final'), 0.01);
+        $this->assertEqualsWithDelta(25.01, DB::table('stj_pedidos_detalle')->where('car_id', 2)->value('car_descuento_final'), 0.01);
+
+        DB::table('stj_pedidos_detalle')->update(['car_descuento' => 50, 'car_descuento_final' => 50]);
+        $invalidPayment = (object) ['ppa_id' => 1, 'ppa_ref' => 'STJ-PAIR', 'ppa_monto_senv' => '60.00', 'ppa_monto' => '60.00'];
+        try {
+            $method->invoke($service, 1, $invalidPayment);
+            $this->fail('Un subtotal no verificable no debe autorizar el pago.');
+        } catch (\Illuminate\Validation\ValidationException) {
+            $this->assertEqualsWithDelta(50, DB::table('stj_pedidos_detalle')->where('car_id', 1)->value('car_descuento_final'), 0.01);
         }
     }
 

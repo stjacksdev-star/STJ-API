@@ -21,6 +21,68 @@ use Illuminate\Validation\ValidationException;
 
 class PowerTranzController extends Controller
 {
+    public function pending(Request $request, string $country): JsonResponse
+    {
+        $visitor = $this->visitor($request);
+        $customer = $this->customer();
+        $row = DB::table('stj_carritos as cart')
+            ->join('stj_paises as country', 'country.pai_id', '=', 'cart.car_pais_id')
+            ->join('stj_pedidos as orders', 'orders.ped_id', '=', 'cart.car_pedido_id')
+            ->join('stj_pedidos_pago as payment', 'payment.ppa_pedido', '=', 'orders.ped_id')
+            ->whereRaw('UPPER(country.pai_codigo) = ?', [strtoupper($country)])
+            ->where('cart.car_estado', 'CONVERTIDO')
+            ->where('orders.ped_estatus', 'PENDIENTE_PAGO')
+            ->where('orders.ped_fecha', '>=', now()->subDays(7))
+            ->where('payment.ppa_tipo', 'TARJETA')
+            ->where('payment.ppa_estado', 'PENDIENTE')
+            ->when($customer,
+                fn ($query) => $query->where('cart.car_usu_id', $customer->getKey()),
+                fn ($query) => $query->whereNull('cart.car_usu_id')->where('cart.car_visitante_id', $visitor->getKey()),
+            )
+            ->orderByDesc('orders.ped_id')
+            ->first([
+                'orders.ped_id', 'orders.ped_checkout', 'cart.car_moneda', 'payment.ppa_ref', 'payment.ppa_monto_sdesc',
+                'payment.ppa_monto_senv', 'payment.ppa_monto', 'payment.ppa_articulos',
+            ]);
+
+        if (! $row) {
+            return response()->json(['ok' => true, 'data' => null])->header('Cache-Control', 'no-store, private');
+        }
+
+        $items = DB::table('stj_pedidos_detalle as detail')
+            ->leftJoin('stj_productos as product', 'product.pro_id', '=', 'detail.car_producto')
+            ->where('detail.car_ref', $row->ppa_ref)
+            ->get(['detail.car_id', 'detail.car_producto', 'detail.car_estilo_final', 'detail.car_talla',
+                'detail.car_cantidad', 'detail.car_precio', 'product.pro_nombre'])
+            ->map(fn ($item) => [
+                'key' => (string) $item->car_id,
+                'productId' => (int) $item->car_producto,
+                'sku' => (string) $item->car_estilo_final,
+                'size' => (string) $item->car_talla,
+                'name' => (string) ($item->pro_nombre ?: $item->car_estilo_final),
+                'quantity' => (int) $item->car_cantidad,
+                'price' => (float) $item->car_precio,
+                'currency' => (string) $row->car_moneda,
+            ])->all();
+
+        return response()->json(['ok' => true, 'data' => [
+            'order' => [
+                'pedidoId' => (int) $row->ped_id,
+                'paymentRef' => (string) $row->ppa_ref,
+                'checkoutType' => (string) $row->ped_checkout,
+                'currency' => (string) $row->car_moneda,
+                'paymentStatus' => 'PENDIENTE',
+                'baseSubtotal' => (string) $row->ppa_monto_sdesc,
+                'subtotal' => (string) $row->ppa_monto_senv,
+                'shipping' => number_format((float) $row->ppa_monto - (float) $row->ppa_monto_senv, 2, '.', ''),
+                'total' => (string) $row->ppa_monto,
+                'discount' => number_format((float) $row->ppa_monto_sdesc - (float) $row->ppa_monto_senv, 2, '.', ''),
+                'articleCount' => (int) $row->ppa_articulos,
+            ],
+            'items' => $items,
+        ]])->header('Cache-Control', 'no-store, private');
+    }
+
     public function start(Request $request, int $order, PowerTranzPaymentService $service, CheckoutEventService $events): JsonResponse
     {
         $data = $request->validate(['operation_uuid' => ['required', 'uuid'], 'card' => ['required', 'array'], 'card.pan' => ['required', 'digits_between:13,19'], 'card.cvv' => ['required', 'digits_between:3,4'], 'card.expiration' => ['required', 'digits:4'], 'card.holder' => ['required', 'string', 'max:100']]);

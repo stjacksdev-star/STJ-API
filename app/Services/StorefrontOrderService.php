@@ -248,7 +248,6 @@ class StorefrontOrderService
                     ...$item,
                     'baseTotal' => $baseTotal,
                     'discount' => $discount,
-                    'discountPercentage' => data_get($resolved, 'promotion.discountPercentage'),
                     'finalTotal' => $finalTotal,
                     'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
                     'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
@@ -286,7 +285,6 @@ class StorefrontOrderService
                             ...$item,
                             'discount' => $this->decimal($totalDiscount),
                             'couponDiscount' => (string) $couponLine['couponDiscount'],
-                            'discountPercentage' => (float) ($couponLine['commercialDiscountPercentage'] ?? $couponLine['effectiveDiscountPercentage'] ?? 0),
                             'finalTotal' => $finalTotal,
                             'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
                             'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
@@ -468,11 +466,9 @@ class StorefrontOrderService
             $pagoId = DB::table('stj_pedidos_pago')->insertGetId($paymentRow);
 
             $detailRows = collect($items)->map(function (array $item) use ($country, $checkoutType, $payload, $paymentRef, $now) {
-                $effectivePercentage = isset($item['discountPercentage'])
-                    ? round((float) $item['discountPercentage'], 2)
-                    : ($this->cents($item['baseTotal']) > 0
-                        ? round($this->cents($item['discount']) * 100 / $this->cents($item['baseTotal']), 2)
-                        : 0);
+                $effectivePercentage = $this->cents($item['baseTotal']) > 0
+                    ? round($this->cents($item['discount']) * 100 / $this->cents($item['baseTotal']), 2)
+                    : 0;
                 $promotion = $item['promotion'];
 
                 return [
