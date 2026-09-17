@@ -422,39 +422,66 @@ class StorefrontPromotionResolver
         $units = $lines
             ->flatMap(fn (array $line) => array_fill(0, $line['quantity'], [
                 'key' => $line['key'],
+                'productId' => $line['productId'],
                 'price' => $line['unitPriceCents'],
             ]))
-            ->sortBy('price')
             ->values();
-        $pairs = intdiv($units->count(), 2);
+        $restriction = (string) $promotion['restriction'];
+        $pairs = $restriction === '21/2'
+            ? $this->pairPromotionUnits($units)
+            : $units->sortBy('price')->values()->chunk(2)
+                ->filter(fn (Collection $pair) => $pair->count() === 2)
+                ->map(fn (Collection $pair) => $pair->values()->all())
+                ->values();
 
-        if ($pairs < 1) {
+        if ($pairs->isEmpty()) {
             return $allocations;
         }
 
-        $restriction = (string) $promotion['restriction'];
-        $discountedUnits = match ($restriction) {
-            '2xPP' => $pairs * 2,
-            '2x1', '21/2', '2doPrecio' => $pairs,
-            default => 0,
-        };
         $targetCents = $promotion['price'] !== null ? $this->cents($promotion['price']) : 0;
 
         if ($restriction === '2x1') {
-            return $this->twoForOneAllocations($units, $allocations);
+            return $this->twoForOneAllocations($pairs, $allocations);
         }
 
-        foreach ($units->take($discountedUnits) as $unit) {
-            $benefit = match ($restriction) {
-                '21/2' => (int) round($unit['price'] / 2, 0, PHP_ROUND_HALF_UP),
-                '2doPrecio' => max(0, $unit['price'] - $targetCents),
-                '2xPP' => max(0, $unit['price'] - (int) round($targetCents / 2, 0, PHP_ROUND_HALF_UP)),
-                default => 0,
-            };
-            $allocations[$unit['key']] += $benefit;
+        foreach ($pairs as [$cheaper, $other]) {
+            $discountedUnits = $restriction === '2xPP' ? [$cheaper, $other] : [$cheaper];
+            foreach ($discountedUnits as $unit) {
+                $benefit = match ($restriction) {
+                    '21/2' => (int) round($unit['price'] / 2, 0, PHP_ROUND_HALF_UP),
+                    '2doPrecio' => max(0, $unit['price'] - $targetCents),
+                    '2xPP' => max(0, $unit['price'] - (int) round($targetCents / 2, 0, PHP_ROUND_HALF_UP)),
+                    default => 0,
+                };
+                $allocations[$unit['key']] += $benefit;
+            }
         }
 
         return $allocations;
+    }
+
+    /** Pair copies of the same product first, then pair remaining eligible units. */
+    private function pairPromotionUnits(Collection $units): Collection
+    {
+        $pairs = collect();
+        $unpaired = collect();
+
+        foreach ($units->groupBy('productId') as $productUnits) {
+            $sorted = $productUnits->sortBy('price')->values();
+            for ($index = 0; $index + 1 < $sorted->count(); $index += 2) {
+                $pairs->push([$sorted[$index], $sorted[$index + 1]]);
+            }
+            if ($sorted->count() % 2 !== 0) {
+                $unpaired->push($sorted->last());
+            }
+        }
+
+        $unpaired = $unpaired->sortBy('price')->values();
+        for ($index = 0; $index + 1 < $unpaired->count(); $index += 2) {
+            $pairs->push([$unpaired[$index], $unpaired[$index + 1]]);
+        }
+
+        return $pairs;
     }
 
     /**
@@ -462,17 +489,13 @@ class StorefrontPromotionResolver
      * products in each pair. This preserves the 2x1 total without producing
      * a zero-priced invoice line.
      *
-     * @param  Collection<int, array{key: string, price: int}>  $units
+     * @param  Collection<int, array{0: array{key: string, price: int}, 1: array{key: string, price: int}}>  $pairs
      * @param  array<string, int>  $allocations
      * @return array<string, int>
      */
-    private function twoForOneAllocations(Collection $units, array $allocations): array
+    private function twoForOneAllocations(Collection $pairs, array $allocations): array
     {
-        $pairedUnits = $units->values();
-
-        for ($index = 0; $index + 1 < $pairedUnits->count(); $index += 2) {
-            $first = $pairedUnits[$index];
-            $second = $pairedUnits[$index + 1];
+        foreach ($pairs as [$first, $second]) {
             $pairBase = $first['price'] + $second['price'];
             $benefit = min($first['price'], $second['price'], max(0, $pairBase - 2));
 

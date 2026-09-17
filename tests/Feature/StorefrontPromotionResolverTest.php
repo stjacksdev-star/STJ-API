@@ -410,6 +410,52 @@ class StorefrontPromotionResolverTest extends TestCase
         }
     }
 
+    public function test_second_item_half_price_forms_every_pair_even_with_repeated_products(): void
+    {
+        $this->promotion(95, [
+            'prm_tipo_promocion' => 'CONDICION-SKU',
+            'prm_restriccion' => '21/2',
+        ]);
+        foreach ([100, 101, 102, 103] as $productId) {
+            $this->product(95, $productId);
+        }
+
+        $cases = [
+            [
+                [['key' => 'shirt', 'productId' => 100, 'quantity' => 2, 'unitPrice' => 15.95],
+                    ['key' => 'pajama-a', 'productId' => 101, 'quantity' => 1, 'unitPrice' => 24.95],
+                    ['key' => 'pajama-b', 'productId' => 102, 'quantity' => 1, 'unitPrice' => 24.95]],
+                '20.46',
+                ['shirt' => '7.98', 'pajama-a' => '12.48'],
+            ],
+            [
+                [['key' => 'shirt', 'productId' => 100, 'quantity' => 2, 'unitPrice' => 15.95],
+                    ['key' => 'pajama-a', 'productId' => 101, 'quantity' => 2, 'unitPrice' => 24.95],
+                    ['key' => 'pajama-b', 'productId' => 102, 'quantity' => 2, 'unitPrice' => 24.95]],
+                '32.94',
+                ['shirt' => '7.98', 'pajama-a' => '12.48', 'pajama-b' => '12.48'],
+            ],
+            [
+                [['key' => 'shirt', 'productId' => 100, 'quantity' => 2, 'unitPrice' => 15.95],
+                    ['key' => 'pajama-a', 'productId' => 101, 'quantity' => 2, 'unitPrice' => 24.95],
+                    ['key' => 'pajama-b', 'productId' => 102, 'quantity' => 2, 'unitPrice' => 30],
+                    ['key' => 'fourth', 'productId' => 103, 'quantity' => 2, 'unitPrice' => 40]],
+                '55.46',
+                ['shirt' => '7.98', 'pajama-a' => '12.48', 'pajama-b' => '15.00', 'fourth' => '20.00'],
+            ],
+        ];
+
+        foreach ($cases as [$lines, $expectedTotal, $expectedByLine]) {
+            $result = $this->resolver->resolve($this->context('DOMICILIO', null, $lines));
+            $resolved = collect($result['lines'])->keyBy('key');
+            $this->assertSame($expectedTotal, $result['totals']['discount']);
+            foreach ($expectedByLine as $key => $expectedDiscount) {
+                $this->assertSame($expectedDiscount, $resolved[$key]['discount']);
+                $this->assertSame(95, $resolved[$key]['promotion']['id']);
+            }
+        }
+    }
+
     public function test_invalid_or_expired_promotions_are_not_returned(): void
     {
         $this->promotion(30, [
