@@ -4,13 +4,16 @@ namespace App\Http\Controllers\Api\Dashboard;
 
 use App\Http\Controllers\Api\BaseController;
 use App\Services\Dashboard\PromotionService;
+use App\Services\Dashboard\AssetPublicationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class PromotionController extends BaseController
 {
     public function __construct(
         private readonly PromotionService $promotions,
+        private readonly AssetPublicationService $assets,
     ) {}
 
     public function index(Request $request)
@@ -160,7 +163,7 @@ class PromotionController extends BaseController
 
         $validated = $request->validate($this->actorRules());
 
-        return $this->success(
+        return $this->successWithRefreshedAssets(
             $this->promotions->cancel($promotion, $validated['actor'] ?? []),
             'Promocion y assets relacionados cancelados correctamente'
         );
@@ -174,10 +177,22 @@ class PromotionController extends BaseController
 
         $validated = $request->validate($this->actorRules());
 
-        return $this->success(
+        return $this->successWithRefreshedAssets(
             $this->promotions->activate($promotion, $validated['actor'] ?? []),
             'Promocion y assets vigentes activados correctamente'
         );
+    }
+
+    private function successWithRefreshedAssets(array $promotion, string $message)
+    {
+        try {
+            $this->assets->refresh();
+        } catch (Throwable $exception) {
+            report($exception);
+            $promotion['assetPublicationWarning'] = 'La promocion cambio de estado, pero no fue posible actualizar los assets visibles. Revise la publicacion de assets.';
+        }
+
+        return $this->success($promotion, $message);
     }
 
     private function actorRules(): array

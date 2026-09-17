@@ -32,6 +32,17 @@ class AssetPublicationService
             ->where('ast_inicio', '<=', $now->toDateTimeString())
             ->update(['ast_estado' => 'ACTIVO']);
 
+        return $this->refresh($now, $finished, $activated);
+    }
+
+    /**
+     * Regenera el JSON desde los estados actuales, sin ejecutar las transiciones del cron.
+     *
+     * @return array<string, mixed>
+     */
+    public function refresh(?Carbon $now = null, int $finished = 0, int $activated = 0): array
+    {
+        $now ??= now();
         $countries = $this->countries();
         $payload = [
             'generatedAt' => $now->toIso8601String(),
@@ -68,7 +79,7 @@ class AssetPublicationService
         return DB::table('stj_paises')
             ->select(['pai_id', 'pai_codigo', 'pai_nombre'])
             ->whereIn('pai_codigo', ['SV', 'GT', 'CR', 'PA', 'DO', 'HN'])
-            ->orderByRaw("FIELD(pai_codigo, 'SV', 'GT', 'CR', 'PA', 'DO', 'HN')")
+            ->orderByRaw("CASE pai_codigo WHEN 'SV' THEN 1 WHEN 'GT' THEN 2 WHEN 'CR' THEN 3 WHEN 'PA' THEN 4 WHEN 'DO' THEN 5 WHEN 'HN' THEN 6 END")
             ->get()
             ->all();
     }

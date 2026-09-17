@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\Dashboard\PromotionHistoryService;
+use App\Services\Dashboard\AssetPublicationService;
 use App\Services\Dashboard\PromotionProductImportService;
 use App\Services\Dashboard\PromotionService;
 use Illuminate\Database\Schema\Blueprint;
@@ -134,6 +135,37 @@ class DashboardPromotionStoreScopeTest extends TestCase
         $this->service->activate(10);
     }
 
+    public function test_asset_refresh_immediately_removes_finalized_asset_from_storefront_json(): void
+    {
+        $path = storage_path('app/storefront/assets.json');
+        $original = is_file($path) ? file_get_contents($path) : false;
+        DB::table('stj_assets')->insert([
+            'ast_idpromocion' => 10,
+            'ast_tipo_accion' => 1,
+            'ast_estado' => 'FINALIZADO',
+            'ast_tipo' => 'BANNER',
+            'ast_pais' => 1,
+            'ast_plataforma' => 'WEB',
+            'ast_inicio' => '2026-01-01 00:00:00',
+            'ast_fin' => '2099-12-31 23:59:59',
+        ]);
+
+        try {
+            $result = app(AssetPublicationService::class)->refresh();
+            $published = json_decode((string) file_get_contents($path), true);
+
+            $this->assertSame(0, $result['summary']['activated']);
+            $this->assertSame([], $published['countries']['sv']['assets']['banner']);
+            $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 10, 'ast_estado' => 'FINALIZADO']);
+        } finally {
+            if ($original === false) {
+                @unlink($path);
+            } else {
+                file_put_contents($path, $original);
+            }
+        }
+    }
+
     #[DataProvider('invalidStores')]
     public function test_invalid_selected_stores_roll_back(array $storeIds, string $message): void
     {
@@ -261,9 +293,19 @@ class DashboardPromotionStoreScopeTest extends TestCase
         });
 
         Schema::create('stj_assets', function (Blueprint $table) {
+            $table->id('ast_id');
             $table->unsignedBigInteger('ast_idpromocion');
             $table->integer('ast_tipo_accion');
             $table->string('ast_estado')->nullable();
+            $table->string('ast_tipo')->nullable();
+            $table->unsignedBigInteger('ast_pais')->nullable();
+            $table->string('ast_plataforma')->nullable();
+            $table->integer('ast_orden')->nullable();
+            $table->string('ast_imagen')->nullable();
+            $table->string('ast_imagen_movil')->nullable();
+            $table->string('ast_link')->nullable();
+            $table->string('ast_posicion')->nullable();
+            $table->string('ast_titulo')->nullable();
             $table->dateTime('ast_inicio')->nullable();
             $table->dateTime('ast_fin')->nullable();
         });
