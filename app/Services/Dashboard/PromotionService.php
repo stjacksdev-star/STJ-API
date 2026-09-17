@@ -457,6 +457,56 @@ class PromotionService
         return $this->find($id);
     }
 
+    public function activate(int $id, array $actor = []): array
+    {
+        DB::transaction(function () use ($id, $actor) {
+            $promotion = DB::table('stj_promociones')->where('prm_id', $id)->lockForUpdate()->first();
+
+            if (! $promotion) {
+                throw ValidationException::withMessages(['promotion' => 'La promocion seleccionada no existe.']);
+            }
+
+            if ((string) $promotion->prm_estado !== 'PENDIENTE') {
+                throw ValidationException::withMessages(['promotion' => 'Solo se pueden activar promociones pendientes.']);
+            }
+
+            $schedule = DB::table('stj_promociones_horario')
+                ->where('pho_promocion', $id)
+                ->where('pho_tipo', 'NORMAL')
+                ->where('pho_estado', 'PENDIENTE')
+                ->orderByDesc('pho_id')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $schedule) {
+                throw ValidationException::withMessages(['schedule' => 'La promocion no tiene un horario pendiente.']);
+            }
+
+            $now = $this->dashboardNow()->format('Y-m-d H:i:s');
+            if ((string) $schedule->pho_fin <= $now) {
+                throw ValidationException::withMessages(['schedule' => 'La vigencia de la promocion ya termino. Actualice la fecha final antes de activarla.']);
+            }
+
+            DB::table('stj_promociones')->where('prm_id', $id)->update(['prm_estado' => 'EN-PROCESO']);
+            DB::table('stj_promociones_horario')->where('pho_id', $schedule->pho_id)->update([
+                'pho_estado' => 'ACTIVO',
+                'pho_inicio' => (string) $schedule->pho_inicio <= $now ? $schedule->pho_inicio : $now,
+            ]);
+
+            DB::table('stj_assets')
+                ->where('ast_tipo_accion', 1)
+                ->where('ast_idpromocion', $id)
+                ->where('ast_estado', 'PENDIENTE')
+                ->where('ast_inicio', '<=', $now)
+                ->where('ast_fin', '>=', $now)
+                ->update(['ast_estado' => 'ACTIVO']);
+
+            $this->history->record($id, 'GENERAL', 'Promocion activada desde Dashboard; assets vigentes activados.', $actor);
+        });
+
+        return $this->find($id);
+    }
+
     /**
      * @param  array<string, mixed>  $actor
      */

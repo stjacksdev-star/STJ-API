@@ -102,6 +102,38 @@ class DashboardPromotionStoreScopeTest extends TestCase
         $this->service->cancel(10);
     }
 
+    public function test_activating_pending_promotion_starts_schedule_and_only_current_assets(): void
+    {
+        DB::table('stj_promociones_horario')->insert([
+            'pho_promocion' => 10, 'pho_tipo' => 'NORMAL',
+            'pho_inicio' => '2026-01-01 00:00:00', 'pho_fin' => '2099-12-31 23:59:59', 'pho_estado' => 'PENDIENTE',
+        ]);
+        DB::table('stj_assets')->insert([
+            ['ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'PENDIENTE', 'ast_inicio' => '2026-01-01 00:00:00', 'ast_fin' => '2099-12-31 23:59:59'],
+            ['ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'PENDIENTE', 'ast_inicio' => '2099-01-01 00:00:00', 'ast_fin' => '2099-12-31 23:59:59'],
+            ['ast_idpromocion' => 11, 'ast_tipo_accion' => 1, 'ast_estado' => 'PENDIENTE', 'ast_inicio' => '2026-01-01 00:00:00', 'ast_fin' => '2099-12-31 23:59:59'],
+        ]);
+
+        $promotion = $this->service->activate(10, ['id' => 7]);
+
+        $this->assertSame('EN-PROCESO', $promotion['status']);
+        $this->assertDatabaseHas('stj_promociones_horario', ['pho_promocion' => 10, 'pho_estado' => 'ACTIVO']);
+        $this->assertSame(1, DB::table('stj_assets')->where('ast_idpromocion', 10)->where('ast_estado', 'ACTIVO')->count());
+        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 11, 'ast_estado' => 'PENDIENTE']);
+        $this->assertDatabaseHas('stj_promociones_historial', ['pph_promocion' => 10, 'pph_usuario_id' => '7']);
+    }
+
+    public function test_expired_pending_promotion_cannot_be_activated(): void
+    {
+        DB::table('stj_promociones_horario')->insert([
+            'pho_promocion' => 10, 'pho_tipo' => 'NORMAL',
+            'pho_inicio' => '2025-01-01 00:00:00', 'pho_fin' => '2025-12-31 23:59:59', 'pho_estado' => 'PENDIENTE',
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->service->activate(10);
+    }
+
     #[DataProvider('invalidStores')]
     public function test_invalid_selected_stores_roll_back(array $storeIds, string $message): void
     {
@@ -232,6 +264,8 @@ class DashboardPromotionStoreScopeTest extends TestCase
             $table->unsignedBigInteger('ast_idpromocion');
             $table->integer('ast_tipo_accion');
             $table->string('ast_estado')->nullable();
+            $table->dateTime('ast_inicio')->nullable();
+            $table->dateTime('ast_fin')->nullable();
         });
 
         Schema::create('stj_promociones_historial', function (Blueprint $table) {
