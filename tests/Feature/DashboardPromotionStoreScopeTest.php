@@ -73,6 +73,35 @@ class DashboardPromotionStoreScopeTest extends TestCase
         $this->service->updateStores(10, 'SELECCIONADAS', [1]);
     }
 
+    public function test_cancelling_active_promotion_finalizes_only_its_assets_and_records_history(): void
+    {
+        DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_estado' => 'EN-PROCESO']);
+        DB::table('stj_promociones_horario')->insert([
+            'pho_promocion' => 10, 'pho_tipo' => 'NORMAL',
+            'pho_inicio' => '2026-09-01 00:00:00', 'pho_fin' => '2026-09-30 23:59:59', 'pho_estado' => 'ACTIVO',
+        ]);
+        DB::table('stj_assets')->insert([
+            ['ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO'],
+            ['ast_idpromocion' => 11, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO'],
+        ]);
+
+        $promotion = $this->service->cancel(10, ['id' => 7, 'name' => 'Operador']);
+
+        $this->assertSame('CANCELADO', $promotion['status']);
+        $this->assertDatabaseHas('stj_promociones', ['prm_id' => 10, 'prm_estado' => 'CANCELADO']);
+        $this->assertNotNull(DB::table('stj_promociones')->where('prm_id', 10)->value('prm_cancelado_fecha'));
+        $this->assertDatabaseHas('stj_promociones_horario', ['pho_promocion' => 10, 'pho_estado' => 'FINALIZADO']);
+        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 10, 'ast_estado' => 'FINALIZADO']);
+        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 11, 'ast_estado' => 'ACTIVO']);
+        $this->assertDatabaseHas('stj_promociones_historial', ['pph_promocion' => 10, 'pph_usuario_id' => '7']);
+    }
+
+    public function test_pending_promotion_cannot_be_cancelled(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->service->cancel(10);
+    }
+
     #[DataProvider('invalidStores')]
     public function test_invalid_selected_stores_roll_back(array $storeIds, string $message): void
     {
@@ -175,6 +204,7 @@ class DashboardPromotionStoreScopeTest extends TestCase
             $table->dateTime('prm_fecha')->nullable();
             $table->string('prm_grid_promo')->nullable();
             $table->string('prm_encabezado')->nullable();
+            $table->dateTime('prm_cancelado_fecha')->nullable();
         });
 
         Schema::create('stj_promociones_tienda', function (Blueprint $table) {
@@ -201,6 +231,7 @@ class DashboardPromotionStoreScopeTest extends TestCase
         Schema::create('stj_assets', function (Blueprint $table) {
             $table->unsignedBigInteger('ast_idpromocion');
             $table->integer('ast_tipo_accion');
+            $table->string('ast_estado')->nullable();
         });
 
         Schema::create('stj_promociones_historial', function (Blueprint $table) {

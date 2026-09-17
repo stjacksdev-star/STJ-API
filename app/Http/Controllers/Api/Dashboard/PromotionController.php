@@ -152,6 +152,20 @@ class PromotionController extends BaseController
         );
     }
 
+    public function cancel(Request $request, int $promotion)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate($this->actorRules());
+
+        return $this->success(
+            $this->promotions->cancel($promotion, $validated['actor'] ?? []),
+            'Promocion y assets relacionados cancelados correctamente'
+        );
+    }
+
     private function actorRules(): array
     {
         return [

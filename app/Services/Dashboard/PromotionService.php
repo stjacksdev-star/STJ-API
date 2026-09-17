@@ -277,9 +277,9 @@ class PromotionService
             ]);
         }
 
-        if ((string) $promotion->prm_estado === 'FINALIZADA') {
+        if (! in_array((string) $promotion->prm_estado, ['PENDIENTE', 'EN-PROCESO'], true)) {
             throw ValidationException::withMessages([
-                'promotion' => 'No se pueden modificar promociones finalizadas.',
+                'promotion' => 'Solo se pueden modificar promociones pendientes o en proceso.',
             ]);
         }
 
@@ -418,6 +418,43 @@ class PromotionService
         throw ValidationException::withMessages([
             'promotion' => 'Solo se pueden editar horarios de promociones pendientes o en proceso.',
         ]);
+    }
+
+    public function cancel(int $id, array $actor = []): array
+    {
+        DB::transaction(function () use ($id, $actor) {
+            $promotion = DB::table('stj_promociones')->where('prm_id', $id)->lockForUpdate()->first();
+
+            if (! $promotion) {
+                throw ValidationException::withMessages(['promotion' => 'La promocion seleccionada no existe.']);
+            }
+
+            if ((string) $promotion->prm_estado !== 'EN-PROCESO') {
+                throw ValidationException::withMessages(['promotion' => 'Solo se pueden cancelar promociones en proceso.']);
+            }
+
+            $now = $this->dashboardNow()->format('Y-m-d H:i:s');
+
+            DB::table('stj_promociones')->where('prm_id', $id)->update([
+                'prm_estado' => 'CANCELADO',
+                'prm_cancelado_fecha' => $now,
+            ]);
+
+            DB::table('stj_promociones_horario')
+                ->where('pho_promocion', $id)
+                ->whereIn('pho_estado', ['ACTIVO', 'PENDIENTE'])
+                ->update(['pho_estado' => 'FINALIZADO']);
+
+            DB::table('stj_assets')
+                ->where('ast_tipo_accion', 1)
+                ->where('ast_idpromocion', $id)
+                ->whereIn('ast_estado', ['ACTIVO', 'PENDIENTE'])
+                ->update(['ast_estado' => 'FINALIZADO']);
+
+            $this->history->record($id, 'GENERAL', 'Promocion cancelada desde Dashboard; horarios y assets relacionados finalizados.', $actor);
+        });
+
+        return $this->find($id);
     }
 
     /**
