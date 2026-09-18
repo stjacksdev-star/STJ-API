@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Throwable;
 
 class PushNotificationService
@@ -76,6 +77,7 @@ class PushNotificationService
         $data = [
             'click_action' => (string) $notification->npu_action,
             'image' => $this->imageUrl((string) $notification->npu_imagen),
+            'environment' => strtoupper((string) ($notification->npu_entorno ?? 'PRODUCTION')),
         ];
         $platform = (string) ($notification->npu_plataforma ?? 'WEB');
         $topic = trim((string) $notification->npu_para);
@@ -101,28 +103,7 @@ class PushNotificationService
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
         }
 
-        if ($topic === '') {
-            $result = $this->firebase->sendToPlatform(
-                'Todo',
-                (string) $notification->npu_titulo,
-                (string) $notification->npu_cuerpo,
-                $data,
-            );
-
-            return json_encode([
-                'target' => 'platform',
-                'platform' => 'Todo',
-                'sent' => $result['sent'],
-                'failed' => $result['failed'],
-            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
-        }
-
-        return $this->firebase->sendToTopic(
-            $topic,
-            (string) $notification->npu_titulo,
-            (string) $notification->npu_cuerpo,
-            $data,
-        );
+        throw new RuntimeException('Plataforma push no soportada para envio segmentado por entorno.');
     }
 
     private function imageUrl(string $path): string

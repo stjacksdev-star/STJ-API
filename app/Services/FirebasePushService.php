@@ -111,7 +111,7 @@ class FirebasePushService
     public function sendToPlatform(string $platform, string $title, string $body, array $data = []): array
     {
         return $this->sendToTokens(
-            $this->tokensForPlatform($platform, $this->optionalTopic($data)),
+            $this->tokensForPlatform($platform, $this->optionalTopic($data), $data['environment'] ?? null),
             $title,
             $body,
             $data,
@@ -160,7 +160,7 @@ class FirebasePushService
     /**
      * @return array<int, string>
      */
-    public function tokensForPlatform(string $platform, ?string $topic = null): array
+    public function tokensForPlatform(string $platform, ?string $topic = null, ?string $environment = null): array
     {
         $platforms = $this->platforms($platform);
 
@@ -170,6 +170,16 @@ class FirebasePushService
             ->whereIn('s.psu_plataforma', $platforms)
             ->where('s.psu_estado', 'ACTIVA')
             ->where('s.psu_permiso', 'GRANTED')
+            ->when($environment !== null, function ($query) use ($environment) {
+                $query->where(function ($scope) use ($environment) {
+                    $scope->where('s.psu_entorno', strtoupper($environment));
+                    if (strtoupper($environment) === 'PRODUCTION') {
+                        $scope->orWhere(function ($legacyWeb) {
+                            $legacyWeb->where('s.psu_plataforma', 'WEB')->whereNull('s.psu_entorno');
+                        });
+                    }
+                });
+            })
             ->whereNotNull('s.psu_token')
             ->where('s.psu_token', '<>', '')
             ->when($topics !== [], function ($query) use ($topics) {
@@ -212,7 +222,7 @@ class FirebasePushService
                 'image' => $imageUrl !== '' ? $imageUrl : null,
             ], fn ($value) => $value !== null && $value !== ''),
             'data' => collect($data)
-                ->except(['image', 'topic'])
+                ->except(['image', 'topic', 'environment'])
                 ->map(fn ($value) => (string) $value)
                 ->all(),
         ];

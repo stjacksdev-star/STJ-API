@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Services\PushNotificationService;
+use App\Services\FirebasePushService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,7 @@ class PushNotificationServiceTest extends TestCase
             npu_action TEXT NOT NULL,
             npu_para TEXT NOT NULL,
             npu_plataforma TEXT NULL,
+            npu_entorno TEXT NOT NULL DEFAULT \'PRODUCTION\',
             npu_promocion INTEGER NULL
         )');
 
@@ -38,6 +40,7 @@ class PushNotificationServiceTest extends TestCase
             psu_id INTEGER PRIMARY KEY AUTOINCREMENT,
             psu_token TEXT NULL,
             psu_plataforma TEXT NOT NULL,
+            psu_entorno TEXT NULL,
             psu_estado TEXT NOT NULL,
             psu_permiso TEXT NOT NULL
         )');
@@ -183,6 +186,50 @@ class PushNotificationServiceTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_it_separates_test_and_production_subscriptions_including_legacy_web(): void
+    {
+        DB::table('stj_push_suscripciones')->insert([
+            ['psu_id' => 1, 'psu_token' => 'android-test', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'TEST', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 2, 'psu_token' => 'android-prod', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'PRODUCTION', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 3, 'psu_token' => 'web-legacy', 'psu_plataforma' => 'WEB', 'psu_entorno' => null, 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+        ]);
+
+        $firebase = app(FirebasePushService::class);
+        $this->assertSame(['android-test'], $firebase->tokensForPlatform('Todo', null, 'TEST'));
+        $this->assertSame(['android-prod', 'web-legacy'], $firebase->tokensForPlatform('Todo', null, 'PRODUCTION'));
+        $this->assertSame([], $firebase->tokensForPlatform('WEB', null, 'TEST'));
+    }
+
+    public function test_a_test_campaign_does_not_send_to_production_tokens(): void
+    {
+        Http::fake([
+            'oauth2.test/*' => Http::response(['access_token' => 'test-access-token'], 200),
+            'fcm.test/*' => Http::response(['name' => 'sent'], 200),
+        ]);
+
+        DB::table('stj_push_suscripciones')->insert([
+            ['psu_id' => 1, 'psu_token' => 'test-token', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'TEST', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 2, 'psu_token' => 'production-token', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'PRODUCTION', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+        ]);
+        DB::table('stj_notificaciones_push')->insert([
+            'npu_id' => 103, 'npu_titulo' => 'Prueba', 'npu_cuerpo' => 'Solo test',
+            'npu_imagen' => '', 'npu_action' => 'https://stjacks.com', 'npu_para' => '',
+            'npu_plataforma' => 'Android', 'npu_entorno' => 'TEST',
+        ]);
+        DB::table('stj_notificaciones_push_envios')->insert([
+            'npe_id' => 203, 'npe_notificacion' => 103,
+            'npe_fecha_envio' => now()->subMinute()->toDateTimeString(), 'npe_estado' => 'PENDIENTE',
+        ]);
+
+        app(PushNotificationService::class)->sendPending();
+
+        $this->assertStringContainsString('"sent":1', DB::table('stj_notificaciones_push_envios')->value('npe_resultado'));
+        Http::assertSent(fn ($request) => $request->url() === 'https://fcm.test/v1/projects/stj-test/messages:send'
+            && ($request->data()['message']['token'] ?? null) === 'test-token');
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://fcm.test/v1/projects/stj-test/messages:send'
+            && ($request->data()['message']['token'] ?? null) === 'production-token');
+    }
+
     public function test_it_sends_pending_push_notifications_to_android_tokens(): void
     {
         Http::fake([
@@ -200,10 +247,10 @@ class PushNotificationServiceTest extends TestCase
             'pto_id' => 1, 'pto_codigo' => 'country.sv', 'pto_estado' => 'ACTIVO',
         ]);
         DB::table('stj_push_suscripciones')->insert([
-            ['psu_id' => 1, 'psu_token' => 'android-token-1', 'psu_plataforma' => 'ANDROID', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
-            ['psu_id' => 2, 'psu_token' => 'android-token-2', 'psu_plataforma' => 'ANDROID', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
-            ['psu_id' => 3, 'psu_token' => 'ios-token-1', 'psu_plataforma' => 'IOS', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
-            ['psu_id' => 4, 'psu_token' => '', 'psu_plataforma' => 'ANDROID', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 1, 'psu_token' => 'android-token-1', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'PRODUCTION', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 2, 'psu_token' => 'android-token-2', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'PRODUCTION', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 3, 'psu_token' => 'ios-token-1', 'psu_plataforma' => 'IOS', 'psu_entorno' => 'PRODUCTION', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
+            ['psu_id' => 4, 'psu_token' => '', 'psu_plataforma' => 'ANDROID', 'psu_entorno' => 'PRODUCTION', 'psu_estado' => 'ACTIVA', 'psu_permiso' => 'GRANTED'],
         ]);
         DB::table('stj_push_suscripcion_topics')->insert([
             ['pst_suscripcion_id' => 1, 'pst_topic_id' => 1],
