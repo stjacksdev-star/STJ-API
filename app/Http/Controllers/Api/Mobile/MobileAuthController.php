@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Models\StorefrontCustomer;
+use App\Support\CustomerDocumentNumber;
+use App\Support\CustomerPhoneNumber;
 use App\Services\Mobile\MobilePushSubscriptionService;
 use App\Services\CustomerAccountDeletionService;
 use App\Services\StorefrontPasswordResetService;
@@ -93,6 +95,10 @@ class MobileAuthController extends Controller
         }
 
         $countryCode = strtoupper((string) $country->pai_codigo);
+        $phone = CustomerPhoneNumber::digits((string) $data['telefono']);
+        if (! CustomerPhoneNumber::valid($countryCode, $phone)) {
+            throw ValidationException::withMessages(['telefono' => CustomerPhoneNumber::message($countryCode)]);
+        }
         $countryNames = ['SV' => 'El Salvador', 'GT' => 'Guatemala', 'CR' => 'Costa Rica', 'HN' => 'Honduras'];
         $phoneCodes = ['SV' => '+503', 'GT' => '+502', 'CR' => '+506', 'HN' => '+504'];
         $customerId = DB::table('stj_usuarios')->insertGetId([
@@ -101,7 +107,7 @@ class MobileAuthController extends Controller
             'usu_nombre' => trim((string) $data['nombres']),
             'usu_apellido' => trim((string) $data['apellidos']),
             'usu_telefono_pais' => $phoneCodes[$countryCode] ?? '',
-            'usu_telefono' => trim((string) $data['telefono']),
+            'usu_telefono' => $phone,
             'usu_correo' => $email,
             'usu_fecha_nacimiento' => filled($data['fechaNac'] ?? null) ? $data['fechaNac'] : null,
             'usu_tipo_login' => 'APP',
@@ -438,6 +444,37 @@ class MobileAuthController extends Controller
             throw ValidationException::withMessages(['form1.pais' => 'El pais seleccionado no es valido.']);
         }
 
+        $countryCode = match (mb_strtolower(trim((string) $country->name), 'UTF-8')) {
+            'el salvador' => 'SV',
+            'guatemala' => 'GT',
+            'costa rica' => 'CR',
+            'honduras' => 'HN',
+            default => null,
+        };
+        if ($countryCode === null) {
+            throw ValidationException::withMessages(['form1.pais' => 'El pais seleccionado no esta disponible en la app.']);
+        }
+
+        $phone = CustomerPhoneNumber::digits((string) $data['telefono']);
+        if (! CustomerPhoneNumber::valid($countryCode, $phone)) {
+            throw ValidationException::withMessages(['form1.telefono' => CustomerPhoneNumber::message($countryCode)]);
+        }
+        $whatsapp = trim((string) ($data['whatsapp'] ?? ''));
+        if ($whatsapp !== '') {
+            $whatsapp = CustomerPhoneNumber::digits($whatsapp);
+            if (! CustomerPhoneNumber::valid($countryCode, $whatsapp)) {
+                throw ValidationException::withMessages(['form1.whatsapp' => CustomerPhoneNumber::message($countryCode)]);
+            }
+        }
+        $documentType = trim((string) ($data['tipoIdentificacion'] ?? ''));
+        $document = trim((string) ($data['identificacion'] ?? ''));
+        if ($documentType !== '' || $document !== '') {
+            if (! CustomerDocumentNumber::valid($countryCode, $documentType, $document)) {
+                throw ValidationException::withMessages(['form1.identificacion' => CustomerDocumentNumber::message($countryCode, $documentType)]);
+            }
+            $document = CustomerDocumentNumber::normalize($countryCode, $documentType, $document);
+        }
+
         $departmentId = (int) $data['departamento'];
         $department = DB::table('stj_world_states')
             ->where('id', $departmentId)
@@ -466,8 +503,8 @@ class MobileAuthController extends Controller
             'usu_correo' => $email,
             'usu_nombre' => trim((string) $data['nombres']),
             'usu_apellido' => trim((string) $data['apellidos']),
-            'usu_tipo_identificacion' => trim((string) ($data['tipoIdentificacion'] ?? '')),
-            'usu_identificacion' => trim((string) ($data['identificacion'] ?? '')),
+            'usu_tipo_identificacion' => $documentType,
+            'usu_identificacion' => $document,
             'usu_pais' => $country->name,
             'usu_departamento_id' => $department->id,
             'usu_departamento_txt' => $stateName,
@@ -477,9 +514,9 @@ class MobileAuthController extends Controller
             'usu_ciudad' => $city,
             'usu_direccion' => trim((string) ($data['direccion'] ?? '')),
             'usu_telefono_pais' => $phoneCode,
-            'usu_telefono' => trim((string) $data['telefono']),
-            'usu_telefono_w_pais' => trim((string) ($data['whatsapp'] ?? '')) !== '' ? $phoneCode : '',
-            'usu_telefono_w' => trim((string) ($data['whatsapp'] ?? '')),
+            'usu_telefono' => $phone,
+            'usu_telefono_w_pais' => $whatsapp !== '' ? $phoneCode : '',
+            'usu_telefono_w' => $whatsapp,
         ])->save();
 
         return response()->json($this->legacyProfile($customer->refresh()) + ['resultado' => 'true']);

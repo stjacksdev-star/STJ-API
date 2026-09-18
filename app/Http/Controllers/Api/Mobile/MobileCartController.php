@@ -10,6 +10,8 @@ use App\Services\StorefrontCartService;
 use App\Services\StorefrontCartCouponService;
 use App\Services\StorefrontShippingService;
 use App\Services\StorefrontOrderService;
+use App\Support\CustomerDocumentNumber;
+use App\Support\CustomerPhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -200,6 +202,7 @@ class MobileCartController extends Controller
             'pickup.samePerson' => ['nullable', 'boolean'],
             'pickup.person' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
             'pickup.phone' => ['nullable', 'string', 'max:100', 'not_regex:/[<>]/'],
+            'pickup.documentType' => ['nullable', 'string', 'max:50'],
             'pickup.identification' => ['nullable', 'string', 'max:50', 'not_regex:/[<>]/'],
             'delivery' => ['nullable', 'array'],
             'delivery.city_id' => ['nullable', 'integer'],
@@ -242,6 +245,31 @@ class MobileCartController extends Controller
         }
         if (! $location) {
             throw ValidationException::withMessages(['customer.cityId' => 'La ubicacion de facturacion no pertenece al pais seleccionado.']);
+        }
+        $countryCode = strtoupper((string) $country->pai_codigo);
+        $documentType = (string) data_get($data, 'customer.documentType', '');
+        $document = (string) data_get($data, 'customer.document', '');
+        if (! CustomerDocumentNumber::valid($countryCode, $documentType, $document)) {
+            throw ValidationException::withMessages(['customer.document' => CustomerDocumentNumber::message($countryCode, $documentType)]);
+        }
+        $data['customer']['document'] = CustomerDocumentNumber::normalize($countryCode, $documentType, $document);
+        $phone = CustomerPhoneNumber::digits((string) data_get($data, 'customer.phone', ''));
+        if (! CustomerPhoneNumber::valid($countryCode, $phone)) {
+            throw ValidationException::withMessages(['customer.phone' => CustomerPhoneNumber::message($countryCode)]);
+        }
+        $data['customer']['phone'] = $phone;
+        if (isset($data['pickup']) && ! ($data['pickup']['samePerson'] ?? true)) {
+            $pickupPhone = CustomerPhoneNumber::digits((string) ($data['pickup']['phone'] ?? ''));
+            if (! CustomerPhoneNumber::valid($countryCode, $pickupPhone)) {
+                throw ValidationException::withMessages(['pickup.phone' => CustomerPhoneNumber::message($countryCode)]);
+            }
+            $data['pickup']['phone'] = $pickupPhone;
+            $pickupType = (string) ($data['pickup']['documentType'] ?? '');
+            $pickupDocument = (string) ($data['pickup']['identification'] ?? '');
+            if (! CustomerDocumentNumber::valid($countryCode, $pickupType, $pickupDocument)) {
+                throw ValidationException::withMessages(['pickup.identification' => CustomerDocumentNumber::message($countryCode, $pickupType)]);
+            }
+            $data['pickup']['identification'] = CustomerDocumentNumber::normalize($countryCode, $pickupType, $pickupDocument);
         }
         $cart = $this->cartInCurrentStore($request, $country, $visitor, $customer);
         $paymentType = strtoupper((string) $data['payment_type']);

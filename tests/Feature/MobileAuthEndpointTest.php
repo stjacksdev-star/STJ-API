@@ -174,6 +174,16 @@ class MobileAuthEndpointTest extends TestCase
         ]);
     }
 
+    public function test_mobile_registration_rejects_a_phone_with_wrong_country_length(): void
+    {
+        $this->postJson('/api/mobile/v1/auth/register?countryId=1', [
+            'nombres' => 'Nuevo', 'apellidos' => 'Cliente', 'email' => 'nuevo@example.com',
+            'telefono' => '700-1111', 'password' => 'Clave123', 'dispositivo' => 'ANDROID',
+        ])->assertUnprocessable()->assertJsonValidationErrors('telefono');
+
+        $this->assertDatabaseMissing('stj_usuarios', ['usu_correo' => 'nuevo@example.com']);
+    }
+
     public function test_mobile_registration_rejects_a_country_outside_the_app_scope(): void
     {
         DB::table('stj_paises')->insert(['pai_id' => 5, 'pai_codigo' => 'PA']);
@@ -423,6 +433,35 @@ class MobileAuthEndpointTest extends TestCase
             'usu_departamento_id' => 10,
             'usu_estado' => 'San Salvador',
             'usu_telefono_pais' => '+503',
+            'usu_identificacion' => '012345678',
+        ]);
+    }
+
+    public function test_mobile_account_rejects_invalid_phone_and_document_for_selected_country(): void
+    {
+        $customer = StorefrontCustomer::query()->findOrFail(77);
+        $token = $customer->createToken('mobile-account-validation', ['mobile:account'], now()->addDays(30));
+        $form = [
+            'nombres' => 'Ana', 'apellidos' => 'Lopez', 'email' => 'cliente@example.com',
+            'pais' => 'El Salvador', 'departamento' => 10, 'municipio' => 11,
+            'tipoIdentificacion' => 'DUI', 'identificacion' => '01234567-8',
+            'telefono' => '7000-1111', 'whatsapp' => '',
+        ];
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
+            'form1' => array_merge($form, ['telefono' => '7000111']),
+        ])->assertUnprocessable()->assertJsonValidationErrors('form1.telefono');
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
+            'form1' => array_merge($form, ['identificacion' => '01234567']),
+        ])->assertUnprocessable()->assertJsonValidationErrors('form1.identificacion');
+
+        $this->withToken($token->plainTextToken)->putJson('/api/mobile/v1/account', [
+            'form1' => $form,
+        ])->assertOk()->assertJsonPath('resultado', 'true');
+
+        $this->assertDatabaseHas('stj_usuarios', [
+            'usu_id' => 77, 'usu_telefono' => '70001111', 'usu_identificacion' => '012345678',
         ]);
     }
 
