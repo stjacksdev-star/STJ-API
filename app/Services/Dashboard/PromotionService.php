@@ -449,9 +449,12 @@ class PromotionService
                 ->where('ast_tipo_accion', 1)
                 ->where('ast_idpromocion', $id)
                 ->whereIn('ast_estado', ['ACTIVO', 'PENDIENTE'])
-                ->update(['ast_estado' => 'FINALIZADO']);
+                ->where(function ($query) use ($now) {
+                    $query->whereNull('ast_fin')->orWhere('ast_fin', '>', $now);
+                })
+                ->update(['ast_fin' => $now]);
 
-            $this->history->record($id, 'GENERAL', 'Promocion cancelada desde Dashboard; horarios y assets relacionados finalizados.', $actor);
+            $this->history->record($id, 'GENERAL', 'Promocion cancelada desde Dashboard; vigencia de assets relacionados cerrada.', $actor);
         });
 
         return $this->find($id);

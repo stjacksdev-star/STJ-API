@@ -23,13 +23,14 @@ class AssetPublicationService
         $now ??= now();
 
         $finished = DB::table('stj_assets')
-            ->where('ast_estado', 'ACTIVO')
-            ->where('ast_fin', '<', $now->toDateTimeString())
+            ->whereIn('ast_estado', ['ACTIVO', 'PENDIENTE'])
+            ->where('ast_fin', '<=', $now->toDateTimeString())
             ->update(['ast_estado' => 'FINALIZADO']);
 
         $activated = DB::table('stj_assets')
             ->where('ast_estado', 'PENDIENTE')
             ->where('ast_inicio', '<=', $now->toDateTimeString())
+            ->where('ast_fin', '>', $now->toDateTimeString())
             ->update(['ast_estado' => 'ACTIVO']);
 
         return $this->refresh($now, $finished, $activated);
@@ -98,7 +99,7 @@ class AssetPublicationService
                 ->where('ast_pais', $countryId)
                 ->whereIn('ast_plataforma', ['TODO', 'WEB'])
                 ->where('ast_inicio', '<=', $now->toDateTimeString())
-                ->where('ast_fin', '>=', $now->toDateTimeString())
+                ->where('ast_fin', '>', $now->toDateTimeString())
                 ->orderBy('ast_orden')
                 ->orderBy('ast_id')
                 ->get()

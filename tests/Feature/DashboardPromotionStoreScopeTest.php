@@ -74,7 +74,7 @@ class DashboardPromotionStoreScopeTest extends TestCase
         $this->service->updateStores(10, 'SELECCIONADAS', [1]);
     }
 
-    public function test_cancelling_active_promotion_finalizes_only_its_assets_and_records_history(): void
+    public function test_cancelling_active_promotion_expires_only_its_assets_and_records_history(): void
     {
         DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_estado' => 'EN-PROCESO']);
         DB::table('stj_promociones_horario')->insert([
@@ -82,8 +82,9 @@ class DashboardPromotionStoreScopeTest extends TestCase
             'pho_inicio' => '2026-09-01 00:00:00', 'pho_fin' => '2026-09-30 23:59:59', 'pho_estado' => 'ACTIVO',
         ]);
         DB::table('stj_assets')->insert([
-            ['ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO'],
-            ['ast_idpromocion' => 11, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO'],
+            ['ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO', 'ast_fin' => '2099-12-31 23:59:59'],
+            ['ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'PENDIENTE', 'ast_fin' => '2099-12-31 23:59:59'],
+            ['ast_idpromocion' => 11, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO', 'ast_fin' => '2099-12-31 23:59:59'],
         ]);
 
         $promotion = $this->service->cancel(10, ['id' => 7, 'name' => 'Operador']);
@@ -92,8 +93,11 @@ class DashboardPromotionStoreScopeTest extends TestCase
         $this->assertDatabaseHas('stj_promociones', ['prm_id' => 10, 'prm_estado' => 'CANCELADO']);
         $this->assertNotNull(DB::table('stj_promociones')->where('prm_id', 10)->value('prm_cancelado_fecha'));
         $this->assertDatabaseHas('stj_promociones_horario', ['pho_promocion' => 10, 'pho_estado' => 'FINALIZADO']);
-        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 10, 'ast_estado' => 'FINALIZADO']);
-        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 11, 'ast_estado' => 'ACTIVO']);
+        $cancelledAt = DB::table('stj_promociones')->where('prm_id', 10)->value('prm_cancelado_fecha');
+        $this->assertSame(2, DB::table('stj_assets')->where('ast_idpromocion', 10)->where('ast_fin', $cancelledAt)->count());
+        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 10, 'ast_estado' => 'ACTIVO']);
+        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 10, 'ast_estado' => 'PENDIENTE']);
+        $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 11, 'ast_estado' => 'ACTIVO', 'ast_fin' => '2099-12-31 23:59:59']);
         $this->assertDatabaseHas('stj_promociones_historial', ['pph_promocion' => 10, 'pph_usuario_id' => '7']);
     }
 
@@ -135,19 +139,21 @@ class DashboardPromotionStoreScopeTest extends TestCase
         $this->service->activate(10);
     }
 
-    public function test_asset_refresh_immediately_removes_finalized_asset_from_storefront_json(): void
+    public function test_expired_assets_leave_storefront_immediately_and_cron_finalizes_them(): void
     {
         $path = storage_path('app/storefront/assets.json');
         $original = is_file($path) ? file_get_contents($path) : false;
         DB::table('stj_assets')->insert([
-            'ast_idpromocion' => 10,
-            'ast_tipo_accion' => 1,
-            'ast_estado' => 'FINALIZADO',
-            'ast_tipo' => 'BANNER',
-            'ast_pais' => 1,
-            'ast_plataforma' => 'WEB',
-            'ast_inicio' => '2026-01-01 00:00:00',
-            'ast_fin' => '2099-12-31 23:59:59',
+            [
+                'ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'ACTIVO',
+                'ast_tipo' => 'BANNER', 'ast_pais' => 1, 'ast_plataforma' => 'WEB',
+                'ast_inicio' => '2025-01-01 00:00:00', 'ast_fin' => '2025-12-31 23:59:59',
+            ],
+            [
+                'ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'PENDIENTE',
+                'ast_tipo' => 'BANNER', 'ast_pais' => 1, 'ast_plataforma' => 'WEB',
+                'ast_inicio' => '2025-01-01 00:00:00', 'ast_fin' => '2025-12-31 23:59:59',
+            ],
         ]);
 
         try {
@@ -156,7 +162,12 @@ class DashboardPromotionStoreScopeTest extends TestCase
 
             $this->assertSame(0, $result['summary']['activated']);
             $this->assertSame([], $published['countries']['sv']['assets']['banner']);
-            $this->assertDatabaseHas('stj_assets', ['ast_idpromocion' => 10, 'ast_estado' => 'FINALIZADO']);
+            $this->assertSame(1, DB::table('stj_assets')->where('ast_idpromocion', 10)->where('ast_estado', 'ACTIVO')->count());
+
+            $publishedByCron = app(AssetPublicationService::class)->publish();
+            $this->assertSame(2, $publishedByCron['summary']['finished']);
+            $this->assertSame(0, $publishedByCron['summary']['activated']);
+            $this->assertSame(2, DB::table('stj_assets')->where('ast_idpromocion', 10)->where('ast_estado', 'FINALIZADO')->count());
         } finally {
             if ($original === false) {
                 @unlink($path);

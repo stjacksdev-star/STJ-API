@@ -165,7 +165,7 @@ class PromotionController extends BaseController
 
         return $this->successWithRefreshedAssets(
             $this->promotions->cancel($promotion, $validated['actor'] ?? []),
-            'Promocion y assets relacionados cancelados correctamente'
+            'Promocion cancelada y vigencia de sus assets cerrada correctamente'
         );
     }
 
