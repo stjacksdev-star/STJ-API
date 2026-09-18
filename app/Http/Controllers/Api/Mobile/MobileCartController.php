@@ -229,22 +229,28 @@ class MobileCartController extends Controller
                 json_decode((string) $previous->cao_respuesta, true),
             ));
         }
+        $residenceCountry = DB::table('stj_paises')
+            ->where('pai_id', (int) data_get($data, 'customer.countryId', $country->pai_id))
+            ->first(['pai_id', 'pai_id_world', 'pai_codigo']);
+        if (! $residenceCountry?->pai_id_world) {
+            throw ValidationException::withMessages(['customer.countryId' => 'El pais de residencia seleccionado no es valido.']);
+        }
         $location = DB::table('stj_world_cities as city')
             ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
             ->where('city.id', (int) data_get($data, 'customer.cityId'))
             ->where('state.id', (int) data_get($data, 'customer.stateId'))
-            ->where('state.country_id', (int) $country->pai_id_world)
+            ->where('state.country_id', (int) $residenceCountry->pai_id_world)
             ->first(['state.id as state_id', 'city.id as city_id']);
         if (! $location) {
             $location = DB::table('stj_world_cities as city')
                 ->join('stj_world_states as state', 'state.id', '=', 'city.state_id')
-                ->where('state.country_id', (int) $country->pai_id_world)
+                ->where('state.country_id', (int) $residenceCountry->pai_id_world)
                 ->whereRaw('LOWER(TRIM(state.name)) = ?', [mb_strtolower(trim((string) data_get($data, 'customer.state')))])
                 ->whereRaw('LOWER(TRIM(city.name)) = ?', [mb_strtolower(trim((string) data_get($data, 'customer.city')))])
                 ->first(['state.id as state_id', 'city.id as city_id']);
         }
         if (! $location) {
-            throw ValidationException::withMessages(['customer.cityId' => 'La ubicacion de facturacion no pertenece al pais seleccionado.']);
+            throw ValidationException::withMessages(['customer.cityId' => 'La ubicacion de residencia no pertenece al pais seleccionado.']);
         }
         $countryCode = strtoupper((string) $country->pai_codigo);
         $documentType = (string) data_get($data, 'customer.documentType', '');
@@ -254,8 +260,8 @@ class MobileCartController extends Controller
         }
         $data['customer']['document'] = CustomerDocumentNumber::normalize($countryCode, $documentType, $document);
         $phone = CustomerPhoneNumber::digits((string) data_get($data, 'customer.phone', ''));
-        if (! CustomerPhoneNumber::valid($countryCode, $phone)) {
-            throw ValidationException::withMessages(['customer.phone' => CustomerPhoneNumber::message($countryCode)]);
+        if (! CustomerPhoneNumber::valid((string) $residenceCountry->pai_codigo, $phone)) {
+            throw ValidationException::withMessages(['customer.phone' => CustomerPhoneNumber::message((string) $residenceCountry->pai_codigo)]);
         }
         $data['customer']['phone'] = $phone;
         if (isset($data['pickup']) && ! ($data['pickup']['samePerson'] ?? true)) {
@@ -277,7 +283,7 @@ class MobileCartController extends Controller
             throw ValidationException::withMessages(['payment_type' => 'El pago en efectivo solo esta disponible para retiro en tienda.']);
         }
 
-        $result = DB::transaction(function () use ($country, $visitor, $customer, $data, $location, $platform, $paymentType) {
+        $result = DB::transaction(function () use ($country, $residenceCountry, $visitor, $customer, $data, $location, $platform, $paymentType) {
             $this->carts->startCheckout(strtolower((string) $country->pai_codigo), $visitor, $customer, [
                 'operation_uuid' => (string) Str::uuid(),
                 'email' => (string) data_get($data, 'customer.email'),
@@ -286,7 +292,7 @@ class MobileCartController extends Controller
             ]);
 
             $trustedCustomer = $data['customer'];
-            $trustedCustomer['countryId'] = (int) $country->pai_id_world;
+            $trustedCustomer['countryId'] = (int) $residenceCountry->pai_id_world;
             $trustedCustomer['stateId'] = (int) $location->state_id;
             $trustedCustomer['cityId'] = (int) $location->city_id;
 

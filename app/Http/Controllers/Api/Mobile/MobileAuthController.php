@@ -407,6 +407,7 @@ class MobileAuthController extends Controller
             'form1.email' => ['required', 'email', 'max:150'],
             'form1.tipoIdentificacion' => ['nullable', 'string', 'max:50'],
             'form1.identificacion' => ['nullable', 'string', 'max:50'],
+            'form1.documentCountryId' => ['nullable', 'integer', 'min:1'],
             'form1.pais' => ['required', 'string', 'max:100'],
             'form1.departamento' => ['required', 'integer'],
             'form1.municipio' => ['required', 'integer'],
@@ -468,11 +469,21 @@ class MobileAuthController extends Controller
         }
         $documentType = trim((string) ($data['tipoIdentificacion'] ?? ''));
         $document = trim((string) ($data['identificacion'] ?? ''));
-        if ($documentType !== '' || $document !== '') {
-            if (! CustomerDocumentNumber::valid($countryCode, $documentType, $document)) {
-                throw ValidationException::withMessages(['form1.identificacion' => CustomerDocumentNumber::message($countryCode, $documentType)]);
+        $documentCountryCode = $countryCode;
+        if (isset($data['documentCountryId'])) {
+            $documentCountry = DB::table('stj_paises')
+                ->where('pai_id', (int) $data['documentCountryId'])
+                ->first(['pai_codigo', 'pai_id_world']);
+            if (! $documentCountry?->pai_id_world) {
+                throw ValidationException::withMessages(['form1.documentCountryId' => 'El pais del documento no es valido.']);
             }
-            $document = CustomerDocumentNumber::normalize($countryCode, $documentType, $document);
+            $documentCountryCode = strtoupper((string) $documentCountry->pai_codigo);
+        }
+        if ($documentType !== '' || $document !== '') {
+            if (! CustomerDocumentNumber::valid($documentCountryCode, $documentType, $document)) {
+                throw ValidationException::withMessages(['form1.identificacion' => CustomerDocumentNumber::message($documentCountryCode, $documentType)]);
+            }
+            $document = CustomerDocumentNumber::normalize($documentCountryCode, $documentType, $document);
         }
 
         $departmentId = (int) $data['departamento'];
