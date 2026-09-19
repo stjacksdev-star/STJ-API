@@ -7,6 +7,7 @@ use App\Models\StorefrontCustomer;
 use App\Models\StorefrontVisitor;
 use App\Services\StorefrontPaymentEventService;
 use App\Services\StorefrontPromotionResolver;
+use App\Services\StorefrontDiscountCalculator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -173,7 +174,7 @@ class PowerTranzPaymentService
         foreach ($details as $detail) {
             $baseCents = $this->cents((string) $detail->car_precio) * (int) $detail->car_cantidad;
             $discount = (float) ($detail->car_descuento_final ?? $detail->car_descuento ?? 0);
-            $subtotal += (int) round($baseCents * (100 - $discount) / 100, 0, PHP_ROUND_HALF_UP);
+            $subtotal += StorefrontDiscountCalculator::subtotalCents($baseCents, $discount);
             // car_descuento_final stores two decimal places. Reconstructing a
             // line can therefore differ by 0.005 percentage points plus the
             // final cent rounding, without changing the authorized charge.
@@ -234,9 +235,11 @@ class PowerTranzPaymentService
         foreach ($details as $detail) {
             $line = $resolved->get((string) $detail->car_id);
             $base = $this->cents((string) $line['baseTotal']);
-            $percentage = $base > 0 ? round($this->cents((string) $line['discount']) * 100 / $base, 2) : 0;
+            $percentage = round(StorefrontDiscountCalculator::percentage(
+                $base, $this->cents((string) $line['discount']), $line['commercialDiscountPercentage'] ?? null,
+            ), 2);
             $percentages[$detail->car_id] = $percentage;
-            $reconstructedSubtotal += (int) round($base * (100 - $percentage) / 100, 0, PHP_ROUND_HALF_UP);
+            $reconstructedSubtotal += StorefrontDiscountCalculator::subtotalCents($base, $percentage);
         }
         if (abs($reconstructedSubtotal - $persistedSubtotal) > $roundingTolerance) {
             return false;

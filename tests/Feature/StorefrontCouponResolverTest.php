@@ -30,6 +30,7 @@ class StorefrontCouponResolverTest extends TestCase
         $this->assertSame('5.00', $result['lines'][0]['couponDiscount']);
         $this->assertSame('10.00', $result['lines'][0]['finalTotal']);
         $this->assertSame(33.333333, $result['lines'][0]['effectiveDiscountPercentage']);
+        $this->assertSame(33.333333, $result['lines'][0]['commercialDiscountPercentage']);
     }
 
     public function test_regular_coupon_does_not_apply_over_a_promotion(): void
@@ -82,6 +83,73 @@ class StorefrontCouponResolverTest extends TestCase
         $this->assertSame('70.00', $result['lines'][0]['finalTotal']);
         $this->assertSame('0.00', $result['lines'][1]['couponDiscount']);
         $this->assertSame('75.00', $result['lines'][1]['finalTotal']);
+    }
+
+    public function test_fixed_promotion_and_coupon_round_the_combined_discount_once(): void
+    {
+        $this->coupon(1, ['che_aplica_promo' => 'TODOS', 'che_descuento_extra' => 'SI'], ['cup_descuento' => 50]);
+        $result = $this->resolve([1], [
+            ['productId' => 100, 'quantity' => 1, 'unitPrice' => 13.95, 'promotionDiscount' => 4.19,
+                'promotion' => ['type' => 'DESCUENTO', 'discountPercentage' => 30]],
+            ['productId' => 101, 'quantity' => 1, 'unitPrice' => 25.95],
+        ]);
+
+        $this->assertSame(80.0, $result['lines'][0]['commercialDiscountPercentage']);
+        $this->assertSame('6.97', $result['lines'][0]['couponDiscount']);
+        $this->assertSame('2.79', $result['lines'][0]['finalTotal']);
+        $this->assertSame(50.0, $result['lines'][1]['commercialDiscountPercentage']);
+        $this->assertSame('12.97', $result['lines'][1]['finalTotal']);
+        $this->assertSame('19.95', $result['coupons'][0]['discount']);
+        $this->assertSame('15.76', $result['totals']['final']);
+    }
+
+    public function test_multiple_fixed_coupons_share_one_rounding_and_preserve_fractional_configuration(): void
+    {
+        $this->coupon(1, [], ['cup_descuento' => 30]);
+        $this->coupon(2, [], ['cup_descuento' => 50]);
+        $result = $this->resolve([1, 2], [['productId' => 100, 'quantity' => 1, 'unitPrice' => 13.95]]);
+        $this->assertSame(80.0, $result['lines'][0]['commercialDiscountPercentage']);
+        $this->assertSame('11.16', $result['totals']['couponDiscount']);
+        $this->assertSame('2.79', $result['totals']['final']);
+
+        $this->coupon(3, [], ['cup_descuento' => 12.5]);
+        $fractional = $this->resolve([3], [['productId' => 100, 'quantity' => 1, 'unitPrice' => 13.95]]);
+        $this->assertSame(12.5, $fractional['lines'][0]['commercialDiscountPercentage']);
+    }
+
+    public function test_conditional_promotion_with_extra_coupon_uses_the_allocated_percentage(): void
+    {
+        $this->coupon(1, ['che_aplica_promo' => 'TODOS', 'che_descuento_extra' => 'SI'], ['cup_descuento' => 20]);
+        $result = $this->resolve([1], [[
+            'productId' => 100, 'quantity' => 2, 'unitPrice' => 15.95, 'promotionDiscount' => 7.98,
+            'promotion' => ['type' => 'CONDICION-SKU', 'restriction' => '21/2', 'discountPercentage' => 50],
+        ]]);
+        $this->assertSame('17.54', $result['lines'][0]['finalTotal']);
+        $this->assertSame(45.015674, $result['lines'][0]['commercialDiscountPercentage']);
+    }
+
+    public function test_non_extra_coupon_replaces_fixed_promotion_without_inheriting_its_rounding(): void
+    {
+        $this->coupon(1, ['che_aplica_promo' => 'TODOS'], ['cup_descuento' => 50]);
+        $result = $this->resolve([1], [[
+            'productId' => 100, 'quantity' => 1, 'unitPrice' => 13.95, 'promotionDiscount' => 4.19,
+            'promotion' => ['type' => 'DESCUENTO-SKU', 'discountPercentage' => 30],
+        ]]);
+        $this->assertSame('0.00', $result['lines'][0]['promotionDiscount']);
+        $this->assertSame(50.0, $result['lines'][0]['commercialDiscountPercentage']);
+        $this->assertSame('6.97', $result['lines'][0]['finalTotal']);
+    }
+
+    public function test_unapplied_coupon_preserves_the_fixed_promotion_percentage(): void
+    {
+        $this->coupon(1, ['che_aplica_promo' => 'REGULAR'], ['cup_descuento' => 50]);
+        $result = $this->resolve([1], [[
+            'productId' => 100, 'quantity' => 1, 'unitPrice' => 13.95, 'promotionDiscount' => 4.19,
+            'promotion' => ['type' => 'DESCUENTO', 'discountPercentage' => 30],
+        ]]);
+        $this->assertSame('NO_APLICABLE', $result['coupons'][0]['status']);
+        $this->assertSame(30.0, $result['lines'][0]['commercialDiscountPercentage']);
+        $this->assertSame('9.76', $result['lines'][0]['finalTotal']);
     }
 
     public function test_non_extra_coupon_replaces_the_promotion_on_eligible_products(): void

@@ -15,7 +15,6 @@ use App\Services\StorefrontPaymentEventService;
 use App\Services\StorefrontProductPricingService;
 use App\Services\StorefrontShippingService;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -26,7 +25,20 @@ use Tests\TestCase;
 
 class StorefrontOrderFromCartTest extends TestCase
 {
-    use RefreshDatabase;
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->assertSame('testing', app()->environment());
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->assertSame(':memory:', DB::connection()->getDatabaseName());
+        // Only the cart/payment infrastructure is needed; legacy ALTER migrations
+        // require production tables that do not belong in this isolated fixture.
+        foreach (['2026_07_18_*.php', '2026_07_19_*.php'] as $pattern) {
+            foreach (glob(database_path('migrations/'.$pattern)) as $migration) {
+                (require $migration)->up();
+            }
+        }
+    }
 
     #[DataProvider('fulfillmentCases')]
     public function test_order_uses_exact_authorized_store_code(string $countryCode, int $countryId, string $type, string $storeCode, string $paymentType = 'TARJETA', bool $allowed = true, bool $gatewayApproved = true): void
@@ -47,7 +59,7 @@ class StorefrontOrderFromCartTest extends TestCase
                 'prm_tipo_promocion' => 'DESCUENTO', 'prm_porcentaje' => 20,
                 'prm_tipo_checkout' => 'T', 'prm_alcance_tienda' => 'SELECCIONADAS',
                 'prm_aplica' => 'TODO', 'prm_estado' => 'EN-PROCESO',
-                'prm_modalidad' => 'PROGRAMADO', 'prm_origen' => 'WEB',
+                'prm_modalidad' => 'PROGRAMADO', 'prm_origen' => 'TODO',
             ]);
             DB::table('stj_promociones_horario')->insert([
                 'pho_promocion' => 2000, 'pho_tipo' => 'NORMAL',
@@ -72,9 +84,10 @@ class StorefrontOrderFromCartTest extends TestCase
         if ($hasPromotion) {
             $payload += ['_origin' => 'APP', '_platform' => 'IOS', '_app_build' => 1];
         }
+        $payload['delivery']['reference'] = 'Frente al parque';
         $destination = $type === 'TIENDA'
             ? ['city_id' => 0, 'state_id' => 0, 'address' => '', 'reference' => '']
-            : ['city_id' => 11, 'state_id' => 2, 'address' => 'direccion', 'reference' => ''];
+            : ['city_id' => 11, 'state_id' => 2, 'address' => 'direccion', 'reference' => 'frente al parque'];
         DB::table('stj_carrito_operaciones')->insert(['cao_uuid' => (string) Str::uuid(), 'cao_carrito_id' => $cart->getKey(), 'cao_visitante_id' => $visitor->getKey(), 'cao_tipo' => 'CHECKOUT_START', 'cao_payload_hash' => hash('sha256', 'checkout'), 'cao_respuesta' => json_encode(['checkout' => ['destinationHash' => hash('sha256', json_encode($destination, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))]]), 'cao_creado_en' => now()]);
 
         if (! $allowed) {
@@ -89,7 +102,7 @@ class StorefrontOrderFromCartTest extends TestCase
 
         $this->assertSame($first, $retry);
         $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tienda' => $storeCode]);
-        $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tipo_identificacion' => 'DUI', 'ped_identificacion' => 'ID', 'ped_departamento' => 2, 'ped_municipio' => 11, 'ped_direccion' => 'Residencia', 'ped_estatus' => $paymentType === 'EFECTIVO' ? 'RECIBIDO' : 'PENDIENTE_PAGO']);
+        $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tipo_identificacion' => 'Pasaporte', 'ped_identificacion' => 'ID12345', 'ped_departamento' => 2, 'ped_municipio' => 11, 'ped_direccion' => 'Residencia', 'ped_estatus' => $paymentType === 'EFECTIVO' ? 'RECIBIDO' : 'PENDIENTE_PAGO']);
         $relation = $type === 'DOMICILIO' ? 'stj_pedidos_direccion' : 'stj_pedidos_tienda';
         $foreign = $type === 'DOMICILIO' ? 'pdi_pedido' : 'pti_pedido';
         $this->assertDatabaseHas($relation, [$foreign => $first['order']['pedidoId']]);
@@ -220,6 +233,74 @@ class StorefrontOrderFromCartTest extends TestCase
     private function visitor(int $countryId): StorefrontVisitor
     {
         return StorefrontVisitor::query()->create(['vis_uuid' => (string) Str::uuid(), 'vis_origen' => 'WEB', 'vis_pais_id' => $countryId, 'vis_primera_visita' => now(), 'vis_ultima_visita' => now(), 'vis_expira_en' => now()->addYear(), 'vis_creado_en' => now(), 'vis_actualizado_en' => now()]);
+    }
+
+    #[DataProvider('discountCases')]
+    public function test_order_preserves_discount_semantics_and_passes_payment_amount_validation(string $type, float $price, int $quantity, float $configured, ?float $targetPrice, ?array $couponLine, float $expectedPercentage, string $expectedTotal): void
+    {
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->schema();
+        DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_id_world' => 1, 'pai_codigo' => 'SV']);
+        DB::table('stj_world_countries')->insert(['id' => 1, 'iso2' => 'SV', 'name' => 'El Salvador', 'phonecode' => '503']);
+        DB::table('stj_world_states')->insert(['id' => 2, 'country_id' => 1, 'name' => 'San Salvador']);
+        DB::table('stj_world_cities')->insert(['id' => 11, 'country_id' => 1, 'state_id' => 2, 'name' => 'San Salvador']);
+        DB::table('stj_tiendas')->insert(['tie_id' => 8, 'tie_pais' => 1, 'tie_codigo' => '001', 'tie_nombre' => 'Tienda']);
+        DB::table('stj_productos')->insert(['pro_id' => 10, 'pro_codigo' => 'SKU10', 'pro_nombre' => 'Producto', 'pro_tallas' => 'S', 'pro_estatus' => 'ACTIVO']);
+        DB::table('stj_producto_pais')->insert(['ppa_pais' => 1, 'ppa_producto' => 10, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => $price, 'ppa_precio_talla' => 'NO', 'ppa_descuento' => 0]);
+        DB::table('stj_promociones')->insert([
+            'prm_id' => 2000, 'prm_pais' => 1, 'prm_nombre' => 'PROMO TEST', 'prm_nombre_comercial' => 'Promocion',
+            'prm_tipo' => 'PRODUCTOS', 'prm_tipo_promocion' => $type, 'prm_porcentaje' => $configured,
+            'prm_precio' => $targetPrice, 'prm_restriccion' => '21/2', 'prm_tipo_checkout' => 'TODO',
+            'prm_alcance_tienda' => 'TODAS', 'prm_aplica' => 'TODO', 'prm_estado' => 'EN-PROCESO',
+            'prm_modalidad' => 'PROGRAMADO', 'prm_origen' => 'WEB',
+        ]);
+        DB::table('stj_promociones_horario')->insert(['pho_promocion' => 2000, 'pho_tipo' => 'NORMAL', 'pho_inicio' => now()->subHour(), 'pho_fin' => now()->addHour(), 'pho_estado' => 'ACTIVO']);
+        DB::table('stj_promociones_producto')->insert(['ppr_promocion' => 2000, 'ppr_producto' => 10]);
+        $validator = Mockery::mock(StorefrontCheckoutValidationService::class);
+        $validator->shouldReceive('validate')->once()->andReturn(['ok' => true]);
+        $shipping = Mockery::mock(StorefrontShippingService::class);
+        $shipping->shouldReceive('quote')->andReturn(['shipping_amount' => '0.00', 'source' => 'STORE_PICKUP']);
+        $coupons = null;
+        $cartId = null;
+        if ($couponLine !== null) {
+            Schema::create('stj_carrito_cupones', fn (Blueprint $table) => $table->id());
+            $visitor = $this->visitor(1);
+            $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_pais_id' => 1, 'car_tipo' => 'TIENDA', 'car_estado' => 'CHECKOUT', 'car_origen' => 'WEB', 'car_moneda' => 'USD', 'car_version' => 1, 'car_ultima_actividad_en' => now(), 'car_expira_en' => now()->addMonth(), 'car_creado_en' => now(), 'car_actualizado_en' => now()]);
+            $cartId = $cart->getKey();
+            $coupons = Mockery::mock(\App\Services\StorefrontCartCouponService::class);
+            $coupons->shouldReceive('usePromotionContext')->andReturnSelf();
+            $coupons->shouldReceive('revalidate')->andReturn(['lines' => [['key' => 'SKU10:S', 'coupons' => [], ...$couponLine]], 'totals' => ['shipping' => '0.00']]);
+        }
+        $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping, cartCoupons: $coupons);
+        $result = $service->create([
+            'country' => 'sv', 'fulfillment' => ['method' => 'store_pickup', 'storeCode' => '001'],
+            'items' => [['sku' => 'SKU10', 'size' => 'S', 'quantity' => $quantity]], 'cartId' => $cartId,
+            'customer' => ['countryId' => 1, 'stateId' => 2, 'cityId' => 11, 'documentType' => 'Pasaporte', 'document' => 'ID12345', 'phone' => '77067440', 'address' => 'Residencia'],
+            'guestCartId' => 'test',
+        ]);
+        $this->assertTrue($result['ok']);
+        $this->assertSame($expectedTotal, $result['order']['total']);
+        $this->assertDatabaseHas('stj_pedidos_detalle', ['car_descuento' => $expectedPercentage, 'car_descuento_final' => $expectedPercentage]);
+        $payment = DB::table('stj_pedidos_pago')->where('ppa_id', $result['order']['pagoId'])->first();
+        $powerTranz = (new \ReflectionClass(PowerTranzPaymentService::class))->newInstanceWithoutConstructor();
+        (new \ReflectionMethod(PowerTranzPaymentService::class, 'assertAuthorizedAmount'))->invoke($powerTranz, $result['order']['pedidoId'], $payment);
+        $this->assertSame($expectedTotal, number_format((float) $payment->ppa_monto, 2, '.', ''));
+        $payment->ppa_monto = (float) $payment->ppa_monto + 1;
+        $this->expectException(ValidationException::class);
+        (new \ReflectionMethod(PowerTranzPaymentService::class, 'assertAuthorizedAmount'))->invoke($powerTranz, $result['order']['pedidoId'], $payment);
+    }
+
+    public static function discountCases(): array
+    {
+        return [
+            'fixed promotion' => ['DESCUENTO', 13.95, 1, 30, null, null, 30, '9.76'],
+            'fixed sku promotion' => ['DESCUENTO-SKU', 25.95, 1, 50, null, null, 50, '12.97'],
+            'fractional configured percentage' => ['DESCUENTO', 13.95, 1, 12.5, null, null, 12.5, '12.21'],
+            'second half price' => ['CONDICION-SKU', 15.95, 2, 50, null, null, 25.02, '23.92'],
+            'price target' => ['PUNTO-PRECIO', 13.95, 1, 50, 10, null, 28.32, '10.00'],
+            'promotion plus coupon' => ['DESCUENTO', 13.95, 1, 30, null, ['couponDiscount' => '6.97', 'commercialDiscountPercentage' => 80.0, 'finalTotal' => '2.79'], 80, '2.79'],
+            'coupon replacing promotion' => ['DESCUENTO', 25.95, 1, 30, null, ['couponDiscount' => '12.98', 'commercialDiscountPercentage' => 50.0, 'finalTotal' => '12.97'], 50, '12.97'],
+        ];
     }
 
     private function schema(): void

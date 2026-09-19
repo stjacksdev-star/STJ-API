@@ -88,12 +88,14 @@ class StorefrontCouponResolver
                 ->filter(fn (array $coupon) => $coupon['type'] === 'DESCUENTO' && $coupon['percentage'] !== null);
             $configuredCouponPercentage = $percentageCoupons->sum('percentage');
             $configuredCommercialPercentage = (float) ($line['promotionPercentage'] ?? 0) + $configuredCouponPercentage;
-            $commercialDiscount = $percentageCoupons->count() === count($line['coupons'])
-                && $percentageCoupons->isNotEmpty()
+            $configuredPercentage = $percentageCoupons->count() === count($line['coupons'])
                 && ($line['promotionDiscountCents'] === 0 || $line['promotionPercentage'] !== null)
                 && $configuredCommercialPercentage < 100
                     ? $configuredCommercialPercentage
-                    : $effectiveDiscount;
+                    : null;
+            $commercialDiscount = StorefrontDiscountCalculator::percentage(
+                $line['baseTotalCents'], $line['baseTotalCents'] - $line['currentTotalCents'], $configuredPercentage,
+            );
 
             return [
                 'key' => $line['key'],
@@ -171,7 +173,7 @@ class StorefrontCouponResolver
                 'unitPriceCents' => $unitPrice,
                 'baseTotalCents' => $base,
                 'promotionDiscountCents' => $promotionDiscount,
-                'promotionPercentage' => data_get($line, 'promotion.discountPercentage'),
+                'promotionPercentage' => StorefrontDiscountCalculator::promotionPercentage($line['promotion'] ?? null),
                 'couponDiscountCents' => 0,
                 'currentTotalCents' => $base - $promotionDiscount,
                 'hasPromotion' => $promotionDiscount > 0 || ! empty($line['promotion']),
@@ -333,8 +335,18 @@ class StorefrontCouponResolver
                 return 0;
             }
 
-            // Coupon percentages always describe points over regular price. Whether the active
-            // promotion is preserved or replaced is controlled by che_descuento_extra.
+            // Round the combined fixed percentage once. Attribute only the remaining
+            // cents to this coupon so promotion + coupons always match the line total.
+            $previousCoupons = collect($line['coupons']);
+            if (($line['promotionDiscountCents'] === 0 || $line['promotionPercentage'] !== null)
+                && $previousCoupons->every(fn (array $applied) => $applied['type'] === 'DESCUENTO' && $applied['percentage'] !== null)) {
+                $combined = (float) ($line['promotionPercentage'] ?? 0) + $previousCoupons->sum('percentage') + $percentage;
+                $targetDiscount = StorefrontDiscountCalculator::discountCents($line['baseTotalCents'], $combined);
+
+                return min($maximumBenefit, max(0, $targetDiscount - $line['promotionDiscountCents'] - $line['couponDiscountCents']));
+            }
+
+            // Conditional and price-based benefits remain monetary allocations.
             return min($maximumBenefit, (int) round($line['baseTotalCents'] * $percentage / 100, 0, PHP_ROUND_HALF_UP));
         }
 

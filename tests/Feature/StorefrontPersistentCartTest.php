@@ -15,7 +15,6 @@ use App\Services\StorefrontProductPricingService;
 use App\Services\StorefrontPromotionResolver;
 use App\Services\StorefrontShippingService;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -25,7 +24,6 @@ use Tests\TestCase;
 
 class StorefrontPersistentCartTest extends TestCase
 {
-    use RefreshDatabase;
 
     private StorefrontVisitor $visitor;
 
@@ -36,6 +34,14 @@ class StorefrontPersistentCartTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->assertSame('testing', app()->environment());
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->assertSame(':memory:', DB::connection()->getDatabaseName());
+        foreach (['2026_07_18_*.php', '2026_07_19_*.php'] as $pattern) {
+            foreach (glob(database_path('migrations/'.$pattern)) as $migration) {
+                (require $migration)->up();
+            }
+        }
         Schema::create('stj_paises', fn (Blueprint $t) => tap($t->bigInteger('pai_id', true), function () use ($t) {
             $t->bigInteger('pai_id_world')->nullable();
             $t->string('pai_codigo', 3);
@@ -581,6 +587,39 @@ class StorefrontPersistentCartTest extends TestCase
     private function item(string $size, int $quantity): array
     {
         return ['operation_uuid' => (string) Str::uuid(), 'product_id' => 10, 'sku' => 'SKU10', 'size' => $size, 'quantity' => $quantity];
+    }
+
+    public function test_cart_and_checkout_preserve_fixed_percentages_and_coupon_replacement_totals(): void
+    {
+        DB::table('stj_producto_pais')->where('ppa_producto', 10)->update(['ppa_precio' => 13.95]);
+        $this->promotion(105, 'DESCUENTO-SKU');
+        DB::table('stj_promociones_producto')->insert(['ppr_promocion' => 105, 'ppr_producto' => 10, 'ppr_descuento' => 30]);
+        $cart = $this->service->add('sv', $this->visitor, null, $this->item('S', 1));
+        $this->assertEquals(30, $cart['cart']['items'][0]['discountPercentage']);
+        $this->assertEquals(9.76, $cart['cart']['items'][0]['lineSubtotal']);
+
+        Schema::create('stj_carrito_cupones', fn (Blueprint $table) => $table->id());
+        $coupons = Mockery::mock(\App\Services\StorefrontCartCouponService::class);
+        $coupons->shouldReceive('usePromotionContext')->andReturnSelf();
+        $coupons->shouldReceive('revalidate')->andReturn([
+            'applications' => [],
+            'lines' => [[
+                'key' => (string) $cart['cart']['items'][0]['id'], 'promotionDiscount' => '0.00',
+                'couponDiscount' => '6.98', 'finalTotal' => '6.97', 'commercialDiscountPercentage' => 50.0, 'coupons' => [],
+            ]],
+            'totals' => ['shipping' => '0.00'],
+        ]);
+        $this->app->instance(\App\Services\StorefrontCartCouponService::class, $coupons);
+        $updated = $this->service->get('sv', $this->visitor, null);
+        $this->assertEquals(0, $updated['cart']['totals']['promotionDiscount']);
+        $this->assertEquals(6.98, $updated['cart']['totals']['discount']);
+        $this->assertEquals(50, $updated['cart']['items'][0]['discountPercentage']);
+
+        $checkout = $this->service->startCheckout('sv', $this->visitor, null, ['operation_uuid' => (string) Str::uuid()]);
+        $this->assertEquals(50, $checkout['checkout']['discountPercentage']);
+        $this->assertEquals(6.98, $checkout['checkout']['discount']);
+        $this->assertEquals(6.97, $checkout['checkout']['subtotal']);
+        $this->assertEquals(13.95, $checkout['checkout']['discount'] + $checkout['checkout']['subtotal']);
     }
 
     private function promotion(int $id, string $type, array $overrides = []): void

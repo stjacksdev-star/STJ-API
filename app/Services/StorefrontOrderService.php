@@ -248,6 +248,7 @@ class StorefrontOrderService
                     ...$item,
                     'baseTotal' => $baseTotal,
                     'discount' => $discount,
+                    'discountPercentage' => $resolved['commercialDiscountPercentage'] ?? null,
                     'finalTotal' => $finalTotal,
                     'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
                     'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
@@ -285,6 +286,7 @@ class StorefrontOrderService
                             ...$item,
                             'discount' => $this->decimal($totalDiscount),
                             'couponDiscount' => (string) $couponLine['couponDiscount'],
+                            'discountPercentage' => (float) $couponLine['commercialDiscountPercentage'],
                             'finalTotal' => $finalTotal,
                             'finalUnitPrice' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
                             'price' => $this->decimal((int) round($this->cents($finalTotal) / $item['quantity'])),
@@ -466,9 +468,9 @@ class StorefrontOrderService
             $pagoId = DB::table('stj_pedidos_pago')->insertGetId($paymentRow);
 
             $detailRows = collect($items)->map(function (array $item) use ($country, $checkoutType, $payload, $paymentRef, $now) {
-                $effectivePercentage = $this->cents($item['baseTotal']) > 0
-                    ? round($this->cents($item['discount']) * 100 / $this->cents($item['baseTotal']), 2)
-                    : 0;
+                $effectivePercentage = round(StorefrontDiscountCalculator::percentage(
+                    $this->cents($item['baseTotal']), $this->cents($item['discount']), $item['discountPercentage'] ?? null,
+                ), 2);
                 $promotion = $item['promotion'];
 
                 return [
@@ -482,9 +484,7 @@ class StorefrontOrderService
                     'car_precio' => $item['regularPrice'],
                     'car_talla' => $item['size'],
                     'car_cantidad' => $item['quantity'],
-                    // El pedido debe conservar el porcentaje realmente
-                    // distribuido y cobrado por línea, no el porcentaje
-                    // nominal configurado en una promoción condicionada.
+                    // Preserve fixed percentages; conditional promotions use their allocated benefit.
                     'car_descuento' => $effectivePercentage,
                     'car_promocion' => $promotion ? $this->limit($promotion['commercialName'] ?: $promotion['name'], 250) : null,
                     'car_promocion_id' => $promotion['id'] ?? null,
@@ -516,7 +516,7 @@ class StorefrontOrderService
                 'storeCode' => $storeCode,
                 'baseSubtotal' => $baseSubtotal,
                 'discount' => $this->decimal($discountCents),
-                'discountPercentage' => $baseSubtotalCents > 0 ? round($discountCents * 100 / $baseSubtotalCents, 2) : 0,
+                'discountPercentage' => $baseSubtotalCents > 0 ? round(collect($items)->sum(fn (array $item) => $this->cents($item['baseTotal']) * (float) ($item['discountPercentage'] ?? 0)) / $baseSubtotalCents, 2) : 0,
                 'subtotal' => $subtotal,
                 'shipping' => $shipping['shipping_amount'],
                 'shippingSource' => $shipping['source'],

@@ -81,6 +81,9 @@ class StorefrontPromotionResolver
                     'baseUnitPrice' => $this->decimal($line['unitPriceCents']),
                     'baseTotal' => $this->decimal($lineBaseCents),
                     'discount' => $this->decimal($discountCents),
+                    'commercialDiscountPercentage' => StorefrontDiscountCalculator::percentage(
+                        $lineBaseCents, $discountCents, StorefrontDiscountCalculator::promotionPercentage($promotion),
+                    ),
                     'finalTotal' => $this->decimal(max(0, $lineBaseCents - $discountCents)),
                     'promotion' => $promotion,
                     'pendingPromotion' => $pendingPromotion,

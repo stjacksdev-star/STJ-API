@@ -133,6 +133,7 @@ class StorefrontCartService
                         'baseLineTotal' => round($baseLineTotal, 2),
                         'discount' => round($promotionDiscount / $line['quantity'], 4),
                         'promotionDiscount' => round($promotionDiscount, 2),
+                        'discountPercentage' => (float) ($resolved['commercialDiscountPercentage'] ?? 0),
                         'finalPrice' => $finalPrice,
                         'lineTotal' => round($lineTotal, 2),
                         'promotion' => $resolved['promotion'] ?? null,
@@ -141,7 +142,7 @@ class StorefrontCartService
                 $baseSubtotal = round($authorized->sum('baseLineTotal'), 2);
                 $discount = round($authorized->sum('promotionDiscount'), 2);
                 $subtotal = round($authorized->sum('lineTotal'), 2);
-                $discountPercentage = $baseSubtotal > 0 ? round($discount * 100 / $baseSubtotal, 2) : 0.0;
+                $discountPercentage = $baseSubtotal > 0 ? round($authorized->sum(fn (array $line) => $line['baseLineTotal'] * $line['discountPercentage']) / $baseSubtotal, 2) : 0.0;
                 $country = $this->country($countryCode);
                 $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($input, 'delivery.city_id'), number_format($subtotal, 2, '.', ''));
                 $shippingAmount = (float) $shipping['shipping_amount'];
@@ -158,11 +159,14 @@ class StorefrontCartService
                             return [...$line, 'couponDiscount' => 0.0, 'coupons' => []];
                         }
                         $couponDiscount = (float) $couponLine['couponDiscount'];
+                        $promotionDiscount = (float) $couponLine['promotionDiscount'];
                         $lineTotal = (float) $couponLine['finalTotal'];
 
                         return [
                             ...$line,
-                            'discount' => round(($line['promotionDiscount'] + $couponDiscount) / $line['quantity'], 4),
+                            'discount' => round(($promotionDiscount + $couponDiscount) / $line['quantity'], 4),
+                            'promotionDiscount' => $promotionDiscount,
+                            'discountPercentage' => (float) $couponLine['commercialDiscountPercentage'],
                             'couponDiscount' => round($couponDiscount, 2),
                             'finalPrice' => round($lineTotal / $line['quantity'], 4),
                             'lineTotal' => round($lineTotal, 2),
@@ -171,7 +175,7 @@ class StorefrontCartService
                     })->values();
                     $discount = round($authorized->sum('promotionDiscount') + $authorized->sum('couponDiscount'), 2);
                     $subtotal = round($authorized->sum('lineTotal'), 2);
-                    $discountPercentage = $baseSubtotal > 0 ? round($discount * 100 / $baseSubtotal, 2) : 0.0;
+                    $discountPercentage = $baseSubtotal > 0 ? round($authorized->sum(fn (array $line) => $line['baseLineTotal'] * $line['discountPercentage']) / $baseSubtotal, 2) : 0.0;
                     // El umbral de envio se evalua sobre el subtotal comercial final:
                     // promociones y cupones ya descontados, sin incluir el envio.
                     $shipping = ($this->shipping ?? app(StorefrontShippingService::class))->quote($country, (string) $cart->car_tipo, data_get($input, 'delivery.city_id'), number_format($subtotal, 2, '.', ''));
@@ -883,6 +887,7 @@ class StorefrontCartService
             $baseTotal = (float) ($resolved['baseTotal'] ?? ($regularPrice * $quantity));
             $promotionDiscount = $selectedAndAvailable ? (float) ($resolved['discount'] ?? 0) : 0.0;
             $couponLine = $couponLines->get((string) $item->getKey());
+            $promotionDiscount = $selectedAndAvailable ? (float) ($couponLine['promotionDiscount'] ?? $promotionDiscount) : 0.0;
             $couponDiscount = $selectedAndAvailable ? (float) ($couponLine['couponDiscount'] ?? 0) : 0.0;
             $lineSubtotal = (float) ($couponLine['finalTotal'] ?? $resolved['finalTotal'] ?? $baseTotal);
             $effectiveUnitPrice = $quantity > 0 ? round($lineSubtotal / $quantity, 4) : $regularPrice;
@@ -906,6 +911,7 @@ class StorefrontCartService
                 'price' => $effectiveUnitPrice,
                 'regularPrice' => $regularPrice,
                 'discount' => $effectiveUnitDiscount,
+                'discountPercentage' => $selectedAndAvailable ? (float) ($couponLine['commercialDiscountPercentage'] ?? $resolved['commercialDiscountPercentage'] ?? 0) : 0.0,
                 'promotionDiscount' => round($promotionDiscount, 2),
                 'couponDiscount' => round($couponDiscount, 2),
                 'finalPrice' => $effectiveUnitPrice,
