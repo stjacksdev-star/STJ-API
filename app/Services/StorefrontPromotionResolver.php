@@ -61,7 +61,7 @@ class StorefrontPromotionResolver
                 if ($includePending && $promotion === null) {
                     $pendingCandidates = $allEvaluations
                         ->filter(fn (array $evaluation) => $evaluation['promotionType'] === 'CONDICION-SKU'
-                            && in_array($evaluation['restriction'], ['2x1', '21/2'], true)
+                            && in_array($evaluation['restriction'], ['2x1', '21/2', '2xPP'], true)
                             && $evaluation['totalBenefitCents'] === 0
                             && in_array($line['key'], $evaluation['eligibleLineKeys'], true)
                             && collect($normalized['lines'])
