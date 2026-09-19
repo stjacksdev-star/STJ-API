@@ -448,6 +448,10 @@ class MobileCartController extends Controller
                 'car_id' => $item['id'], 'car_tipo' => $cartType,
                 'car_cantidad' => $item['quantity'], 'car_talla' => $item['size'],
                 'car_descuento' => max(0, $discount),
+                // Exact display values from the shared cart; keep legacy aliases for older apps.
+                'baseSubtotal' => (float) $item['baseSubtotal'],
+                'lineSubtotal' => (float) $item['lineSubtotal'],
+                'discountPercentage' => (float) $item['discountPercentage'],
                 'car_promocion' => data_get($item, 'promotion.name', data_get($item, 'promotion.title', '')),
                 'car_seleccionado' => $item['selected'] ? 'SI' : 'NO',
                 'pro_id' => $item['productId'], 'pro_codigo' => $item['sku'],
