@@ -101,6 +101,12 @@ class StorefrontOrderFromCartTest extends TestCase
         $retry = $service->createFromCart($countryCode, $visitor, null, $payload);
 
         $this->assertSame($first, $retry);
+        $saved = json_decode(DB::table('stj_carrito_operaciones')->where('cao_uuid', $payload['operation_uuid'])->value('cao_respuesta'), true);
+        $this->assertSame(1, $saved['order']['lineAmountsVersion']);
+        $snapshots = app(\App\Services\StorefrontOrderAmountSnapshot::class)->lines($first['order']['paymentRef'], $countryId);
+        $detailId = (int) DB::table('stj_pedidos_detalle')->where('car_ref', $first['order']['paymentRef'])->value('car_id');
+        $this->assertSame($detailId, (int) $saved['order']['items'][0]['detailId']);
+        $this->assertSame($first['order']['total'], $snapshots[$detailId]['finalTotal']);
         $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tienda' => $storeCode]);
         $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $first['order']['pedidoId'], 'ped_tipo_identificacion' => 'Pasaporte', 'ped_identificacion' => 'ID12345', 'ped_departamento' => 2, 'ped_municipio' => 11, 'ped_direccion' => 'Residencia', 'ped_estatus' => $paymentType === 'EFECTIVO' ? 'RECIBIDO' : 'PENDIENTE_PAGO']);
         $relation = $type === 'DOMICILIO' ? 'stj_pedidos_direccion' : 'stj_pedidos_tienda';
@@ -236,7 +242,7 @@ class StorefrontOrderFromCartTest extends TestCase
     }
 
     #[DataProvider('discountCases')]
-    public function test_order_preserves_discount_semantics_and_passes_payment_amount_validation(string $type, float $price, int $quantity, float $configured, ?float $targetPrice, ?array $couponLine, float $expectedPercentage, string $expectedTotal): void
+    public function test_order_preserves_discount_semantics_and_passes_payment_amount_validation(string $type, float $price, int $quantity, float $configured, ?float $targetPrice, ?array $couponLine, float $expectedPercentage, string $expectedTotal, string $restriction = '21/2'): void
     {
         $this->assertSame('sqlite', DB::connection()->getDriverName());
         $this->schema();
@@ -250,7 +256,7 @@ class StorefrontOrderFromCartTest extends TestCase
         DB::table('stj_promociones')->insert([
             'prm_id' => 2000, 'prm_pais' => 1, 'prm_nombre' => 'PROMO TEST', 'prm_nombre_comercial' => 'Promocion',
             'prm_tipo' => 'PRODUCTOS', 'prm_tipo_promocion' => $type, 'prm_porcentaje' => $configured,
-            'prm_precio' => $targetPrice, 'prm_restriccion' => '21/2', 'prm_tipo_checkout' => 'TODO',
+            'prm_precio' => $targetPrice, 'prm_restriccion' => $restriction, 'prm_tipo_checkout' => 'TODO',
             'prm_alcance_tienda' => 'TODAS', 'prm_aplica' => 'TODO', 'prm_estado' => 'EN-PROCESO',
             'prm_modalidad' => 'PROGRAMADO', 'prm_origen' => 'WEB',
         ]);
@@ -281,6 +287,13 @@ class StorefrontOrderFromCartTest extends TestCase
         $this->assertTrue($result['ok']);
         $this->assertSame($expectedTotal, $result['order']['total']);
         $this->assertDatabaseHas('stj_pedidos_detalle', ['car_descuento' => $expectedPercentage, 'car_descuento_final' => $expectedPercentage]);
+        $detail = DB::table('stj_pedidos_detalle')->first();
+        $detail->pro_codigo = 'SKU10';
+        $detail->pro_nombre = 'Producto';
+        $dashboard = (new \ReflectionClass(\App\Services\Dashboard\OrderReferenceService::class))->newInstanceWithoutConstructor();
+        $product = (new \ReflectionMethod($dashboard, 'normalizeProduct'))->invoke($dashboard, $detail, $result['order']['items'][0]);
+        $this->assertSame($expectedTotal, number_format($product['chargedSubtotal'], 2, '.', ''));
+        $this->assertSame($expectedTotal, number_format($product['billedSubtotal'], 2, '.', ''));
         $payment = DB::table('stj_pedidos_pago')->where('ppa_id', $result['order']['pagoId'])->first();
         $powerTranz = (new \ReflectionClass(PowerTranzPaymentService::class))->newInstanceWithoutConstructor();
         (new \ReflectionMethod(PowerTranzPaymentService::class, 'assertAuthorizedAmount'))->invoke($powerTranz, $result['order']['pedidoId'], $payment);
@@ -298,6 +311,7 @@ class StorefrontOrderFromCartTest extends TestCase
             'fractional configured percentage' => ['DESCUENTO', 13.95, 1, 12.5, null, null, 12.5, '12.21'],
             'second half price' => ['CONDICION-SKU', 15.95, 2, 50, null, null, 25.02, '23.92'],
             'price target' => ['PUNTO-PRECIO', 13.95, 1, 50, 10, null, 28.32, '10.00'],
+            'two for 950' => ['CONDICION-SKU', 525, 2, 0, 950, null, 9.52, '950.00', '2xPP'],
             'promotion plus coupon' => ['DESCUENTO', 13.95, 1, 30, null, ['couponDiscount' => '6.97', 'commercialDiscountPercentage' => 80.0, 'finalTotal' => '2.79'], 80, '2.79'],
             'coupon replacing promotion' => ['DESCUENTO', 25.95, 1, 30, null, ['couponDiscount' => '12.98', 'commercialDiscountPercentage' => 50.0, 'finalTotal' => '12.97'], 50, '12.97'],
         ];

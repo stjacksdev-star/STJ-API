@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Services\Mail\Smtp2GoMailer;
+use App\Services\StorefrontOrderAmountSnapshot;
 use App\Support\OrderCurrency;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -556,7 +557,7 @@ class OrderReferenceService
             $quantityChanged = $quantity !== (int) ($line->car_cantidad ?? 0);
             $hasOriginalQuantityCopy = (int) ($line->car_cantidad_copia ?? 0) > 0;
 
-            $this->ensureCardLineDoesNotIncreasePayment($line, $product['price'], $quantity, $discount);
+            $this->ensureCardLineDoesNotIncreasePayment($line, $product, trim((string) $data['size']), $quantity, $discount);
 
             $updates = [
                 'car_producto' => $product['id'],
@@ -912,7 +913,7 @@ class OrderReferenceService
             ->first();
     }
 
-    private function ensureCardLineDoesNotIncreasePayment(object $line, float $price, int $quantity, float $discount): void
+    private function ensureCardLineDoesNotIncreasePayment(object $line, array $product, string $size, int $quantity, float $discount): void
     {
         if (strtoupper((string) ($line->ppa_tipo ?? '')) !== 'TARJETA') {
             return;
@@ -923,7 +924,16 @@ class OrderReferenceService
             ->sum(fn (array $product) => (float) ($product['chargedSubtotal'] ?? 0));
         $editedLineSubtotal = collect($products)
             ->first(fn (array $product) => (int) ($product['id'] ?? 0) === (int) $line->car_id)['chargedSubtotal'] ?? 0;
-        $newLineSubtotal = $quantity * ($price * (1 - ($discount / 100)));
+        $candidate = clone $line;
+        $candidate->car_producto = $product['id'];
+        $candidate->pro_codigo = $product['sku'];
+        $candidate->car_talla = $size;
+        $candidate->car_precio = $product['price'];
+        $candidate->car_cantidad = $quantity;
+        $candidate->car_descuento = $discount;
+        $amounts = app(StorefrontOrderAmountSnapshot::class)->lines((string) $line->ppa_ref, (int) $line->ped_id_pais);
+        $newLineSubtotal = StorefrontOrderAmountSnapshot::subtotal($candidate, $amounts[$line->car_id] ?? null)
+            ?? $this->subtotalAfterPercentageDiscount($product['price'], $quantity, $discount);
         $shipping = (string) ($line->ped_checkout ?? '') === 'DOMICILIO'
             ? (float) ($line->pdi_costo_envio_final ?? 0)
             : 0.0;
@@ -2185,6 +2195,8 @@ class OrderReferenceService
 
     private function products(string $reference, int $countryId): array
     {
+        $amounts = app(StorefrontOrderAmountSnapshot::class)->lines($reference, $countryId);
+
         return DB::table('stj_pedidos_detalle as detail')
             ->join('stj_productos as product', 'product.pro_id', '=', 'detail.car_producto')
             ->join('stj_producto_pais as country_product', function ($join) use ($countryId) {
@@ -2202,7 +2214,7 @@ class OrderReferenceService
                 (SELECT sp.pro_nombre FROM stj_productos sp WHERE sp.pro_codigo = detail.car_estilo_final LIMIT 1) AS estilo_final_nombre
             ")
             ->get()
-            ->map(fn ($product) => $this->normalizeProduct($product))
+            ->map(fn ($product) => $this->normalizeProduct($product, $amounts[$product->car_id] ?? null))
             ->values()
             ->all();
     }
@@ -2327,7 +2339,7 @@ class OrderReferenceService
         ];
     }
 
-    private function normalizeProduct(object $product): array
+    private function normalizeProduct(object $product, ?array $amountSnapshot = null): array
     {
         $quantity = (int) ($product->car_cantidad ?? 0);
         $originalQuantity = (int) ($product->car_cantidad_copia ?? 0) > 0
@@ -2340,8 +2352,10 @@ class OrderReferenceService
         $hasSubstitute = filled($product->car_estilo_final)
             && ((string) $product->pro_codigo !== (string) $product->car_estilo_final
                 || (string) $product->car_talla !== (string) $product->car_talla_final);
-        $chargedSubtotal = $this->subtotalAfterPercentageDiscount($price, $quantity, $discount);
-        $billedSubtotal = $this->subtotalAfterPercentageDiscount($price, $billedQuantity ?? 0, $billedDiscount);
+        $chargedSubtotal = StorefrontOrderAmountSnapshot::subtotal($product, $amountSnapshot)
+            ?? $this->subtotalAfterPercentageDiscount($price, $quantity, $discount);
+        $billedSubtotal = StorefrontOrderAmountSnapshot::subtotal($product, $amountSnapshot, true)
+            ?? $this->subtotalAfterPercentageDiscount($price, $billedQuantity ?? 0, $billedDiscount);
 
         return [
             'id' => (int) $product->car_id,

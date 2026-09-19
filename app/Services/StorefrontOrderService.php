@@ -504,10 +504,14 @@ class StorefrontOrderService
                 ];
             })->all();
 
-            DB::table('stj_pedidos_detalle')->insert($detailRows);
+            foreach ($detailRows as $index => $detailRow) {
+                $items[$index]['detailId'] = DB::table('stj_pedidos_detalle')->insertGetId($detailRow, 'car_id');
+                $items[$index]['persistedDiscountPercentage'] = $detailRow['car_descuento'];
+            }
 
             return [
                 'pedidoId' => $pedidoId,
+                'lineAmountsVersion' => 1,
                 'pagoId' => $pagoId,
                 'paymentRef' => $paymentRef,
                 'status' => $orderStatus,
