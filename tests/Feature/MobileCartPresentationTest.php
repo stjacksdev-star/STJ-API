@@ -22,6 +22,7 @@ class MobileCartPresentationTest extends TestCase
             }
         });
         $base = ['id' => 1, 'productId' => 10, 'sku' => 'SKU10', 'name' => 'Producto', 'size' => 'M',
+            'pendingPromotion' => ['id' => 12, 'type' => 'CONDICION-SKU', 'restriction' => '2xPP'],
             'selected' => true, 'status' => 'DISPONIBLE', 'unavailableReason' => null, 'imageUrl' => null];
         $items = [
             [...$base, 'quantity' => 2, 'regularPrice' => 525, 'finalPrice' => 475, 'baseSubtotal' => 1050, 'lineSubtotal' => 950, 'discountPercentage' => 9.523809],
@@ -36,6 +37,7 @@ class MobileCartPresentationTest extends TestCase
             $this->assertSame((float) $item['lineSubtotal'], $row['lineSubtotal']);
             $this->assertSame((float) $item['baseSubtotal'], $row['baseSubtotal']);
             $this->assertSame((float) $item['discountPercentage'], $row['discountPercentage']);
+            $this->assertSame($item['pendingPromotion'], $row['pendingPromotion']);
             $this->assertSame(round((1 - $item['finalPrice'] / $item['regularPrice']) * 100, 4), $row['car_descuento']);
         }
     }
