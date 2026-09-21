@@ -42,8 +42,25 @@ class PowerTranzRefundService
             $country = strtolower(trim((string) DB::table('stj_paises')
                 ->where('pai_id', $order->ped_id_pais)->value('pai_codigo')));
             $configuration = $this->configuration->forCountry($country, (string) $order->ped_origen);
-            $correlationId = (string) Str::uuid();
             $transaction = trim((string) $payment->ppa_transactionidentifier);
+            $storedResponse = json_decode((string) $order->ped_rsp_servicio, true);
+            if (is_array($storedResponse)) {
+                unset($storedResponse['LocalValidationError']);
+                [$storedApproved] = $this->validateResponse(
+                    $storedResponse, $transaction, (string) $payment->ppa_ref, $amount, $configuration['currency'],
+                );
+                if ($storedApproved) {
+                    DB::table('stj_pedidos')->where('ped_id', $orderId)->update([
+                        'ped_devolucion_realizada' => 'SI',
+                        'ped_rsp_servicio' => json_encode($storedResponse, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                        'ped_fecha_devolucion_sistema' => now(),
+                    ]);
+
+                    return $this->result($orderId, $payment, $country, $order, $amount, 'APROBADA', $storedResponse, true);
+                }
+            }
+
+            $correlationId = (string) Str::uuid();
             $payload = [
                 'Refund' => true,
                 'TransactionIdentifier' => $transaction,
@@ -57,11 +74,11 @@ class PowerTranzRefundService
                 'AddressMatch' => false,
             ];
             $response = $this->client->refund($configuration, $payload, $correlationId);
-            $approved = ($response['Approved'] ?? null) === true;
-            $responseTransaction = trim((string) ($response['TransactionIdentifier'] ?? ''));
-            if ($responseTransaction !== '' && $responseTransaction !== $transaction) {
-                $approved = false;
-                $response['LocalValidationError'] = 'TransactionIdentifier no coincide con la operacion original.';
+            [$approved, $validationError] = $this->validateResponse(
+                $response, $transaction, (string) $payment->ppa_ref, $amount, $configuration['currency'],
+            );
+            if ($validationError !== null) {
+                $response['LocalValidationError'] = $validationError;
             }
 
             DB::table('stj_pedidos')->where('ped_id', $orderId)->update([
@@ -70,9 +87,8 @@ class PowerTranzRefundService
                 'ped_fecha_devolucion_sistema' => $approved ? now() : $order->ped_fecha_devolucion_sistema,
             ]);
 
-            return ['orderId' => $orderId, 'reference' => (string) $payment->ppa_ref,
-                'country' => strtoupper($country), 'origin' => strtoupper((string) $order->ped_origen),
-                'amount' => $amount, 'status' => $approved ? 'APROBADA' : 'RECHAZADA', 'response' => $response];
+            return $this->result($orderId, $payment, $country, $order, $amount,
+                $approved ? 'APROBADA' : 'RECHAZADA', $response, false);
         }, 3);
     }
 
@@ -98,5 +114,41 @@ class PowerTranzRefundService
         }
 
         return DB::table('stj_pedidos_pago')->where('ppa_ref', $identifier)->orderByDesc('ppa_id')->value('ppa_pedido');
+    }
+
+    /** @return array{bool, ?string} */
+    private function validateResponse(array $response, string $originalTransaction, string $reference, float $amount, string $currency): array
+    {
+        if (($response['Approved'] ?? null) !== true) {
+            return [false, null];
+        }
+        $returnedOriginal = trim((string) ($response['OriginalTrxnIdentifier']
+            ?? $response['OriginalTransactionIdentifier'] ?? ''));
+        if ($returnedOriginal === '' || $returnedOriginal !== $originalTransaction) {
+            return [false, 'OriginalTrxnIdentifier no coincide con la operacion original.'];
+        }
+        if (trim((string) ($response['TransactionIdentifier'] ?? '')) === '') {
+            return [false, 'PowerTranz no devolvio el identificador de la devolucion.'];
+        }
+        if (isset($response['OrderIdentifier']) && (string) $response['OrderIdentifier'] !== $reference) {
+            return [false, 'OrderIdentifier no coincide con la referencia del pedido.'];
+        }
+        if (isset($response['CurrencyCode']) && (string) $response['CurrencyCode'] !== $currency) {
+            return [false, 'CurrencyCode no coincide con la moneda esperada.'];
+        }
+        if (isset($response['TotalAmount']) && (int) round((float) $response['TotalAmount'] * 100) !== (int) round($amount * 100)) {
+            return [false, 'TotalAmount no coincide con el monto solicitado.'];
+        }
+
+        return [true, null];
+    }
+
+    /** @return array<string, mixed> */
+    private function result(int $orderId, object $payment, string $country, object $order, float $amount,
+        string $status, array $response, bool $reconciled): array
+    {
+        return ['orderId' => $orderId, 'reference' => (string) $payment->ppa_ref,
+            'country' => strtoupper($country), 'origin' => strtoupper((string) $order->ped_origen),
+            'amount' => $amount, 'status' => $status, 'response' => $response, 'reconciled' => $reconciled];
     }
 }

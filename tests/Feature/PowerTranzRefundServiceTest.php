@@ -40,7 +40,9 @@ class PowerTranzRefundServiceTest extends TestCase
             return $configuration['id'] === 'app-id' && $payload['Refund'] === true
                 && $payload['TransactionIdentifier'] === 'TX-APP' && $payload['TotalAmount'] === 12.34
                 && $payload['CurrencyCode'] === '840';
-        })->andReturn(['Approved' => true, 'TransactionIdentifier' => 'TX-APP', 'IsoResponseCode' => '00']);
+        })->andReturn(['Approved' => true, 'OriginalTrxnIdentifier' => 'TX-APP',
+            'TransactionIdentifier' => 'NEW-REFUND-TX', 'TotalAmount' => 12.34, 'CurrencyCode' => '840',
+            'OrderIdentifier' => 'STJ-TEST', 'IsoResponseCode' => '00']);
 
         $result = (new PowerTranzRefundService($config, $client))->process($orderId);
 
@@ -63,6 +65,44 @@ class PowerTranzRefundServiceTest extends TestCase
         $order = DB::table('stj_pedidos')->where('ped_id', $orderId)->first();
         $this->assertSame('NO', $order->ped_devolucion_realizada);
         $this->assertSame('05', json_decode($order->ped_rsp_servicio, true)['IsoResponseCode']);
+    }
+
+    public function test_previous_approved_response_is_reconciled_without_sending_a_second_refund(): void
+    {
+        $orderId = $this->pendingOrder('WEB', 'ORIGINAL-TX');
+        DB::table('stj_pedidos')->where('ped_id', $orderId)->update(['ped_rsp_servicio' => json_encode([
+            'Approved' => true, 'OriginalTrxnIdentifier' => 'ORIGINAL-TX',
+            'TransactionIdentifier' => 'REFUND-TX', 'TotalAmount' => 12.34, 'CurrencyCode' => '840',
+            'OrderIdentifier' => 'STJ-TEST',
+            'LocalValidationError' => 'TransactionIdentifier no coincide con la operacion original.',
+        ])]);
+        $config = Mockery::mock(PowerTranzConfigResolver::class);
+        $config->shouldReceive('forCountry')->once()->with('sv', 'WEB')->andReturn($this->configuration());
+        $client = Mockery::mock(PowerTranzClient::class);
+        $client->shouldNotReceive('refund');
+
+        $result = (new PowerTranzRefundService($config, $client))->process($orderId);
+
+        $this->assertSame('APROBADA', $result['status']);
+        $this->assertTrue($result['reconciled']);
+        $order = DB::table('stj_pedidos')->where('ped_id', $orderId)->first();
+        $this->assertSame('SI', $order->ped_devolucion_realizada);
+        $this->assertArrayNotHasKey('LocalValidationError', json_decode($order->ped_rsp_servicio, true));
+    }
+
+    public function test_approved_response_with_wrong_original_transaction_stays_pending(): void
+    {
+        $orderId = $this->pendingOrder('WEB', 'ORIGINAL-TX');
+        $config = Mockery::mock(PowerTranzConfigResolver::class);
+        $config->shouldReceive('forCountry')->andReturn($this->configuration());
+        $client = Mockery::mock(PowerTranzClient::class);
+        $client->shouldReceive('refund')->andReturn(['Approved' => true, 'OriginalTrxnIdentifier' => 'OTHER-TX',
+            'TransactionIdentifier' => 'REFUND-TX']);
+
+        $result = (new PowerTranzRefundService($config, $client))->process($orderId);
+
+        $this->assertSame('RECHAZADA', $result['status']);
+        $this->assertDatabaseHas('stj_pedidos', ['ped_id' => $orderId, 'ped_devolucion_realizada' => 'NO']);
     }
 
     public function test_historical_payment_without_transaction_identifier_is_not_eligible(): void
