@@ -2,6 +2,7 @@
 
 namespace App\Services\Mobile;
 
+use App\Support\StorefrontImageUrl;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -19,7 +20,7 @@ class MobileCategoryService
             ->where('cat_habilitado_app', 1)
             ->where('cat_id', '<>', 11)
             ->orderBy('cat_orden_app')
-            ->get(['cat_id', 'cat_logo_app', 'cat_tallas']);
+            ->get(['cat_id', 'cat_logo_app', 'cat_header', 'cat_tallas']);
 
         $subcategoryGroups = DB::table('stj_sub_categorias')
             ->whereIn('sca_categoria', $categories->pluck('cat_id'))
@@ -29,7 +30,7 @@ class MobileCategoryService
 
         $assetUrl = (string) config('mobile.legacy_category_asset_url');
 
-        return $categories->map(static function (object $category) use ($subcategoryGroups, $assetUrl): array {
+        return $categories->map(function (object $category) use ($subcategoryGroups, $assetUrl): array {
             $subcategories = $subcategoryGroups->get($category->cat_id, collect())
                 ->map(static fn (object $subcategory): array => [
                     'id' => $subcategory->sca_id,
@@ -41,7 +42,8 @@ class MobileCategoryService
             return [
                 'id' => $category->cat_id,
                 'nombre' => '<span style="color:rgb(0,122,201)">&nbsp;</span>',
-                'foto' => $assetUrl.'/'.ltrim((string) $category->cat_logo_app, '/'),
+                'foto' => $this->categoryAsset($category->cat_logo_app, $assetUrl),
+                'imgHeader' => $this->categoryHeader($category->cat_header, (int) $category->cat_id, $assetUrl),
                 'tallas' => $category->cat_tallas,
                 'subCategorias' => $subcategories,
             ];
@@ -56,19 +58,20 @@ class MobileCategoryService
             ->where('cat_habilitado_app', 1)
             ->where('cat_id', '<>', 10)
             ->orderBy('cat_orden_app')
-            ->get(['cat_id', 'cat_nombre_app', 'cat_logo_app', 'cat_tallas']);
+            ->get(['cat_id', 'cat_nombre_app', 'cat_logo_app', 'cat_header', 'cat_tallas']);
 
         $subcategoryGroups = $this->subcategoriesFor($categories->pluck('cat_id')->all());
         $assetUrl = (string) config('mobile.legacy_category_asset_url');
 
-        return $categories->map(static function (object $category) use ($subcategoryGroups, $assetUrl): array {
+        return $categories->map(function (object $category) use ($subcategoryGroups, $assetUrl): array {
             return [
                 'id' => $category->cat_id,
                 'nombre' => '<span style="color:rgb(0,122,201)">'.(string) $category->cat_nombre_app.'</span>',
                 'foto2' => $assetUrl.'/ocho2/'.$category->cat_id.'.jpg',
                 'tallas' => $category->cat_tallas,
                 'subCategorias' => $subcategoryGroups->get($category->cat_id, collect())->values()->all(),
-                'foto' => $assetUrl.'/'.ltrim((string) $category->cat_logo_app, '/'),
+                'foto' => $this->categoryAsset($category->cat_logo_app, $assetUrl),
+                'imgHeader' => $this->categoryHeader($category->cat_header, (int) $category->cat_id, $assetUrl),
             ];
         })->values()->all();
     }
@@ -143,7 +146,7 @@ class MobileCategoryService
 
         $category = DB::table('stj_categorias')
             ->where('cat_id', $categoryId)
-            ->first(['cat_id', 'cat_nombre']);
+            ->first(['cat_id', 'cat_nombre', 'cat_header']);
 
         if (! $category) {
             throw ValidationException::withMessages([
@@ -154,9 +157,45 @@ class MobileCategoryService
         return [
             'id' => $category->cat_id,
             'nombre' => $category->cat_nombre,
-            'foto' => (string) config('mobile.legacy_category_asset_url').'/ocho/'.$category->cat_id.'.jpg',
+            'foto' => $this->categoryHeader($category->cat_header, (int) $category->cat_id, (string) config('mobile.legacy_category_asset_url')),
             'tipo' => 1,
         ];
+    }
+
+    private function categoryHeader(mixed $path, int $categoryId, string $legacyBaseUrl): string
+    {
+        $path = trim((string) $path);
+        if ($path !== '' && ! str_starts_with($path, 'https://') && ! str_starts_with($path, 'http://')
+            && ! str_starts_with($path, '/images/') && ! str_starts_with($path, 'images/')) {
+            $baseUrl = rtrim((string) config('filesystems.disks.spaces.url'), '/')
+                ?: 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com';
+            $path = ltrim($path, '/');
+            return $baseUrl.'/'.(str_starts_with($path, 'categorias/') ? $path : 'categorias/'.$path);
+        }
+
+        return $this->categoryAsset($path, $legacyBaseUrl)
+            ?? rtrim($legacyBaseUrl, '/').'/ocho/'.$categoryId.'.jpg';
+    }
+
+    private function categoryAsset(mixed $path, string $legacyBaseUrl): ?string
+    {
+        $path = trim((string) $path);
+        if ($path === '') {
+            return null;
+        }
+        if (str_starts_with($path, 'https://') || str_starts_with($path, 'http://')) {
+            return $path;
+        }
+        if (str_starts_with($path, '/images/') || str_starts_with($path, 'images/')) {
+            return StorefrontImageUrl::asset($path);
+        }
+        if (str_starts_with(ltrim($path, '/'), 'categorias/')) {
+            $baseUrl = rtrim((string) config('filesystems.disks.spaces.url'), '/')
+                ?: 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com';
+            return $baseUrl.'/'.ltrim($path, '/');
+        }
+
+        return rtrim($legacyBaseUrl, '/').'/'.ltrim($path, '/');
     }
 
     private function assertCountryExists(int $countryId): void

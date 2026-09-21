@@ -28,6 +28,7 @@ class MobileCategoryEndpointTest extends TestCase
             $table->string('cat_nombre');
             $table->string('cat_nombre_app')->nullable();
             $table->string('cat_logo_app')->nullable();
+            $table->string('cat_header')->nullable();
             $table->string('cat_tallas')->nullable();
             $table->boolean('cat_si_sub_otras')->default(false);
             $table->string('cat_sub_otras')->nullable();
@@ -93,6 +94,7 @@ class MobileCategoryEndpointTest extends TestCase
                         'id' => 1,
                         'nombre' => '<span style="color:rgb(0,122,201)">&nbsp;</span>',
                         'foto' => 'https://assets.example/categories/nino.png',
+                        'imgHeader' => 'https://assets.example/categories/ocho/1.jpg',
                         'tallas' => '2-14',
                         'subCategorias' => [
                             ['id' => 10, 'nombre' => 'Camisas'],
@@ -103,6 +105,7 @@ class MobileCategoryEndpointTest extends TestCase
                         'id' => 2,
                         'nombre' => '<span style="color:rgb(0,122,201)">&nbsp;</span>',
                         'foto' => 'https://assets.example/categories/nina.png',
+                        'imgHeader' => 'https://assets.example/categories/ocho/2.jpg',
                         'tallas' => '2-12',
                         'subCategorias' => [
                             ['id' => 30, 'nombre' => 'Vestidos'],
@@ -112,6 +115,7 @@ class MobileCategoryEndpointTest extends TestCase
                         'id' => 10,
                         'nombre' => '<span style="color:rgb(0,122,201)">&nbsp;</span>',
                         'foto' => 'https://assets.example/categories/diez.png',
+                        'imgHeader' => 'https://assets.example/categories/ocho/10.jpg',
                         'tallas' => null,
                         'subCategorias' => [],
                     ],
@@ -137,6 +141,7 @@ class MobileCategoryEndpointTest extends TestCase
             ->assertJsonPath('records.0.nombre', '<span style="color:rgb(0,122,201)">Niño</span>')
             ->assertJsonPath('records.0.foto2', 'https://assets.example/categories/ocho2/1.jpg')
             ->assertJsonPath('records.0.foto', 'https://assets.example/categories/nino.png')
+            ->assertJsonPath('records.0.imgHeader', 'https://assets.example/categories/ocho/1.jpg')
             ->assertJsonPath('records.0.subCategorias.0.nombre', 'Camisas')
             ->assertJsonPath('records.2.id', 11);
 
@@ -188,6 +193,28 @@ class MobileCategoryEndpointTest extends TestCase
                 'foto' => 'https://assets.example/categories/ocho/1.jpg',
                 'tipo' => 1,
             ]);
+    }
+
+    public function test_it_uses_spaces_urls_for_home_and_category_header(): void
+    {
+        DB::table('stj_categorias')->where('cat_id', 1)->update([
+            'cat_logo_app' => 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos.jpg',
+            'cat_header' => 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos-header.jpg',
+        ]);
+
+        $this->getJson('/api/mobile/v1/catalog/categories?countryId=1')
+            ->assertOk()
+            ->assertJsonPath('records.0.foto', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos.jpg')
+            ->assertJsonPath('records.0.imgHeader', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos-header.jpg');
+
+        $this->getJson('/api/mobile/v1/catalog/categories/search?countryId=1')
+            ->assertOk()
+            ->assertJsonPath('records.0.foto', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos.jpg')
+            ->assertJsonPath('records.0.imgHeader', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos-header.jpg');
+
+        $this->getJson('/api/mobile/v1/catalog/categories/1?countryId=1')
+            ->assertOk()
+            ->assertJsonPath('foto', 'https://stj-assets.sfo3.cdn.digitaloceanspaces.com/categorias/ninos-header.jpg');
     }
 
     public function test_single_category_requires_a_supported_category_and_country(): void
