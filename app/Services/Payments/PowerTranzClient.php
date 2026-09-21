@@ -27,6 +27,16 @@ class PowerTranzClient
         return $response->json();
     }
 
+    public function refund(array $configuration, array $payload, string $correlationId): array
+    {
+        return $this->post(
+            $configuration['refund_url'],
+            $configuration,
+            json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            $correlationId,
+        );
+    }
+
     private function post(string $url, array $configuration, string $json, string $correlationId): array
     {
         try {

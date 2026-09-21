@@ -4,6 +4,9 @@ return [
     'environment' => env('POWERTRANZ_ENVIRONMENT', 'staging'),
     'sale_url' => env('POWERTRANZ_URL', 'https://staging.ptranz.com/api/spi/sale'),
     'payment_url' => env('POWERTRANZ_PAYMENT_URL', 'https://staging.ptranz.com/api/spi/payment'),
+    'refund_url' => env('POWERTRANZ_REFUND_URL', env('POWERTRANZ_ENVIRONMENT', 'staging') === 'production'
+        ? 'https://gateway.ptranz.com/api/refund'
+        : 'https://staging.ptranz.com/api/refund'),
     'connect_timeout' => (int) env('POWERTRANZ_CONNECT_TIMEOUT', 5),
     'timeout' => (int) env('POWERTRANZ_TIMEOUT', 20),
     'return_base_url' => env('POWERTRANZ_RETURN_BASE_URL', ''),

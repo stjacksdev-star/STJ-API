@@ -194,6 +194,11 @@ Schedule::command('reports:daily-sales')
     ->dailyAt((string) config('daily_sales_report.time', '00:10'))
     ->timezone((string) config('daily_sales_report.timezone', 'America/El_Salvador'))
     ->withoutOverlapping(60);
+Schedule::command('powertranz:refund-pending')
+    ->dailyAt('00:00')
+    ->timezone('America/El_Salvador')
+    ->withoutOverlapping(120)
+    ->appendOutputTo(storage_path('logs/powertranz-refunds.log'));
 Schedule::command('inventory:sync')
     ->everyFiveMinutes()
     ->between('08:00', '21:00')
