@@ -2,13 +2,21 @@
 
 namespace Tests\Feature;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 class PowerTranzReturnSecurityTest extends TestCase
 {
-    use RefreshDatabase;
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->assertSame('testing', app()->environment());
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->assertSame(':memory:', DB::connection()->getDatabaseName());
+        // Unknown-token checks only need the operations table, not legacy Prism ALTERs.
+        (require database_path('migrations/2026_07_19_000006_create_powertranz_operations_table.php'))->up();
+    }
 
     public function test_unknown_token_is_rejected_without_order_information(): void
     {

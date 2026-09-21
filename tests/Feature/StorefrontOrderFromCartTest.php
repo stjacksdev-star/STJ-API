@@ -28,6 +28,7 @@ class StorefrontOrderFromCartTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['storefront_post_purchase.integrations_enabled' => false, 'storefront_post_purchase.honduras.register_pending' => false]);
         $this->assertSame('testing', app()->environment());
         $this->assertSame('sqlite', DB::connection()->getDriverName());
         $this->assertSame(':memory:', DB::connection()->getDatabaseName());
@@ -41,7 +42,7 @@ class StorefrontOrderFromCartTest extends TestCase
     }
 
     #[DataProvider('fulfillmentCases')]
-    public function test_order_uses_exact_authorized_store_code(string $countryCode, int $countryId, string $type, string $storeCode, string $paymentType = 'TARJETA', bool $allowed = true, bool $gatewayApproved = true): void
+    public function test_order_uses_exact_authorized_store_code(string $countryCode, int $countryId, string $type, string $storeCode, string $paymentType = 'TARJETA', bool $allowed = true, bool $gatewayApproved = true, string $origin = 'WEB'): void
     {
         $this->schema();
         DB::table('stj_paises')->insert(['pai_id' => $countryId, 'pai_id_world' => $countryId, 'pai_codigo' => strtoupper($countryCode)]);
@@ -81,7 +82,7 @@ class StorefrontOrderFromCartTest extends TestCase
         $shipping->shouldReceive('quote')->times($allowed ? 1 : 0)->andReturn(['shipping_amount' => '0.00', 'display_amount' => 'GRATIS', 'currency' => 'USD', 'currency_symbol' => '$', 'source' => $type === 'TIENDA' ? 'STORE_PICKUP' : 'FREE_RULE', 'rule_id' => null, 'minimum_free_shipping' => '0.00', 'remaining_for_free_shipping' => '0.00', 'message' => 'Sin costo', 'city' => $type === 'DOMICILIO' ? ['id' => 11, 'name' => 'SPS', 'stateId' => 2, 'state' => 'Cortes', 'urbanId' => null] : null]);
         $service = new StorefrontOrderService($validator, new StorefrontProductPricingService, $shipping);
         $payload = ['operation_uuid' => (string) Str::uuid(), 'customer' => ['firstName' => 'Ana', 'lastName' => 'Lopez', 'email' => 'ana@example.com', 'phone' => '77067440', 'documentType' => 'Pasaporte', 'document' => 'ID12345', 'countryId' => $countryId, 'stateId' => 2, 'cityId' => 11, 'address' => 'Residencia'], 'delivery' => ['city_id' => 11, 'state_id' => 2, 'city' => 'SPS', 'addressLine1' => 'Direccion'], 'payment_type' => $paymentType, 'items' => [['price' => 0.01]], 'guestCartId' => 'falso'];
-        if ($hasPromotion) {
+        if ($hasPromotion || $origin === 'APP') {
             $payload += ['_origin' => 'APP', '_platform' => 'IOS', '_app_build' => 1];
         }
         $payload['delivery']['reference'] = 'Frente al parque';
@@ -133,7 +134,7 @@ class StorefrontOrderFromCartTest extends TestCase
             $operationUuid = (string) Str::uuid();
             $returnToken = null;
             $paymentReference = (string) DB::table('stj_pedidos_pago')->where('ppa_id', $first['order']['pagoId'])->value('ppa_ref');
-            $configuration->shouldReceive('forCountry')->twice()->andReturn(['environment' => 'staging', 'sale_url' => 'https://staging.ptranz.com/api/spi/sale', 'payment_url' => 'https://staging.ptranz.com/api/spi/payment', 'id' => 'id', 'password' => 'password', 'currency' => $countryCode === 'hn' ? '340' : ($countryCode === 'gt' ? '320' : ($countryCode === 'cr' ? '188' : '840')), 'connect_timeout' => 2, 'timeout' => 5]);
+            $configuration->shouldReceive('forCountry')->with($countryCode, $hasPromotion ? 'APP' : $origin)->twice()->andReturn(['environment' => 'staging', 'sale_url' => 'https://staging.ptranz.com/api/spi/sale', 'payment_url' => 'https://staging.ptranz.com/api/spi/payment', 'id' => 'id', 'password' => 'password', 'currency' => $countryCode === 'hn' ? '340' : ($countryCode === 'gt' ? '320' : ($countryCode === 'cr' ? '188' : '840')), 'connect_timeout' => 2, 'timeout' => 5]);
             $client->shouldReceive('sale')->once()->andReturnUsing(function ($config, $payload) use (&$returnToken) {
                 $returnToken = basename($payload['ExtendedData']['MerchantResponseUrl']);
 
@@ -157,7 +158,7 @@ class StorefrontOrderFromCartTest extends TestCase
                 $this->assertDatabaseHas('stj_carritos', [
                     'car_id' => $cart->getKey(),
                     'car_estado' => 'ACTIVO',
-                    'car_pedido_id' => $first['order']['pedidoId'],
+                    'car_pedido_id' => $origin === 'APP' ? null : $first['order']['pedidoId'],
                 ]);
             }
         } else {
@@ -169,6 +170,10 @@ class StorefrontOrderFromCartTest extends TestCase
             }
         }
         $this->assertSame(1, DB::table('stj_cliente_eventos')->where('cev_tipo', 'ORDER_CREATED')->count());
+        if ($origin === 'APP' && ! $gatewayApproved) {
+            // APP restores and detaches its cart on denial; a new attempt needs checkout again.
+            return;
+        }
         $payments = new StorefrontPaymentEventService;
         $payments->record((int) $first['order']['pagoId'], 'DENEGADA', (string) Str::uuid());
         $this->assertSame($paymentType === 'TARJETA' && $gatewayApproved ? 1 : 0, DB::table('stj_cliente_eventos')->where('cev_tipo', 'PURCHASE')->count());
@@ -182,6 +187,8 @@ class StorefrontOrderFromCartTest extends TestCase
     public static function fulfillmentCases(): array
     {
         return [
+            'APP SV tarjeta aprobada' => ['sv', 1, 'DOMICILIO', '57', 'TARJETA', true, true, 'APP'],
+            'APP SV tarjeta denegada' => ['sv', 1, 'DOMICILIO', '57', 'TARJETA', true, false, 'APP'],
             'domicilio SV' => ['sv', 1, 'DOMICILIO', '57'],
             'domicilio GT' => ['gt', 2, 'DOMICILIO', '2'],
             'domicilio CR' => ['cr', 3, 'DOMICILIO', '1'],

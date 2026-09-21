@@ -13,6 +13,12 @@ return [
         'id' => env('POWERTRANZ_'.strtoupper($country).'_ID', ''),
         'password' => env('POWERTRANZ_'.strtoupper($country).'_PASSWORD', ''),
     ]])->all(),
+    'app_credentials' => [
+        'sv' => [
+            'id' => env('POWERTRANZ_SV_APP_ID', ''),
+            'password' => env('POWERTRANZ_SV_APP_PASSWORD', ''),
+        ],
+    ],
     // ISO 4217 numérico utilizado exclusivamente en los mensajes a PowerTranz.
     'currencies' => [
         'sv' => env('POWERTRANZ_SV_CURRENCY_CODE', '840'),

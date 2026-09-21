@@ -14,6 +14,39 @@ use Tests\TestCase;
 
 class PowerTranzConfigurationAndPayloadTest extends TestCase
 {
+    #[DataProvider('svChannels')]
+    public function test_sv_credentials_are_isolated_by_order_origin(string $origin, array $appCredentials, ?string $expectedId): void
+    {
+        config([
+            'powertranz.environment' => 'staging',
+            'powertranz.sale_url' => 'https://staging.ptranz.com/api/spi/sale',
+            'powertranz.payment_url' => 'https://staging.ptranz.com/api/spi/payment',
+            'powertranz.credentials.sv' => ['id' => 'web-id', 'password' => 'web-password'],
+            'powertranz.app_credentials.sv' => $appCredentials,
+            'powertranz.currencies.sv' => '840',
+        ]);
+        if ($expectedId === null) {
+            $this->expectException(ValidationException::class);
+        }
+        $resolved = (new PowerTranzConfigResolver)->forCountry('SV', $origin);
+        $this->assertSame($expectedId, $resolved['id']);
+        $this->assertSame($expectedId === 'app-id' ? 'app-password' : 'web-password', $resolved['password']);
+        $this->assertSame('840', $resolved['currency']);
+    }
+
+    public static function svChannels(): array
+    {
+        return [
+            'web unchanged' => ['WEB', ['id' => 'app-id', 'password' => 'app-password'], 'web-id'],
+            'app isolated' => ['APP', ['id' => 'app-id', 'password' => 'app-password'], 'app-id'],
+            'web without app configuration' => ['WEB', [], 'web-id'],
+            'app missing both' => ['APP', [], null],
+            'app missing password' => ['APP', ['id' => 'app-id'], null],
+            'app missing id' => ['APP', ['password' => 'app-password'], null],
+            'invalid origin' => ['', [], null],
+        ];
+    }
+
     #[DataProvider('countries')]
     public function test_staging_configuration_resolves_each_country(string $country, string $currency): void
     {

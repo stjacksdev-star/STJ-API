@@ -46,7 +46,7 @@ class PowerTranzPaymentService
                 }
             }
             $country = strtolower((string) DB::table('stj_paises')->where('pai_id', $order->ped_id_pais)->value('pai_codigo'));
-            $configuration = $this->configuration->forCountry($country);
+            $configuration = $this->configuration->forCountry($country, (string) $order->ped_origen);
             $fingerprint = hash('sha256', $orderId.'|'.$payment->ppa_id.'|'.$input['operation_uuid']);
             $existing = DB::table('stj_powertranz_operaciones')->where('pto_uuid', $input['operation_uuid'])->lockForUpdate()->first();
             if ($existing) {
@@ -104,7 +104,7 @@ class PowerTranzPaymentService
             if ($actualCountry !== strtolower($country)) {
                 throw ValidationException::withMessages(['country' => 'El pais del retorno no coincide.']);
             }
-            $configuration = $this->configuration->forCountry($actualCountry);
+            $configuration = $this->configuration->forCountry($actualCountry, (string) $order->ped_origen);
             if ((string) $input['TransactionIdentifier'] !== (string) $operation->pto_uuid) {
                 throw ValidationException::withMessages(['return' => 'El identificador de transaccion no coincide.']);
             }
