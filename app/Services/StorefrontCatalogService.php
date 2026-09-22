@@ -38,7 +38,8 @@ class StorefrontCatalogService
         $trimmedQuery = trim((string) $query);
         $activeGroup = trim((string) ($filters['group'] ?? ''));
         $activeCategory = trim((string) ($filters['category'] ?? ''));
-        $activeSubcategory = (int) ($filters['subcategory'] ?? 0);
+        $activeSubcategories = $this->requestedSubcategories($filters);
+        $activeSubcategory = $activeSubcategories[0] ?? 0;
         $activeFit = trim((string) ($filters['fit'] ?? ''));
         $activeSort = trim((string) ($filters['sort'] ?? 'featured'));
         $activeStore = trim((string) ($filters['store'] ?? ''));
@@ -49,6 +50,7 @@ class StorefrontCatalogService
             return [
                 'filters' => [
                     'groups' => $this->groupFilters(),
+                    'filterGroups' => [],
                     'categories' => [],
                     'sorts' => $this->sortFilters(),
                     'promotions' => $this->promotionFilters(),
@@ -56,6 +58,7 @@ class StorefrontCatalogService
                         'group' => $activeGroup,
                         'category' => $activeCategory,
                         'subcategory' => $activeSubcategory ?: '',
+                        'subcategories' => $activeSubcategories,
                         'fit' => $activeFit,
                         'sort' => $activeSort,
                         'promo' => $promoOnly,
@@ -92,8 +95,8 @@ class StorefrontCatalogService
         $this->applyGroupFilter($baseQuery, $activeGroup);
         $productsQuery = clone $baseQuery;
         $this->applyCategoryFilter($productsQuery, $activeCategory);
-        if ($activeSubcategory > 0) {
-            $productsQuery->where('p.pro_sub_categoria', $activeSubcategory);
+        if ($activeSubcategories !== []) {
+            $productsQuery->whereIn('p.pro_sub_categoria', $activeSubcategories);
         }
         $this->applyDenimFitFilter($productsQuery, $activeFit);
         $this->applySort($productsQuery, $activeSort);
@@ -203,6 +206,7 @@ class StorefrontCatalogService
         return [
             'filters' => [
                 'groups' => $this->groupFilters(),
+                'filterGroups' => $this->filterGroups((int) $country->pai_id),
                 'categories' => $categories,
                 'sorts' => $this->sortFilters(),
                 'promotions' => $this->promotionFilters(),
@@ -210,6 +214,7 @@ class StorefrontCatalogService
                     'group' => $activeGroup,
                     'category' => $activeCategory,
                     'subcategory' => $activeSubcategory ?: '',
+                    'subcategories' => $activeSubcategories,
                     'fit' => $activeFit,
                     'sort' => $activeSort,
                     'promo' => $promoOnly,
@@ -413,6 +418,18 @@ class StorefrontCatalogService
             ->all();
     }
 
+    private function requestedSubcategories(array $filters): array
+    {
+        $selected = $this->parseSubcategoryIds($filters['subcategories'] ?? '');
+        $legacy = (int) ($filters['subcategory'] ?? 0);
+
+        if ($legacy > 0) {
+            $selected[] = $legacy;
+        }
+
+        return array_values(array_unique($selected));
+    }
+
     private function groupFilters(): array
     {
         return [
@@ -424,6 +441,110 @@ class StorefrontCatalogService
             ['value' => 'teens', 'label' => 'Juvenil'],
             ['value' => 'accessories', 'label' => 'Accesorios'],
         ];
+    }
+
+    private function filterGroups(int $countryId): array
+    {
+        $definitions = [
+            ['key' => 'girls', 'categoryId' => 5],
+            ['key' => 'boys', 'categoryId' => 6],
+            ['key' => 'toddler-girls', 'categoryId' => 3],
+            ['key' => 'toddler-boys', 'categoryId' => 4],
+            ['key' => 'baby-girls', 'categoryId' => 1],
+            ['key' => 'baby-boys', 'categoryId' => 2],
+            ['key' => 'babies-unisex', 'categoryId' => 16],
+            ['key' => 'women', 'categoryId' => 7],
+            ['key' => 'men', 'categoryId' => 8],
+            ['key' => 'teen-girls', 'categoryId' => 14],
+            ['key' => 'teen-boys', 'categoryId' => 13],
+        ];
+
+        $categories = DB::table('stj_categorias')
+            ->whereIn('cat_id', array_column($definitions, 'categoryId'))
+            ->get(['cat_id', 'cat_codigo', 'cat_nombre'])
+            ->keyBy('cat_id');
+
+        $groups = collect($definitions)->map(function (array $definition) use ($categories, $countryId): ?array {
+            $category = $categories->get($definition['categoryId']);
+            if (! $category) return null;
+
+            return [
+                'key' => $definition['key'],
+                'group' => $this->groupKeyForCategory((int) $category->cat_id),
+                'categoryId' => (int) $category->cat_id,
+                'categoryCode' => trim((string) $category->cat_codigo),
+                'label' => trim((string) $category->cat_nombre),
+                'subcategories' => $this->filterSubcategories($countryId, [(int) $category->cat_id]),
+            ];
+        })->filter()->values();
+
+        $accessories = DB::table('stj_categorias')->where('cat_id', 10)
+            ->first(['cat_id', 'cat_codigo', 'cat_nombre', 'cat_si_sub_otras', 'cat_sub_otras']);
+        $accessoryIds = $accessories && $accessories->cat_si_sub_otras
+            ? $this->parseSubcategoryIds($accessories->cat_sub_otras)
+            : [];
+
+        if ($accessories && $accessoryIds !== []) {
+            $accessorySubcategories = collect($this->filterSubcategories($countryId, [], $accessoryIds))
+                ->groupBy(fn (array $subcategory) => Str::lower(Str::ascii($subcategory['label'])))
+                ->map(function ($items): array {
+                    $first = $items->first();
+                    return [
+                        'id' => (int) $first['id'],
+                        'ids' => $items->pluck('id')->map(fn ($id) => (int) $id)->values()->all(),
+                        'label' => $first['label'],
+                        'productCount' => $items->sum('productCount'),
+                    ];
+                })
+                ->sortBy(fn (array $subcategory) => Str::lower(Str::ascii($subcategory['label'])), SORT_NATURAL)
+                ->values()
+                ->all();
+            $groups->push([
+                'key' => 'accessories',
+                'group' => 'accessories',
+                'categoryId' => (int) $accessories->cat_id,
+                'categoryCode' => trim((string) $accessories->cat_codigo),
+                'label' => 'Accesorios',
+                'subcategories' => $accessorySubcategories,
+            ]);
+        }
+
+        return $groups->filter(fn (array $group) => $group['subcategories'] !== [])->values()->all();
+    }
+
+    private function filterSubcategories(int $countryId, array $categoryIds = [], array $subcategoryIds = []): array
+    {
+        return DB::table('stj_producto_pais as pp')
+            ->join('stj_productos as p', 'p.pro_id', '=', 'pp.ppa_producto')
+            ->join('stj_sub_categorias as sc', 'sc.sca_id', '=', 'p.pro_sub_categoria')
+            ->where('pp.ppa_pais', $countryId)
+            ->where('pp.ppa_estado', 'ACTIVO')
+            ->where('p.pro_estatus', 'ACTIVO')
+            ->when($categoryIds !== [], fn ($query) => $query->whereIn('p.pro_categoria', $categoryIds))
+            ->when($subcategoryIds !== [], fn ($query) => $query->whereIn('p.pro_sub_categoria', $subcategoryIds))
+            ->groupBy('sc.sca_id', 'sc.sca_nombre')
+            ->orderBy('sc.sca_nombre')
+            ->get(['sc.sca_id', 'sc.sca_nombre', DB::raw('COUNT(DISTINCT p.pro_id) as product_count')])
+            ->map(fn (object $subcategory) => [
+                'id' => (int) $subcategory->sca_id,
+                'label' => trim((string) $subcategory->sca_nombre),
+                'productCount' => (int) $subcategory->product_count,
+            ])
+            ->all();
+    }
+
+    private function groupKeyForCategory(int $categoryId): string
+    {
+        return match ($categoryId) {
+            5 => 'girls',
+            6 => 'boys',
+            3, 4 => 'toddlers',
+            1, 2, 16 => 'babies',
+            7, 8 => 'adults',
+            13, 14 => 'teens',
+            9, 10 => 'accessories',
+            default => '',
+        };
     }
 
     private function sortFilters(): array

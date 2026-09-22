@@ -18,6 +18,7 @@ class StorefrontCatalogController extends BaseController
                 'group' => $request->string('group')->toString(),
                 'category' => $request->string('category')->toString(),
                 'subcategory' => $request->integer('subcategory'),
+                'subcategories' => $request->string('subcategories')->toString(),
                 'fit' => $request->string('fit')->toString(),
                 'sort' => $request->string('sort')->toString(),
                 'promo' => $request->boolean('promo'),

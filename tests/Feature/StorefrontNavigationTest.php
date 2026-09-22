@@ -79,6 +79,37 @@ class StorefrontNavigationTest extends TestCase
         $this->assertSame(10, $result['filters']['active']['subcategory']);
     }
 
+    public function test_catalog_can_filter_multiple_subcategories_from_different_groups(): void
+    {
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn(['availabilityBySku' => [], 'activeStoreCode' => null, 'usedSource' => 'test']);
+
+        $result = (new StorefrontCatalogService($availability))->forCountry('zz', null, ['subcategories' => '10,30']);
+
+        $this->assertSame([1, 2, 5], array_column($result['products'], 'id'));
+        $this->assertSame([10, 30], $result['filters']['active']['subcategories']);
+    }
+
+    public function test_catalog_accessories_filter_uses_only_configured_additional_subcategories(): void
+    {
+        DB::table('stj_categorias')->insert([
+            'cat_id' => 10, 'cat_codigo' => 'RopaInteriorAccesorios', 'cat_nombre' => 'Ropa Interior y Accesorios',
+            'cat_si_sub_otras' => 1, 'cat_sub_otras' => '30',
+        ]);
+        DB::table('stj_sub_categorias')->insert(['sca_id' => 40, 'sca_nombre' => 'Cajas']);
+        DB::table('stj_productos')->insert(['pro_id' => 6, 'pro_codigo' => 'P-6', 'pro_nombre' => 'Caja', 'pro_categoria' => 10, 'pro_sub_categoria' => 40, 'pro_estatus' => 'ACTIVO']);
+        DB::table('stj_producto_pais')->insert(['ppa_id' => 6, 'ppa_pais' => 99, 'ppa_producto' => 6, 'ppa_estado' => 'ACTIVO', 'ppa_fecha_activo' => now()]);
+
+        $availability = Mockery::mock(ProductListAvailabilityService::class);
+        $availability->shouldReceive('summarize')->once()->andReturn(['availabilityBySku' => [], 'activeStoreCode' => null, 'usedSource' => 'test']);
+
+        $result = (new StorefrontCatalogService($availability))->forCountry('zz');
+        $accessories = collect($result['filters']['filterGroups'])->firstWhere('key', 'accessories');
+
+        $this->assertSame(['Mochilas'], array_column($accessories['subcategories'], 'label'));
+        $this->assertNotContains('Cajas', array_column($accessories['subcategories'], 'label'));
+    }
+
     public function test_newest_catalog_only_includes_products_activated_for_the_country_in_the_last_30_days(): void
     {
         $availability = Mockery::mock(ProductListAvailabilityService::class);
