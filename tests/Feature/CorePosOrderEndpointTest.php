@@ -71,6 +71,10 @@ class CorePosOrderEndpointTest extends TestCase
             $table->id('pro_id');
             $table->string('pro_codigo');
         });
+        Schema::create('stj_promociones', function (Blueprint $table) {
+            $table->id('prm_id');
+            $table->string('prm_nombre');
+        });
         Schema::create('stj_pedidos_detalle', function (Blueprint $table) {
             $table->id('car_id');
             $table->unsignedBigInteger('car_producto');
@@ -79,6 +83,7 @@ class CorePosOrderEndpointTest extends TestCase
             $table->integer('car_cantidad');
             $table->decimal('car_precio', 12, 4);
             $table->decimal('car_descuento', 8, 4);
+            $table->unsignedBigInteger('car_promocion_id')->nullable();
             $table->string('car_promocion')->nullable();
         });
 
@@ -98,6 +103,7 @@ class CorePosOrderEndpointTest extends TestCase
             ['ppa_id' => 200, 'ppa_pedido' => 20, 'ppa_estado' => 'APROBADA', 'ppa_ref' => 'STJ-200', 'ppa_fecha' => '2026-09-14 11:30:00', 'ppa_monto_sdesc' => 20, 'ppa_monto_senv' => 20, 'ppa_monto' => 20, 'ppa_tipo' => 'TARJETA', 'ppa_emisor' => 'VISA', 'ppa_autorizacion' => 'XYZ'],
         ]);
         DB::table('stj_productos')->insert(['pro_id' => 5, 'pro_codigo' => '3080186902']);
+        DB::table('stj_promociones')->insert(['prm_id' => 7, 'prm_nombre' => 'NOMBRE PROMOCION']);
         DB::table('stj_pedidos_detalle')->insert([
             'car_id' => 50,
             'car_producto' => 5,
@@ -106,6 +112,7 @@ class CorePosOrderEndpointTest extends TestCase
             'car_cantidad' => 2,
             'car_precio' => 12.9876,
             'car_descuento' => 20.1234,
+            'car_promocion_id' => 7,
             'car_promocion' => 'PROMO PRUEBA',
         ]);
     }
@@ -125,6 +132,7 @@ class CorePosOrderEndpointTest extends TestCase
             ->assertJsonPath('data.items.0.sku', '3080186902-2T')
             ->assertJsonPath('data.items.0.precio', 12.9876)
             ->assertJsonPath('data.items.0.porcentaje_descuento', 20.1234)
+            ->assertJsonPath('data.items.0.promocion', 'NOMBRE PROMOCION')
             ->assertJsonMissingPath('data.items.0.sub_total')
             ->assertJsonMissingPath('data.items.0.monto_descuento');
 
@@ -135,6 +143,16 @@ class CorePosOrderEndpointTest extends TestCase
             'aqc_resultado' => 'EXITOSO',
         ]);
         $this->assertDatabaseMissing('stj_api_consultas', ['aqc_user_agent' => $this->token]);
+    }
+
+    public function test_it_uses_the_saved_promotion_as_a_fallback_for_historical_items(): void
+    {
+        DB::table('stj_pedidos_detalle')->where('car_id', 50)->update(['car_promocion_id' => null]);
+
+        $this->withToken($this->token)
+            ->getJson('/api/v1/sv/billing/orders/STJ-100')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.promocion', 'PROMO PRUEBA');
     }
 
     public function test_it_rejects_missing_tokens_and_does_not_expose_other_countries(): void

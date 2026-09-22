@@ -45,6 +45,7 @@ class CorePosOrderService
 
         $items = DB::table('stj_pedidos_detalle as detail')
             ->join('stj_productos as product', 'product.pro_id', '=', 'detail.car_producto')
+            ->leftJoin('stj_promociones as promotion', 'promotion.prm_id', '=', 'detail.car_promocion_id')
             ->where('detail.car_ref', $header->ppa_ref)
             ->where('detail.car_cantidad', '>', 0)
             ->orderBy('detail.car_id')
@@ -55,6 +56,7 @@ class CorePosOrderService
                 'detail.car_precio',
                 'detail.car_descuento',
                 'detail.car_promocion',
+                'promotion.prm_nombre as promocion_nombre',
             ])
             ->map(fn (object $item): array => [
                 'sku' => (string) $item->pro_codigo.'-'.(string) $item->car_talla,
@@ -63,7 +65,7 @@ class CorePosOrderService
                 'cantidad' => $item->car_cantidad,
                 'precio' => $item->car_precio,
                 'porcentaje_descuento' => $item->car_descuento,
-                'promocion' => $item->car_promocion,
+                'promocion' => $item->promocion_nombre ?? $item->car_promocion,
             ])
             ->all();
 
