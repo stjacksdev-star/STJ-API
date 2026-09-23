@@ -2,15 +2,18 @@
 
 namespace App\Services;
 
+use App\Services\Mobile\MobileSizeGuideService;
 use App\Support\StorefrontImageUrl;
 use App\Support\StorefrontProductExclusions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class StorefrontProductService
 {
     public function __construct(
         private readonly StorefrontPromotionResolver $promotionResolver,
+        private readonly MobileSizeGuideService $sizeGuideService,
     ) {}
 
     public function forCountryAndSlug(string $countryCode, string $slug, array $context = []): ?array
@@ -37,6 +40,7 @@ class StorefrontProductService
                 'p.pro_codigo',
                 'p.pro_thumbs',
                 'p.pro_nombre',
+                'p.pro_categoria',
                 'p.pro_descripcion',
                 'p.pro_marca',
                 'p.pro_oc_categoria',
@@ -56,6 +60,9 @@ class StorefrontProductService
         }
 
         $normalized = $this->normalizeProduct($product, strtolower((string) $country->pai_codigo));
+        $normalized['sizeGuideHtml'] = Schema::hasTable('stj_guia_tallas')
+            ? $this->sizeGuideService->html((int) $country->pai_id, (int) $product->pro_categoria)
+            : '';
         $related = $this->relatedProducts($country->pai_id, (int) $product->pro_id, trim((string) ($product->categoria_nombre ?: '')));
         [$normalized, $related] = $this->resolvePromotions(
             $normalized,

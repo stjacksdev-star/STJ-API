@@ -29,6 +29,10 @@ class MobileSizeGuideService
             ->where('gta_categoria', $categoryId)
             ->orderBy('gta_orden')
             ->get();
+        if ($guides->isEmpty()) {
+            return '';
+        }
+
         $columns = collect(self::MEASUREMENTS)
             ->filter(fn (string $label, string $field) => $guides->contains(
                 fn (object $guide) => mb_strlen(trim((string) ($guide->{'gta_'.$field} ?? ''))) > 1
