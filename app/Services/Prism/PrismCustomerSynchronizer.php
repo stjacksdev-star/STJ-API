@@ -145,11 +145,26 @@ class PrismCustomerSynchronizer
     public static function address(string $address): array
     {
         $address = trim(preg_replace('/\s+/', ' ', $address));
-        // Preserve legacy's two 40-character fields, but don't silently lose data.
-        if (mb_strlen($address) > 80) {
-            throw new RuntimeException('Dirección excede dos líneas de 40 caracteres de Prism; revisar antes de enviar.');
+        if ($address === '') {
+            return ['', ''];
         }
 
-        return [mb_substr($address, 0, 40), mb_substr($address, 40, 40)];
+        if (mb_strlen($address) <= 40) {
+            return [$address, ''];
+        }
+
+        // Match the working legacy helper: prefer a word boundary in line 1,
+        // fall back to a hard cut, and cap the remaining text to line 2.
+        $firstChunk = mb_substr($address, 0, 40);
+        $lastSpace = mb_strrpos($firstChunk, ' ');
+        if ($lastSpace !== false && $lastSpace > 10) {
+            $line1 = trim(mb_substr($address, 0, $lastSpace));
+            $remaining = trim(mb_substr($address, $lastSpace + 1));
+        } else {
+            $line1 = trim($firstChunk);
+            $remaining = trim(mb_substr($address, 40));
+        }
+
+        return [$line1, trim(mb_substr($remaining, 0, 40))];
     }
 }

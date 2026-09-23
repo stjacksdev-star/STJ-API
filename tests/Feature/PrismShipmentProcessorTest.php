@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\Prism\PrismCustomerSynchronizer;
 use App\Services\Prism\PrismShipmentProcessor;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\ConnectionException;
@@ -483,6 +484,40 @@ class PrismShipmentProcessorTest extends TestCase
         $this->customer = ['sid' => '780000000000000001', 'info1' => '08011234', 'tenant_sid' => '100', 'subsidiary_sid' => '999'];
         $this->assertFailure('subsidiaria');
         $this->assertSame([], $this->mutations);
+    }
+
+    public function test_long_address_is_split_and_truncated_like_legacy(): void
+    {
+        $address = 'alpes suizos 1, Coxen Hole, Bay Islands Department, Honduras, referencia adicional muy extensa';
+
+        [$line1, $line2] = PrismCustomerSynchronizer::address($address);
+
+        $this->assertSame('alpes suizos 1, Coxen Hole, Bay Islands', $line1);
+        $this->assertSame('Department, Honduras, referencia adicion', $line2);
+        $this->assertLessThanOrEqual(40, mb_strlen($line1));
+        $this->assertLessThanOrEqual(40, mb_strlen($line2));
+    }
+
+    public function test_address_uses_hard_cut_when_no_reasonable_space_exists(): void
+    {
+        [$line1, $line2] = PrismCustomerSynchronizer::address(str_repeat('A', 45).' segunda parte');
+
+        $this->assertSame(str_repeat('A', 40), $line1);
+        $this->assertSame('AAAAA segunda parte', $line2);
+    }
+
+    public function test_customer_payload_uses_both_prism_address_fields_for_long_address(): void
+    {
+        DB::table('stj_pedidos')->update([
+            'ped_direccion' => 'alpes suizos 1, Coxen Hole, Bay Islands Department, Honduras, referencia adicional muy extensa',
+        ]);
+
+        app(PrismShipmentProcessor::class)->process(1, true);
+
+        $payload = json_decode((string) DB::table('prism_envios_log')
+            ->where('step', 'customer_create')->where('error_message', 'START')->value('request_payload'), true);
+        $this->assertSame('alpes suizos 1, Coxen Hole, Bay Islands', $payload[0]['addresses'][0]['address_line_1']);
+        $this->assertSame('Department, Honduras, referencia adicion', $payload[0]['addresses'][0]['address_line_2']);
     }
 
     private function assertFailure(string $message): void

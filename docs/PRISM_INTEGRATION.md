@@ -252,8 +252,10 @@ Código de salida 0 significa validado/enviado/ya_enviado; 1 indica bloqueo/erro
   Prism calcula `transaction_total_amt` y tarjeta usa ese valor en tender y depósito.
   `ppa_monto` y `ppa_monto_senv` quedan como referencias locales sin modificar y no
   determinan el importe enviado a Prism. No se agrega cargo/artículo de envío.
-- Dirección mayor a 80 caracteres se bloquea antes de escribir, para no truncarla
-  silenciosamente al dividirla en dos campos de 40. Revisar contrato real si admite más.
+- Las direcciones replican `splitAddressPrism()` del controlador legacy: normalizan
+  espacios, procuran cortar la primera línea por palabra antes de 40 caracteres y
+  envían el resto en `address_line_2`, limitado a 40. Texto posterior se trunca para
+  cumplir el contrato vigente de Prism, tanto al crear como al actualizar clientes.
 - Búsquedas de cliente/documento y GET de colecciones se validan estrictamente contra
   el contrato de arrays. Se debe confirmar en la prueba real la sintaxis de filtros,
   nombres de campos y paginación de la instalación; respuestas ambiguas se bloquean.
