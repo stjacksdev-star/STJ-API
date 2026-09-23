@@ -6,6 +6,18 @@ use Illuminate\Support\Facades\DB;
 
 class CorePosOrderService
 {
+    public const PROCESSED_STATUSES = [
+        'PREPARADO',
+        'EN-RUTA',
+        'ENTREGADO',
+        'ANULADO-ERROR',
+        'ANULADO-PRUEBA',
+        'ANULADO-CLIENTE',
+        'ANULADO-INVENTARIO',
+        'DEVOLUCION',
+        'ANULADO-EFECTIVO',
+    ];
+
     /** @return array<string, mixed>|null */
     public function findByReference(string $reference): ?array
     {
@@ -14,7 +26,7 @@ class CorePosOrderService
             ->where('payment.ppa_ref', $reference)
             ->where('payment.ppa_estado', 'APROBADA')
             ->where('orders.ped_id_pais', 1)
-            ->whereIn('orders.ped_estatus', ['RECIBIDO', 'PREPARADO', 'EMPACADO-ENTREGA'])
+            ->whereIn('orders.ped_estatus', ['RECIBIDO', 'EMPACADO-ENTREGA'])
             ->orderByDesc('payment.ppa_id')
             ->select([
                 'orders.ped_id',
@@ -99,6 +111,17 @@ class CorePosOrderService
             ],
             'items' => $items,
         ];
+    }
+
+    public function statusByReference(string $reference): ?string
+    {
+        return DB::table('stj_pedidos_pago as payment')
+            ->join('stj_pedidos as orders', 'orders.ped_id', '=', 'payment.ppa_pedido')
+            ->where('payment.ppa_ref', $reference)
+            ->where('payment.ppa_estado', 'APROBADA')
+            ->where('orders.ped_id_pais', 1)
+            ->orderByDesc('payment.ppa_id')
+            ->value('orders.ped_estatus');
     }
 
     private function formattedPhone(mixed $countryCode, mixed $phone): string

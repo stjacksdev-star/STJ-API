@@ -161,9 +161,28 @@ class CorePosOrderEndpointTest extends TestCase
         $this->withToken($this->token)
             ->getJson('/api/v1/sv/billing/orders/STJ-200')
             ->assertNotFound()
-            ->assertJsonPath('message', 'Pedido no encontrado.');
+            ->assertJsonPath('message', 'Pedido no encontrado');
 
         $this->assertDatabaseHas('stj_api_consultas', ['aqc_http_estado' => 401, 'aqc_resultado' => 'NO_AUTORIZADO']);
         $this->assertDatabaseHas('stj_api_consultas', ['aqc_http_estado' => 404, 'aqc_resultado' => 'NO_ENCONTRADO']);
+    }
+
+    public function test_it_reports_an_already_processed_order_without_returning_its_information(): void
+    {
+        DB::table('stj_pedidos')->where('ped_id', 10)->update(['ped_estatus' => 'PREPARADO']);
+
+        $this->withToken($this->token)
+            ->getJson('/api/v1/sv/billing/orders/STJ-100')
+            ->assertStatus(409)
+            ->assertExactJson([
+                'ok' => false,
+                'message' => 'Pedido ya fue procesado',
+            ]);
+
+        $this->assertDatabaseHas('stj_api_consultas', [
+            'aqc_referencia' => 'STJ-100',
+            'aqc_http_estado' => 409,
+            'aqc_resultado' => 'YA_PROCESADO',
+        ]);
     }
 }

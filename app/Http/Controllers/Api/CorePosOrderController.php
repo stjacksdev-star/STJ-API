@@ -50,9 +50,16 @@ class CorePosOrderController extends Controller
             $data = $orders->findByReference($stj);
 
             if ($data === null) {
+                $status = $orders->statusByReference($stj);
+                if (in_array($status, CorePosOrderService::PROCESSED_STATUSES, true)) {
+                    $this->audit($request, $auditUuid, $client->apc_id, $stj, 409, 'YA_PROCESADO', $startedAt, 'Pedido ya fue procesado.');
+
+                    return response()->json(['ok' => false, 'message' => 'Pedido ya fue procesado'], 409);
+                }
+
                 $this->audit($request, $auditUuid, $client->apc_id, $stj, 404, 'NO_ENCONTRADO', $startedAt, 'Pedido no disponible para facturación.');
 
-                return response()->json(['ok' => false, 'message' => 'Pedido no encontrado.'], 404);
+                return response()->json(['ok' => false, 'message' => 'Pedido no encontrado'], 404);
             }
 
             $this->audit($request, $auditUuid, $client->apc_id, $stj, 200, 'EXITOSO', $startedAt);
