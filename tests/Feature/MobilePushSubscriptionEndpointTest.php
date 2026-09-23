@@ -118,4 +118,51 @@ class MobilePushSubscriptionEndpointTest extends TestCase
             'pst_topic_id' => DB::table('stj_push_topics')->where('pto_codigo', 'country.sv')->value('pto_id'),
         ]);
     }
+
+    public function test_it_reuses_the_mobile_fcm_subscription_when_a_reinstall_changes_the_installation_id(): void
+    {
+        $originalInstallation = '550e8400-e29b-41d4-a716-446655440000';
+        $reinstalledInstallation = '7f67f940-801d-4d3f-b49a-f543cf9a03b4';
+        $payload = [
+            'token' => 'fcm-token-reused-after-reinstall',
+            'installationId' => $originalInstallation,
+            'platform' => 'IOS',
+            'countryId' => 1,
+            'permission' => 'GRANTED',
+            'environment' => 'PRODUCTION',
+            'appVersion' => '2.2.35',
+        ];
+
+        $originalId = $this->postJson('/api/mobile/v1/push/subscriptions', $payload)
+            ->assertCreated()
+            ->assertJsonPath('resultado', 'true')
+            ->json('subscriptionId');
+
+        DB::table('stj_push_suscripciones')->where('psu_id', $originalId)->update(['psu_usu_id' => 77]);
+
+        $this->postJson('/api/mobile/v1/push/subscriptions', [
+            ...$payload,
+            'installationId' => $reinstalledInstallation,
+            'appVersion' => '2.2.36',
+        ])->assertCreated()
+            ->assertJsonPath('resultado', 'true')
+            ->assertJsonPath('subscriptionId', $originalId);
+
+        $this->assertDatabaseCount('stj_push_suscripciones', 1);
+        $this->assertDatabaseHas('stj_push_suscripciones', [
+            'psu_id' => $originalId,
+            'psu_usu_id' => null,
+            'psu_instalacion_uuid' => $reinstalledInstallation,
+            'psu_token_hash' => hash('sha256', 'fcm-token-reused-after-reinstall'),
+            'psu_plataforma' => 'IOS',
+            'psu_estado' => 'ACTIVA',
+            'psu_permiso' => 'GRANTED',
+            'psu_app_version' => '2.2.36',
+            'psu_entorno' => 'PRODUCTION',
+            'psu_provider' => 'FCM',
+        ]);
+        $this->assertDatabaseMissing('stj_push_suscripciones', [
+            'psu_instalacion_uuid' => $originalInstallation,
+        ]);
+    }
 }

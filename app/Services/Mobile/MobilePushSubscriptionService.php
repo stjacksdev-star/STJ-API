@@ -50,6 +50,7 @@ class MobilePushSubscriptionService
 
         $subscription = DB::transaction(function () use ($request, $data, $customer, $platform, $installationId, $token, $environment, $countryId) {
             $hash = hash('sha256', $token);
+            $reinstalledToken = false;
             $subscription = WebPushSubscription::query()
                 ->where('psu_instalacion_uuid', $installationId)
                 ->where('psu_entorno', $environment)
@@ -58,16 +59,27 @@ class MobilePushSubscriptionService
 
             $duplicate = WebPushSubscription::query()
                 ->where('psu_token_hash', $hash)
+                ->where('psu_provider', 'FCM')
+                ->whereIn('psu_plataforma', ['IOS', 'ANDROID'])
                 ->when($subscription, fn ($query) => $query->whereKeyNot($subscription->getKey()))
                 ->lockForUpdate()
                 ->first();
 
             if ($duplicate) {
-                $duplicate->forceFill([
-                    'psu_estado' => 'INVALIDA',
-                    'psu_revocado_en' => now(),
-                    'psu_actualizado_en' => now(),
-                ])->save();
+                if ($subscription) {
+                    // La instalacion actual ya tiene una fila propia. Retirar la
+                    // fila obsoleta libera el hash para la rotacion del token.
+                    DB::table('stj_push_suscripcion_topics')
+                        ->where('pst_suscripcion_id', $duplicate->getKey())
+                        ->delete();
+                    $duplicate->delete();
+                } else {
+                    // Una reinstalacion puede generar otro installationId aunque
+                    // FCM conserve el token. El token identifica la misma
+                    // suscripcion, por lo que se traslada la fila existente.
+                    $subscription = $duplicate;
+                    $reinstalledToken = true;
+                }
             }
 
             // El pais de una instalacion anonima se fija en su primer registro.
@@ -79,7 +91,7 @@ class MobilePushSubscriptionService
 
             $values = [
                 'psu_visitante_id' => null,
-                'psu_usu_id' => $customer?->getKey() ?: $subscription?->psu_usu_id,
+                'psu_usu_id' => $customer?->getKey() ?: ($reinstalledToken ? null : $subscription?->psu_usu_id),
                 'psu_pais_id' => $fixedCountryId,
                 'psu_token' => $token,
                 'psu_token_hash' => $hash,
