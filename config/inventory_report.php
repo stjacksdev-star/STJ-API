@@ -7,6 +7,8 @@ return [
     'timeout_seconds' => (int) env('INVENTORY_REPORT_TIMEOUT', 60),
     'max_attempts' => (int) env('INVENTORY_REPORT_MAX_ATTEMPTS', 3),
     'batch_size' => (int) env('INVENTORY_REPORT_BATCH_SIZE', 100),
+    'retry_batch_size' => (int) env('INVENTORY_REPORT_RETRY_BATCH_SIZE', 20),
+    'final_retry_batch_size' => (int) env('INVENTORY_REPORT_FINAL_RETRY_BATCH_SIZE', 5),
     'start_time' => env('INVENTORY_REPORT_START_TIME', '03:00'),
     'close_time' => env('INVENTORY_REPORT_CLOSE_TIME', '06:00'),
     'email_time' => env('INVENTORY_REPORT_EMAIL_TIME', '08:00'),
