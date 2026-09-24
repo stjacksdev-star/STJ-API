@@ -12,11 +12,13 @@ return [
     'start_time' => env('INVENTORY_REPORT_START_TIME', '03:00'),
     'close_time' => env('INVENTORY_REPORT_CLOSE_TIME', '06:00'),
     'email_time' => env('INVENTORY_REPORT_EMAIL_TIME', '08:00'),
+    'storage_path' => env('INVENTORY_REPORT_STORAGE_PATH', storage_path('app/private/inventory-reports')),
 
     'countries' => [
         'SV' => [
             'id' => 1,
             'name' => 'El Salvador',
+            'excel_name' => 'El Salvador',
             'adapter' => 'sv',
             'url' => env('INVENTORY_REPORT_SV_URL'),
             'token' => env('INVENTORY_API_TOKEN'),
@@ -25,6 +27,7 @@ return [
         'GT' => [
             'id' => 2,
             'name' => 'Guatemala',
+            'excel_name' => 'Guatemala',
             'adapter' => 'regional',
             'url' => env('INVENTORY_REPORT_REGIONAL_URL'),
             'token' => env('INVENTORY_API_TOKEN'),
@@ -33,6 +36,7 @@ return [
         'CR' => [
             'id' => 3,
             'name' => 'Costa Rica',
+            'excel_name' => 'Costa Rica',
             'adapter' => 'regional',
             'url' => env('INVENTORY_REPORT_REGIONAL_URL'),
             'token' => env('INVENTORY_API_TOKEN'),
@@ -41,6 +45,7 @@ return [
         'PA' => [
             'id' => 5,
             'name' => 'Panama',
+            'excel_name' => 'Panama',
             'adapter' => 'regional',
             'url' => env('INVENTORY_REPORT_REGIONAL_URL'),
             'token' => env('INVENTORY_API_TOKEN'),
@@ -49,6 +54,7 @@ return [
         'HN' => [
             'id' => 7,
             'name' => 'Honduras',
+            'excel_name' => 'Honduras',
             'adapter' => 'hn',
             'url' => env('INVENTORY_REPORT_HN_URL'),
             'token' => env('PRISM_HN_SKU_TOKEN'),
