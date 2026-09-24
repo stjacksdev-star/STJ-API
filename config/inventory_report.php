@@ -6,7 +6,7 @@ $recipients = static fn (string $key): array => array_values(array_unique(array_
 ), static fn (string $email): bool => filter_var($email, FILTER_VALIDATE_EMAIL) !== false)));
 
 return [
-    'enabled' => (bool) env('INVENTORY_REPORT_ENABLED', false),
+    'enabled' => filter_var(env('INVENTORY_REPORT_ENABLED', false), FILTER_VALIDATE_BOOL),
     'timezone' => env('INVENTORY_REPORT_TIMEZONE', 'America/El_Salvador'),
     'connect_timeout_seconds' => (int) env('INVENTORY_REPORT_CONNECT_TIMEOUT', 10),
     'timeout_seconds' => (int) env('INVENTORY_REPORT_TIMEOUT', 60),

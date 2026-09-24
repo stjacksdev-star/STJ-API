@@ -92,6 +92,19 @@ class SendInventoryReportCommandTest extends TestCase
         $this->assertSame(0, DB::table('stj_inventory_report_deliveries')->count());
     }
 
+    public function test_it_refuses_to_send_when_an_active_country_has_no_run(): void
+    {
+        DB::table('stj_paises')->insert(['pai_id' => 2, 'pai_codigo' => 'GT', 'pai_estado' => 'ACTIVO']);
+        Http::fake();
+
+        $this->artisan('inventory-report:send', ['--date' => '2026-09-23'])
+            ->expectsOutputToContain('faltan corridas para paises activos: GT')
+            ->assertFailed();
+
+        Http::assertNothingSent();
+        $this->assertSame(0, DB::table('stj_inventory_report_deliveries')->count());
+    }
+
     public function test_mail_failure_is_audited_and_can_be_retried(): void
     {
         Http::fake(['https://smtp.test/send' => Http::sequence()
@@ -124,6 +137,11 @@ class SendInventoryReportCommandTest extends TestCase
 
     private function createSchema(): void
     {
+        Schema::create('stj_paises', function (Blueprint $table): void {
+            $table->id('pai_id');
+            $table->string('pai_codigo', 3);
+            $table->string('pai_estado');
+        });
         Schema::create('stj_inventory_report_runs', function (Blueprint $table): void {
             $table->id('irr_id');
             $table->date('irr_report_date');
@@ -162,6 +180,7 @@ class SendInventoryReportCommandTest extends TestCase
     {
         $path = $this->directory.DIRECTORY_SEPARATOR.'ExistenciasECommerce - El Salvador.xlsx';
         file_put_contents($path, 'xlsx-content');
+        DB::table('stj_paises')->insert(['pai_id' => 1, 'pai_codigo' => 'SV', 'pai_estado' => 'ACTIVO']);
         DB::table('stj_inventory_report_runs')->insert([
             'irr_id' => 1,
             'irr_report_date' => '2026-09-23',

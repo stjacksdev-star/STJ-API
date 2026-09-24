@@ -22,6 +22,22 @@ class InventoryReportEmailService
             throw new RuntimeException("No existen corridas para {$reportDate}.");
         }
 
+        $configuredCountries = collect((array) config('inventory_report.countries', []));
+        $activeCountries = DB::table('stj_paises')
+            ->where('pai_estado', 'ACTIVO')
+            ->whereIn('pai_id', $configuredCountries->pluck('id')->map(static fn ($id): int => (int) $id))
+            ->get(['pai_id', 'pai_codigo'])
+            ->filter(function (object $country) use ($configuredCountries): bool {
+                $code = strtoupper(trim((string) $country->pai_codigo));
+
+                return (int) $country->pai_id === (int) data_get($configuredCountries, "{$code}.id");
+            })
+            ->map(static fn (object $country): string => strtoupper(trim((string) $country->pai_codigo)));
+        $missingCountries = $activeCountries->diff($runs->pluck('irr_country_code')->map(static fn ($code): string => strtoupper((string) $code)));
+        if ($missingCountries->isNotEmpty()) {
+            throw new RuntimeException('No se puede enviar el reporte; faltan corridas para paises activos: '.$missingCountries->implode(', ').'.');
+        }
+
         $open = $runs->reject(fn (object $run): bool => in_array((string) $run->irr_status, ['COMPLETE', 'PARTIAL'], true));
         if ($open->isNotEmpty()) {
             $countries = $open->map(fn (object $run): string => "{$run->irr_country_code} ({$run->irr_status})")->implode(', ');

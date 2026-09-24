@@ -12,7 +12,7 @@ use Throwable;
 class ProcessInventoryReport extends Command
 {
     protected $signature = 'inventory-report:process
-        {--date= : Fecha logica YYYY-MM-DD; por defecto cualquier corrida pendiente}
+        {--date= : Fecha logica YYYY-MM-DD; por defecto hoy}
         {--country= : Codigo opcional de pais}
         {--batch-size= : Sobrescribe el lote configurado, entre 1 y 500}';
 
@@ -65,11 +65,11 @@ class ProcessInventoryReport extends Command
         return $summary['ok'] ? self::SUCCESS : self::FAILURE;
     }
 
-    private function date(): ?Carbon
+    private function date(): Carbon
     {
         $value = trim((string) $this->option('date'));
         if ($value === '') {
-            return null;
+            return Carbon::now((string) config('inventory_report.timezone', 'America/El_Salvador'))->startOfDay();
         }
 
         try {

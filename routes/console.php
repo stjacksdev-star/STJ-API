@@ -205,6 +205,56 @@ Schedule::command('inventory:sync')
     ->timezone('America/El_Salvador')
     ->withoutOverlapping(15)
     ->appendOutputTo(storage_path('logs/inventory-scheduler.log'));
+Schedule::command('inventory-report:start')
+    ->everyFiveMinutes()
+    ->between(
+        (string) config('inventory_report.start_time', '03:00'),
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.start_time', '03:00'))->addMinutes(20)->format('H:i'),
+    )
+    ->timezone((string) config('inventory_report.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(30)
+    ->when(fn (): bool => (bool) config('inventory_report.enabled'))
+    ->appendOutputTo(storage_path('logs/inventory-report-scheduler.log'));
+Schedule::command('inventory-report:process')
+    ->everyMinute()
+    ->between(
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.start_time', '03:00'))->addMinutes(5)->format('H:i'),
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.close_time', '06:00'))->subMinutes(5)->format('H:i'),
+    )
+    ->timezone((string) config('inventory_report.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(10)
+    ->when(fn (): bool => (bool) config('inventory_report.enabled'))
+    ->appendOutputTo(storage_path('logs/inventory-report-scheduler.log'));
+Schedule::command('inventory-report:finalize')
+    ->everyFiveMinutes()
+    ->between(
+        (string) config('inventory_report.close_time', '06:00'),
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.close_time', '06:00'))->addMinutes(20)->format('H:i'),
+    )
+    ->timezone((string) config('inventory_report.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(30)
+    ->when(fn (): bool => (bool) config('inventory_report.enabled'))
+    ->appendOutputTo(storage_path('logs/inventory-report-scheduler.log'));
+Schedule::command('inventory-report:excel')
+    ->everyFiveMinutes()
+    ->between(
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.close_time', '06:00'))->addMinutes(5)->format('H:i'),
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.email_time', '08:00'))->subMinutes(30)->format('H:i'),
+    )
+    ->timezone((string) config('inventory_report.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(30)
+    ->when(fn (): bool => (bool) config('inventory_report.enabled'))
+    ->appendOutputTo(storage_path('logs/inventory-report-scheduler.log'));
+Schedule::command('inventory-report:send')
+    ->everyTenMinutes()
+    ->between(
+        (string) config('inventory_report.email_time', '08:00'),
+        Carbon::createFromFormat('H:i', (string) config('inventory_report.email_time', '08:00'))->addMinutes(30)->format('H:i'),
+    )
+    ->timezone((string) config('inventory_report.timezone', 'America/El_Salvador'))
+    ->withoutOverlapping(30)
+    ->when(fn (): bool => (bool) config('inventory_report.enabled'))
+    ->appendOutputTo(storage_path('logs/inventory-report-scheduler.log'));
 Schedule::command('storefront:navigation-build')
     ->dailyAt('00:05')
     ->timezone('America/El_Salvador')
