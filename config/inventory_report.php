@@ -1,5 +1,10 @@
 <?php
 
+$recipients = static fn (string $key): array => array_values(array_unique(array_filter(array_map(
+    'trim',
+    preg_split('/[,;]+/', (string) env($key, '')) ?: [],
+), static fn (string $email): bool => filter_var($email, FILTER_VALIDATE_EMAIL) !== false)));
+
 return [
     'enabled' => (bool) env('INVENTORY_REPORT_ENABLED', false),
     'timezone' => env('INVENTORY_REPORT_TIMEZONE', 'America/El_Salvador'),
@@ -65,8 +70,8 @@ return [
     'mail' => [
         'from_address' => env('INVENTORY_REPORT_MAIL_FROM_ADDRESS'),
         'from_name' => env('INVENTORY_REPORT_MAIL_FROM_NAME', "St. Jack's Automatico"),
-        'to' => env('INVENTORY_REPORT_MAIL_TO', ''),
-        'cc' => env('INVENTORY_REPORT_MAIL_CC', ''),
-        'bcc' => env('INVENTORY_REPORT_MAIL_BCC', ''),
+        'to' => $recipients('INVENTORY_REPORT_MAIL_TO'),
+        'cc' => $recipients('INVENTORY_REPORT_MAIL_CC'),
+        'bcc' => $recipients('INVENTORY_REPORT_MAIL_BCC'),
     ],
 ];
