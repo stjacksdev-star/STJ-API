@@ -94,6 +94,31 @@ class ProcessInventoryReportCommandTest extends TestCase
         ]);
     }
 
+    public function test_it_persists_large_api_responses_in_safe_database_chunks(): void
+    {
+        DB::table('stj_inventory_report_products')->where('irp_id', 2)->delete();
+        DB::table('stj_inventory_report_runs')->where('irr_id', 1)->update(['irr_expected_products' => 1]);
+        $rows = [];
+        for ($index = 1; $index <= 1200; $index++) {
+            $rows[] = [
+                'estilo' => 'P001',
+                'tienda' => 'Tienda '.(int) ceil($index / 20),
+                'talla' => 'T'.$index,
+                'existencia' => (string) ($index % 10),
+                'PRECIO' => '19.95',
+            ];
+        }
+        Http::fake(['https://inventory.test/sv' => Http::response(['datos' => $rows])]);
+
+        $this->artisan('inventory-report:process', ['--date' => '2026-09-23', '--country' => 'SV'])
+            ->expectsOutputToContain('Filas: 1200')
+            ->expectsOutputToContain('Estado de corrida: COMPLETE')
+            ->assertSuccessful();
+
+        $this->assertSame(1200, DB::table('stj_inventory_report_rows')->count());
+        $this->assertDatabaseHas('stj_inventory_report_runs', ['irr_result_rows' => 1200]);
+    }
+
     private function createSchema(): void
     {
         Schema::create('stj_inventory_report_runs', function (Blueprint $table): void {

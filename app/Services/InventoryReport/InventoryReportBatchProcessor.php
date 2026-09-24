@@ -84,9 +84,9 @@ class InventoryReportBatchProcessor
                     ];
                 })->all();
 
-                if ($rows !== []) {
+                foreach (array_chunk($rows, 500) as $rowChunk) {
                     DB::table('stj_inventory_report_rows')->upsert(
-                        $rows,
+                        $rowChunk,
                         ['irw_run_id', 'irw_product_id', 'irw_store', 'irw_size'],
                         ['irw_request_id', 'irw_quantity', 'irw_sale_price', 'irw_updated_at'],
                     );
