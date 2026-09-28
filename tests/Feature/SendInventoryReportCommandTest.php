@@ -42,7 +42,7 @@ class SendInventoryReportCommandTest extends TestCase
 
         $this->artisan('inventory-report:send', ['--date' => '2026-09-23'])
             ->expectsOutputToContain('Reporte 2026-09-23 enviado correctamente.')
-            ->expectsOutputToContain('Adjuntos: 1')
+            ->expectsOutputToContain('Adjuntos: 2')
             ->assertSuccessful();
 
         Http::assertSent(function ($request): bool {
@@ -54,6 +54,9 @@ class SendInventoryReportCommandTest extends TestCase
                 && $payload['sender'] === '"Reporte Inventario" <no-reply@example.com>'
                 && $payload['attachments'][0]['filename'] === 'ExistenciasECommerce - El Salvador.xlsx'
                 && base64_decode($payload['attachments'][0]['fileblob'], true) === 'xlsx-content'
+                && $payload['attachments'][1]['filename'] === 'EstilosNoDevueltos - El Salvador.txt'
+                && $payload['attachments'][1]['mimetype'] === 'text/plain; charset=UTF-8'
+                && base64_decode($payload['attachments'][1]['fileblob'], true) === "0987654321\r\n1234567890\r\n"
                 && str_contains($payload['html_body'], 'Comparativa de productos por país')
                 && str_contains($payload['html_body'], '<td class="number">2</td>')
                 && str_contains($payload['html_body'], 'PARTIAL');
@@ -64,6 +67,8 @@ class SendInventoryReportCommandTest extends TestCase
             'ird_status' => 'SENT',
             'ird_provider_reference' => 'mail-123',
         ]);
+        $delivery = DB::table('stj_inventory_report_deliveries')->first();
+        $this->assertCount(2, json_decode($delivery->ird_attachments, true, flags: JSON_THROW_ON_ERROR));
     }
 
     public function test_it_does_not_send_the_same_date_twice_without_force(): void
@@ -157,6 +162,12 @@ class SendInventoryReportCommandTest extends TestCase
             $table->string('irr_excel_path');
             $table->string('irr_excel_sha256', 64);
         });
+        Schema::create('stj_inventory_report_products', function (Blueprint $table): void {
+            $table->id('irp_id');
+            $table->unsignedBigInteger('irp_run_id');
+            $table->string('irp_code');
+            $table->string('irp_status');
+        });
         Schema::create('stj_inventory_report_deliveries', function (Blueprint $table): void {
             $table->id('ird_id');
             $table->date('ird_report_date');
@@ -195,6 +206,11 @@ class SendInventoryReportCommandTest extends TestCase
             'irr_result_rows' => 150,
             'irr_excel_path' => $path,
             'irr_excel_sha256' => hash_file('sha256', $path),
+        ]);
+        DB::table('stj_inventory_report_products')->insert([
+            ['irp_id' => 1, 'irp_run_id' => 1, 'irp_code' => '1234567890', 'irp_status' => 'NOT_RETURNED'],
+            ['irp_id' => 2, 'irp_run_id' => 1, 'irp_code' => '0987654321', 'irp_status' => 'NOT_RETURNED'],
+            ['irp_id' => 3, 'irp_run_id' => 1, 'irp_code' => '5555555555', 'irp_status' => 'FOUND'],
         ]);
     }
 }

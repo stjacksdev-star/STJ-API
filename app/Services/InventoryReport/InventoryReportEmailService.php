@@ -62,6 +62,27 @@ class InventoryReportEmailService
                 'mimetype' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ];
             $attachmentLog[] = ['filename' => basename($path), 'sha256' => $actualHash];
+
+            $notReturnedCodes = DB::table('stj_inventory_report_products')
+                ->where('irp_run_id', $run->irr_id)
+                ->where('irp_status', 'NOT_RETURNED')
+                ->orderBy('irp_code')
+                ->pluck('irp_code')
+                ->map(static fn (mixed $code): string => trim((string) $code))
+                ->filter(static fn (string $code): bool => $code !== '')
+                ->unique()
+                ->values();
+            if ($notReturnedCodes->isNotEmpty()) {
+                $filename = "EstilosNoDevueltos - {$run->irr_country_name}.txt";
+                $content = $notReturnedCodes->implode("\r\n")."\r\n";
+                $hash = hash('sha256', $content);
+                $attachments[] = [
+                    'filename' => $filename,
+                    'fileblob' => base64_encode($content),
+                    'mimetype' => 'text/plain; charset=UTF-8',
+                ];
+                $attachmentLog[] = ['filename' => $filename, 'sha256' => $hash];
+            }
         }
 
         $to = (array) config('inventory_report.mail.to', []);
