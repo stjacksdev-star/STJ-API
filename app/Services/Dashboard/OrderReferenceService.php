@@ -2251,6 +2251,7 @@ class OrderReferenceService
             'paidAt' => (string) ($order->ppa_fecha ?? ''),
             'processedAt' => (string) ($order->ppa_fecha_procesado ?? ''),
             'deliveredAt' => (string) ($order->ppa_fecha_entregado ?? ''),
+            'customerNotes' => trim((string) ($order->ped_a_generales ?? '')),
             'customer' => [
                 'name' => trim((string) ($order->ped_nombres ?? '').' '.(string) ($order->ped_apellidos ?? '')),
                 'email' => (string) ($order->ped_email ?? ''),

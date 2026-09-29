@@ -107,8 +107,9 @@ class StorefrontOrderAmountSnapshotTest extends TestCase
         $this->assertSame(950.0, $products[0]['chargedSubtotal']);
         $this->assertSame(950.0, $products[0]['billedSubtotal']);
         $order = (object) ['ped_id' => 1, 'ped_id_pais' => 7, 'ppa_id' => 1, 'ppa_ref' => 'NEW-950',
-            'ppa_monto' => 950, 'ppa_monto_senv' => 950, 'ped_checkout' => 'TIENDA', 'pdi_id' => null, 'dir_id' => null];
+            'ppa_monto' => 950, 'ppa_monto_senv' => 950, 'ped_checkout' => 'TIENDA', 'ped_a_generales' => "Entregar despues de las 4:00 PM.\nLlamar antes de llegar.", 'pdi_id' => null, 'dir_id' => null];
         $summary = (new \ReflectionMethod(OrderReferenceService::class, 'normalizeOrder'))->invoke($service, $order, $products);
+        $this->assertSame("Entregar despues de las 4:00 PM.\nLlamar antes de llegar.", $summary['customerNotes']);
         $this->assertSame(0.0, $summary['totals']['productsDifference']);
         $this->assertSame(0.0, $summary['totals']['paidDifference']);
         $this->assertSame(950.0, $summary['totals']['billed']);
