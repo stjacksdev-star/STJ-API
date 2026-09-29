@@ -713,20 +713,54 @@ class MobileProductService
         $this->applyPriceAndSizeFilters($query, $filters);
         $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
 
-        $products = $this->getProducts($query, $countryId === 1 ? 150 : 100);
+        // Compatibilidad temporal: las versiones publicadas de la app no envian
+        // page/perPage y esperan el listado legado, limitado y solo con existencia.
+        $usesPagination = array_key_exists('page', $filters) || array_key_exists('perPage', $filters);
+
+        if ($usesPagination) {
+            $page = max(1, (int) ($filters['page'] ?? 1));
+            $perPage = max(1, min(100, (int) ($filters['perPage'] ?? 48)));
+            $total = (clone $query)->count('p.pro_id');
+            $lastPage = max(1, (int) ceil($total / $perPage));
+            $currentPage = min($page, $lastPage);
+            $products = $this->getProducts($query->forPage($currentPage, $perPage));
+        } else {
+            $products = $this->getProducts($query, $countryId === 1 ? 150 : 100);
+        }
 
         $availability = $this->summarize($country, $products, $storeCode);
         $bySku = $availability['availabilityBySku'] ?? [];
         $commercial = $this->commercial($products, $country, $storeCode);
 
-        return [
-            'records' => $products
-                ->filter(fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false))
+        $records = $products;
+        if (! $usesPagination) {
+            $records = $records->filter(
+                fn (object $product) => (bool) ($bySku[trim((string) $product->pro_codigo)]['hasStock'] ?? false)
+            );
+        }
+
+        $response = [
+            'records' => $records
                 ->map(fn (object $product) => $this->legacyProduct($product, $bySku, $commercial->get((int) $product->pro_id)))
                 ->values()
                 ->all(),
             'existenciaTalla' => $availability['availabilityRows'] ?? [],
         ];
+
+        if ($usesPagination) {
+            $response['pagination'] = [
+                'currentPage' => $currentPage,
+                'lastPage' => $lastPage,
+                'perPage' => $perPage,
+                'total' => $total,
+            ];
+            $response['category'] = [
+                'id' => (int) $category->cat_id,
+                'name' => (string) $category->cat_nombre,
+            ];
+        }
+
+        return $response;
     }
 
     public function filterJackCo(int $countryId, array $filters): array
@@ -860,7 +894,7 @@ class MobileProductService
         }
 
         $category = DB::table('stj_categorias')->where('cat_id', $categoryId)
-            ->first(['cat_id', 'cat_si_sub_otras', 'cat_sub_otras', 'cat_marca']);
+            ->first(['cat_id', 'cat_nombre', 'cat_si_sub_otras', 'cat_sub_otras', 'cat_marca']);
         if (! $category) {
             throw ValidationException::withMessages([$categoryField => 'Categoria no encontrada.']);
         }

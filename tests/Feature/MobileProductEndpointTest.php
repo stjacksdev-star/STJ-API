@@ -202,16 +202,55 @@ class MobileProductEndpointTest extends TestCase
             'max' => '',
             'talla' => '',
             'tienda' => '019',
+            'page' => 1,
+            'perPage' => 48,
+        ])->assertOk()
+            ->assertJsonCount(2, 'records')
+            ->assertJsonPath('records.0.sku', 'SKU-2')
+            ->assertJsonPath('records.0.hasStock', false)
+            ->assertJsonPath('records.1.sku', 'SKU-1')
+            ->assertJsonPath('records.1.precio', '20.00')
+            ->assertJsonPath('records.1.precioCD', '18.00')
+            ->assertJsonPath('records.1.descuento', 10)
+            ->assertJsonPath('records.1.origen', 'APP')
+            ->assertJsonPath('records.1.ppa_promo_nombre', '10% de descuento')
+            ->assertJsonPath('records.1.availableSizes', ['4', '6'])
+            ->assertJsonPath('pagination.total', 2)
+            ->assertJsonPath('category.name', 'Niñas')
+            ->assertJsonPath('existenciaTalla.1.existencia', 2);
+    }
+
+    public function test_category_filter_keeps_the_legacy_contract_without_pagination_parameters(): void
+    {
+        $this->mock(ProductListAvailabilityService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('summarize')
+                ->once()
+                ->with('sv', \Mockery::on(fn (array $products) => collect($products)->pluck('pro_codigo')->all() === ['SKU-2', 'SKU-1']), '019')
+                ->andReturn([
+                    'availabilityBySku' => [
+                        'SKU-1' => ['hasStock' => true, 'availableSizes' => ['4', '6'], 'totalQuantity' => 3],
+                    ],
+                    'availabilityRows' => [
+                        ['estilo' => 'SKU-1', 'talla' => '4', 'existencia' => 1],
+                        ['estilo' => 'SKU-1', 'talla' => '6', 'existencia' => 2],
+                    ],
+                ]);
+        });
+
+        $this->postJson('/api/mobile/v1/catalog/products/filter?countryId=1', [
+            'categoria' => 5,
+            'scat' => 10,
+            'ordenamiento' => 'Más recientes',
+            'min' => '',
+            'max' => '',
+            'talla' => '',
+            'tienda' => '019',
         ])->assertOk()
             ->assertJsonCount(1, 'records')
             ->assertJsonPath('records.0.sku', 'SKU-1')
-            ->assertJsonPath('records.0.precio', '20.00')
-            ->assertJsonPath('records.0.precioCD', '18.00')
-            ->assertJsonPath('records.0.descuento', 10)
-            ->assertJsonPath('records.0.origen', 'APP')
-            ->assertJsonPath('records.0.ppa_promo_nombre', '10% de descuento')
-            ->assertJsonPath('records.0.availableSizes', ['4', '6'])
-            ->assertJsonPath('existenciaTalla.1.existencia', 2);
+            ->assertJsonPath('records.0.hasStock', true)
+            ->assertJsonMissingPath('pagination')
+            ->assertJsonMissingPath('category');
     }
 
     public function test_denim_container_uses_shared_subcategories_parent_scope_and_fit(): void
