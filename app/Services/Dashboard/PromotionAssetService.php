@@ -230,6 +230,10 @@ class PromotionAssetService
 
     private function ensureUniqueType(int $promotionId, string $type, ?int $ignoreAssetId = null): void
     {
+        if ($type === 'SLIDER') {
+            return;
+        }
+
         $exists = DB::table('stj_assets')
             ->where('ast_tipo_accion', 1)
             ->where('ast_idpromocion', $promotionId)
