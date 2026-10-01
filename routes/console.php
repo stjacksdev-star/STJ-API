@@ -186,6 +186,12 @@ Schedule::command('customers:update-vip')
     ->dailyAt('01:15')
     ->timezone('America/El_Salvador')
     ->withoutOverlapping(30);
+Schedule::command('exchange-rate:sync-hnl-usd')
+    ->dailyAt((string) config('hn_exchange_rate.time', '07:00'))
+    ->timezone((string) config('hn_exchange_rate.timezone', 'America/Tegucigalpa'))
+    ->withoutOverlapping(30)
+    ->when(fn (): bool => (bool) config('hn_exchange_rate.enabled', true))
+    ->appendOutputTo(storage_path('logs/hn-exchange-rate.log'));
 Schedule::command('reports:abandoned-carts')
     ->dailyAt('08:00')
     ->timezone((string) config('abandoned_carts.timezone', 'America/El_Salvador'))
