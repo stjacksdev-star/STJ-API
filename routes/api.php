@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Dashboard\ClaimController as DashboardClaimControll
 use App\Http\Controllers\Api\Dashboard\CollectionAssetController as DashboardCollectionAssetController;
 use App\Http\Controllers\Api\Dashboard\CollectionController as DashboardCollectionController;
 use App\Http\Controllers\Api\Dashboard\CouponController as DashboardCouponController;
+use App\Http\Controllers\Api\Dashboard\ManagementReportController as DashboardManagementReportController;
 use App\Http\Controllers\Api\Dashboard\OrderReferenceController as DashboardOrderReferenceController;
 use App\Http\Controllers\Api\Dashboard\ProductCategoryController as DashboardProductCategoryController;
 use App\Http\Controllers\Api\Dashboard\ProductCountryController as DashboardProductCountryController;
@@ -396,6 +397,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/accounting/3/count', [DashboardAccountingReportController::class, 'count3']);
         Route::get('/reports/accounting/3/export', [DashboardAccountingReportController::class, 'export3']);
         Route::get('/reports/accounting/sales-by-store', [DashboardAccountingReportController::class, 'salesByStore']);
+        Route::get('/reports/management/daily-sales', [DashboardManagementReportController::class, 'dailySales']);
+        Route::get('/reports/management/daily-sales/export', [DashboardManagementReportController::class, 'dailySalesExport']);
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
         Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);
         Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
