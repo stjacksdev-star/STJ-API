@@ -330,6 +330,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/promotions', [DashboardPromotionController::class, 'store']);
         Route::post('/promotions/{promotion}/stores', [DashboardPromotionController::class, 'updateStores']);
         Route::post('/promotions/{promotion}/schedule', [DashboardPromotionController::class, 'updateSchedule']);
+        Route::post('/promotions/{promotion}/reactivate', [DashboardPromotionController::class, 'reactivate']);
         Route::post('/promotions/{promotion}/cancel', [DashboardPromotionController::class, 'cancel']);
         Route::post('/promotions/{promotion}/activate', [DashboardPromotionController::class, 'activate']);
         Route::post('/promotions/{promotion}/products', [DashboardPromotionController::class, 'replaceProducts']);

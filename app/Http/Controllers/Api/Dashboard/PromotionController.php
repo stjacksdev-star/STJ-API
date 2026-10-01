@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api\Dashboard;
 
 use App\Http\Controllers\Api\BaseController;
-use App\Services\Dashboard\PromotionService;
 use App\Services\Dashboard\AssetPublicationService;
+use App\Services\Dashboard\PromotionService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Throwable;
@@ -152,6 +152,24 @@ class PromotionController extends BaseController
         return $this->success(
             $this->promotions->replaceProducts($promotion, $request->file('products'), $validated['actor'] ?? []),
             'Productos de la promocion reemplazados correctamente'
+        );
+    }
+
+    public function reactivate(Request $request, int $promotion)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'startAt' => ['required', 'date'],
+            'endAt' => ['required', 'date', 'after:startAt'],
+            ...$this->actorRules(),
+        ]);
+
+        return $this->success(
+            $this->promotions->reactivate($promotion, $validated, $validated['actor'] ?? []),
+            'Promocion reactivada como pendiente correctamente'
         );
     }
 

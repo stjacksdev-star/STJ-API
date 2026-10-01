@@ -460,6 +460,75 @@ class PromotionService
         return $this->find($id);
     }
 
+    /**
+     * @param  array<string, mixed>  $data
+     * @param  array<string, mixed>  $actor
+     */
+    public function reactivate(int $id, array $data, array $actor = []): array
+    {
+        DB::transaction(function () use ($id, $data, $actor) {
+            $promotion = DB::table('stj_promociones')->where('prm_id', $id)->lockForUpdate()->first();
+
+            if (! $promotion) {
+                throw ValidationException::withMessages(['promotion' => 'La promocion seleccionada no existe.']);
+            }
+
+            if ((string) $promotion->prm_estado !== 'FINALIZADA') {
+                throw ValidationException::withMessages(['promotion' => 'Solo se pueden reactivar promociones finalizadas.']);
+            }
+
+            $schedule = DB::table('stj_promociones_horario')
+                ->where('pho_promocion', $id)
+                ->where('pho_tipo', 'NORMAL')
+                ->orderByDesc('pho_id')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $schedule) {
+                throw ValidationException::withMessages(['schedule' => 'La promocion no tiene horario normal configurado.']);
+            }
+
+            $startAt = $this->dashboardDateTime($data['startAt']);
+            $endAt = $this->dashboardDateTime($data['endAt']);
+
+            if ($startAt->lessThanOrEqualTo($this->dashboardNow())) {
+                throw ValidationException::withMessages(['startAt' => 'La fecha inicial debe ser mayor a la fecha y hora actual.']);
+            }
+
+            if ($startAt->greaterThanOrEqualTo($endAt)) {
+                throw ValidationException::withMessages(['endAt' => 'La fecha final debe ser mayor a la fecha inicial.']);
+            }
+
+            DB::table('stj_promociones')->where('prm_id', $id)->update([
+                'prm_estado' => 'PENDIENTE',
+            ]);
+
+            DB::table('stj_promociones_horario')->where('pho_id', $schedule->pho_id)->update([
+                'pho_inicio' => $startAt->format('Y-m-d H:i:s'),
+                'pho_fin' => $endAt->format('Y-m-d H:i:s'),
+                'pho_estado' => 'PENDIENTE',
+            ]);
+
+            $assetsUpdated = DB::table('stj_assets')
+                ->where('ast_tipo_accion', 1)
+                ->where('ast_idpromocion', $id)
+                ->update([
+                    'ast_inicio' => $startAt->format('Y-m-d H:i:s'),
+                    'ast_fin' => $endAt->format('Y-m-d H:i:s'),
+                    'ast_estado' => 'PENDIENTE',
+                ]);
+
+            $this->history->record(
+                $id,
+                'HORARIO',
+                "Promocion reactivada como PENDIENTE: {$startAt->format('Y-m-d H:i:s')} a {$endAt->format('Y-m-d H:i:s')}; {$assetsUpdated} assets actualizados como PENDIENTE.",
+                $actor,
+            );
+        });
+
+        return $this->find($id);
+    }
+
     public function activate(int $id, array $actor = []): array
     {
         DB::transaction(function () use ($id, $actor) {

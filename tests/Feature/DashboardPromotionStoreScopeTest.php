@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Services\Dashboard\PromotionHistoryService;
 use App\Services\Dashboard\AssetPublicationService;
+use App\Services\Dashboard\PromotionHistoryService;
 use App\Services\Dashboard\PromotionProductImportService;
 use App\Services\Dashboard\PromotionService;
 use Illuminate\Database\Schema\Blueprint;
@@ -105,6 +105,64 @@ class DashboardPromotionStoreScopeTest extends TestCase
     {
         $this->expectException(ValidationException::class);
         $this->service->cancel(10);
+    }
+
+    public function test_finalized_promotion_reactivates_its_normal_schedule_and_assets_as_pending(): void
+    {
+        DB::table('stj_promociones')->where('prm_id', 10)->update(['prm_estado' => 'FINALIZADA']);
+        $scheduleId = DB::table('stj_promociones_horario')->insertGetId([
+            'pho_promocion' => 10, 'pho_tipo' => 'NORMAL',
+            'pho_inicio' => '2026-01-01 00:00:00', 'pho_fin' => '2026-01-31 23:59:59', 'pho_estado' => 'FINALIZADO',
+        ]);
+        DB::table('stj_assets')->insert([
+            [
+                'ast_idpromocion' => 10, 'ast_tipo_accion' => 1, 'ast_estado' => 'FINALIZADO',
+                'ast_inicio' => '2026-01-01 00:00:00', 'ast_fin' => '2026-01-31 23:59:59',
+            ],
+            [
+                'ast_idpromocion' => 11, 'ast_tipo_accion' => 1, 'ast_estado' => 'FINALIZADO',
+                'ast_inicio' => '2026-02-01 00:00:00', 'ast_fin' => '2026-02-28 23:59:59',
+            ],
+        ]);
+        $startAt = now()->addDay()->startOfHour();
+        $endAt = $startAt->copy()->addDays(7);
+
+        $promotion = $this->service->reactivate(10, [
+            'startAt' => $startAt->format('Y-m-d H:i:s'),
+            'endAt' => $endAt->format('Y-m-d H:i:s'),
+        ], ['id' => 7]);
+
+        $this->assertSame('PENDIENTE', $promotion['status']);
+        $this->assertDatabaseHas('stj_promociones_horario', [
+            'pho_id' => $scheduleId,
+            'pho_inicio' => $startAt->format('Y-m-d H:i:s'),
+            'pho_fin' => $endAt->format('Y-m-d H:i:s'),
+            'pho_estado' => 'PENDIENTE',
+        ]);
+        $this->assertDatabaseHas('stj_assets', [
+            'ast_idpromocion' => 10,
+            'ast_estado' => 'PENDIENTE',
+            'ast_inicio' => $startAt->format('Y-m-d H:i:s'),
+            'ast_fin' => $endAt->format('Y-m-d H:i:s'),
+        ]);
+        $this->assertDatabaseHas('stj_assets', [
+            'ast_idpromocion' => 11,
+            'ast_estado' => 'FINALIZADO',
+            'ast_inicio' => '2026-02-01 00:00:00',
+            'ast_fin' => '2026-02-28 23:59:59',
+        ]);
+        $this->assertDatabaseHas('stj_promociones_historial', ['pph_promocion' => 10, 'pph_usuario_id' => '7']);
+    }
+
+    public function test_non_finalized_promotion_cannot_be_reactivated(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Solo se pueden reactivar promociones finalizadas.');
+
+        $this->service->reactivate(10, [
+            'startAt' => now()->addDay()->format('Y-m-d H:i:s'),
+            'endAt' => now()->addDays(2)->format('Y-m-d H:i:s'),
+        ]);
     }
 
     public function test_activating_pending_promotion_starts_schedule_and_only_current_assets(): void
