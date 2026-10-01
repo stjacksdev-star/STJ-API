@@ -117,7 +117,7 @@ class CorePosOrderEndpointTest extends TestCase
         ]);
     }
 
-    public function test_authorized_client_can_read_an_el_salvador_order_without_calculated_amounts(): void
+    public function test_authorized_client_can_read_an_el_salvador_order_with_item_subtotal(): void
     {
         $response = $this->withToken($this->token)->getJson('/api/v1/sv/billing/orders/STJ-100');
 
@@ -132,8 +132,8 @@ class CorePosOrderEndpointTest extends TestCase
             ->assertJsonPath('data.items.0.sku', '3080186902-2T')
             ->assertJsonPath('data.items.0.precio', 12.9876)
             ->assertJsonPath('data.items.0.porcentaje_descuento', 20.1234)
+            ->assertJsonPath('data.items.0.subtotal', 20.75)
             ->assertJsonPath('data.items.0.promocion', 'NOMBRE PROMOCION')
-            ->assertJsonMissingPath('data.items.0.sub_total')
             ->assertJsonMissingPath('data.items.0.monto_descuento');
 
         $this->assertDatabaseHas('stj_api_consultas', [

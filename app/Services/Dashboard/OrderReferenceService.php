@@ -20,8 +20,7 @@ class OrderReferenceService
 
     public function __construct(
         private readonly Smtp2GoMailer $mailer,
-    ) {
-    }
+    ) {}
 
     public function show(string $reference, string $country): array
     {
@@ -46,7 +45,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      */
     public function search(array $filters): array
     {
@@ -202,7 +201,7 @@ class OrderReferenceService
                         ->orWhere('p.ped_tienda', $storeCode);
                 });
             })
-            ->selectRaw("
+            ->selectRaw('
                 p.ped_id,
                 p.ped_id_pais,
                 p.ped_nombres,
@@ -213,7 +212,7 @@ class OrderReferenceService
                 COALESCE(order_store.tie_nombre, pending_store.tie_nombre) AS tie_nombre,
                 COALESCE(order_store.tie_codigo, pending_store.tie_codigo, p.ped_tienda) AS tie_codigo,
                 COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id
-            ")
+            ')
             ->first();
 
         if (! $order) {
@@ -281,7 +280,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      */
     public function refunds(array $filters): array
     {
@@ -331,7 +330,7 @@ class OrderReferenceService
             ->when($start !== null && $end !== null, function ($builder) use ($start, $end) {
                 $builder->whereRaw('DATE(COALESCE(p.ped_fecha_devolucion, pay.ppa_fecha)) BETWEEN ? AND ?', [$start, $end]);
             })
-            ->selectRaw("
+            ->selectRaw('
                 p.ped_id,
                 p.ped_id_pais,
                 p.ped_checkout,
@@ -357,7 +356,7 @@ class OrderReferenceService
                 COALESCE(order_store.tie_nombre, pending_store.tie_nombre) AS tie_nombre,
                 COALESCE(order_store.tie_codigo, pending_store.tie_codigo, p.ped_tienda) AS tie_codigo,
                 COALESCE(order_store.tie_id, pending_store.tie_id) AS tie_id
-            ")
+            ')
             ->orderByRaw('COALESCE(p.ped_fecha_devolucion, pay.ppa_fecha) DESC');
 
         $rows = $query->get()
@@ -386,7 +385,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function updateData(string $reference, string $country, array $data, array $actor = []): array
     {
@@ -437,7 +436,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     public function shippingManagement(string $reference, array $actor = []): array
     {
@@ -455,8 +454,8 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $data
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $data
+     * @param  array<string, mixed>  $actor
      */
     public function updateShippingManagement(string $reference, array $data, array $actor = []): array
     {
@@ -528,7 +527,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function updateLine(int $lineId, array $data, array $actor = []): array
     {
@@ -594,7 +593,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     public function processOrder(string $reference, string $country, string $ticket, ?string $refundObservation = null, array $actor = []): array
     {
@@ -723,7 +722,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     public function deliverOrder(string $reference, string $country, array $actor = []): array
     {
@@ -783,7 +782,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     public function markOrderPackedForPickup(string $reference, string $country, array $actor = []): array
     {
@@ -832,7 +831,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     public function markOrderInRoute(string $reference, string $country, array $actor = []): array
     {
@@ -1051,7 +1050,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     private function ensureActorCanDeliverStore(object $order, array $actor): void
     {
@@ -1077,7 +1076,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     private function ensureActorCountry(object $order, array $actor): void
     {
@@ -1118,7 +1117,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $processed
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $processed
      * @return array{sent: bool, skipped: bool, reason: string|null}
      */
     private function sendProcessedOrderEmail(array $processed): array
@@ -1172,7 +1171,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $delivered
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $delivered
      * @return array{sent: bool, skipped: bool, reason: string|null}
      */
     private function sendDeliveredOrderEmail(array $delivered): array
@@ -1226,7 +1225,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $packed
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $packed
      * @return array{sent: bool, skipped: bool, reason: string|null}
      */
     private function sendPackedForPickupEmail(array $packed): array
@@ -1280,7 +1279,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $routed
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $routed
      * @return array{sent: bool, skipped: bool, reason: string|null}
      */
     private function sendInRouteOrderEmail(array $routed): array
@@ -1348,7 +1347,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $products
+     * @param  array<int, array<string, mixed>>  $products
      * @return array<int, array<string, mixed>>
      */
     private function withLoggedChanges(string $reference, array $products): array
@@ -1403,7 +1402,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $processed
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $processed
      * @return array{subject: string, html: string}
      */
     private function processedOrderMail(array $processed): array
@@ -1490,7 +1489,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $packed
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $packed
      * @return array{subject: string, html: string}
      */
     private function packedForPickupMail(array $packed): array
@@ -1545,7 +1544,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{order: array<string, mixed>, products: array<int, array<string, mixed>>} $delivered
+     * @param  array{order: array<string, mixed>, products: array<int, array<string, mixed>>}  $delivered
      * @return array{subject: string, html: string}
      */
     private function deliveredOrderMail(array $delivered): array
@@ -1612,8 +1611,8 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $order
-     * @param array<int, array<string, mixed>> $products
+     * @param  array<string, mixed>  $order
+     * @param  array<int, array<string, mixed>>  $products
      */
     private function mailChangeNotice(array $order, array $products, string $currency, float $refund): string
     {
@@ -1644,7 +1643,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $products
+     * @param  array<int, array<string, mixed>>  $products
      */
     private function mailProductsTable(array $products, bool $showBilledQuantity): string
     {
@@ -1695,7 +1694,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, string> $rows
+     * @param  array<string, string>  $rows
      */
     private function mailKeyValueTable(array $rows): string
     {
@@ -1745,7 +1744,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     private function logLineChange(object $previous, object $updated, array $actor): void
     {
@@ -1792,7 +1791,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     private function actorName(array $actor): string
     {
@@ -1945,7 +1944,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<string, mixed> $actor
+     * @param  array<string, mixed>  $actor
      */
     private function ensureRootActor(array $actor): void
     {
@@ -2110,9 +2109,6 @@ class OrderReferenceService
         return $value !== '' ? Carbon::parse($value)->toDateString() : null;
     }
 
-    /**
-     * @return mixed
-     */
     private function servicePayload(mixed $value): mixed
     {
         $raw = trim((string) $value);
@@ -2206,13 +2202,13 @@ class OrderReferenceService
             ->where('detail.car_ref', $reference)
             ->where('detail.car_accion', 'AGREGADO')
             ->where('detail.car_pais', $countryId)
-            ->selectRaw("
+            ->selectRaw('
                 detail.*,
                 product.pro_codigo,
                 product.pro_nombre,
                 country_product.ppa_precio,
                 (SELECT sp.pro_nombre FROM stj_productos sp WHERE sp.pro_codigo = detail.car_estilo_final LIMIT 1) AS estilo_final_nombre
-            ")
+            ')
             ->get()
             ->map(fn ($product) => $this->normalizeProduct($product, $amounts[$product->car_id] ?? null))
             ->values()
@@ -2220,7 +2216,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $products
+     * @param  array<int, array<string, mixed>>  $products
      */
     private function normalizeOrder(object $order, array $products): array
     {
@@ -2385,10 +2381,7 @@ class OrderReferenceService
 
     private function subtotalAfterPercentageDiscount(float $unitPrice, int $quantity, float $percentage): float
     {
-        $base = round($unitPrice * $quantity, 2);
-        $discount = round($base * $percentage / 100, 2, PHP_ROUND_HALF_UP);
-
-        return round(max(0, $base - $discount), 2);
+        return StorefrontOrderAmountSnapshot::subtotalAfterPercentageDiscount($unitPrice, $quantity, $percentage);
     }
 
     /**
@@ -2428,7 +2421,7 @@ class OrderReferenceService
     }
 
     /**
-     * @param array{id: int, sku: string, name: string, price: float, status: string, sizes: array<int, string>} $product
+     * @param  array{id: int, sku: string, name: string, price: float, status: string, sizes: array<int, string>}  $product
      */
     private function ensureValidSize(array $product, string $size): void
     {

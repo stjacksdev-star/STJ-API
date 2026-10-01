@@ -72,4 +72,12 @@ class StorefrontOrderAmountSnapshot
 
         return round((float) $snapshot['finalTotal'], 2);
     }
+
+    public static function subtotalAfterPercentageDiscount(float $unitPrice, int $quantity, float $percentage): float
+    {
+        $base = round($unitPrice * $quantity, 2);
+        $discount = round($base * $percentage / 100, 2, PHP_ROUND_HALF_UP);
+
+        return round(max(0, $base - $discount), 2);
+    }
 }

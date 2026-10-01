@@ -55,6 +55,7 @@ class CorePosOrderService
             return null;
         }
 
+        $amounts = app(StorefrontOrderAmountSnapshot::class)->lines((string) $header->ppa_ref, 1);
         $items = DB::table('stj_pedidos_detalle as detail')
             ->join('stj_productos as product', 'product.pro_id', '=', 'detail.car_producto')
             ->leftJoin('stj_promociones as promotion', 'promotion.prm_id', '=', 'detail.car_promocion_id')
@@ -62,6 +63,8 @@ class CorePosOrderService
             ->where('detail.car_cantidad', '>', 0)
             ->orderBy('detail.car_id')
             ->get([
+                'detail.car_id',
+                'detail.car_producto',
                 'product.pro_codigo',
                 'detail.car_talla',
                 'detail.car_cantidad',
@@ -77,6 +80,12 @@ class CorePosOrderService
                 'cantidad' => $item->car_cantidad,
                 'precio' => $item->car_precio,
                 'porcentaje_descuento' => $item->car_descuento,
+                'subtotal' => StorefrontOrderAmountSnapshot::subtotal($item, $amounts[(int) $item->car_id] ?? null)
+                    ?? StorefrontOrderAmountSnapshot::subtotalAfterPercentageDiscount(
+                        (float) $item->car_precio,
+                        (int) $item->car_cantidad,
+                        (float) $item->car_descuento,
+                    ),
                 'promocion' => $item->promocion_nombre ?? $item->car_promocion,
             ])
             ->all();
