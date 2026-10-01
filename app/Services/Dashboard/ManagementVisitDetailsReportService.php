@@ -6,6 +6,9 @@ use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ManagementVisitDetailsReportService
 {
@@ -58,6 +61,37 @@ class ManagementVisitDetailsReportService
                 ])->all(),
             ],
         ];
+    }
+
+    /** @return array{contents: string, filename: string} */
+    public function export(string $startDate, string $endDate, string $country = 'GENERAL', string $platform = 'TODAS'): array
+    {
+        $report = $this->report($startDate, $endDate, $country, $platform);
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Visitas detalles');
+        $sheet->fromArray(['Fecha', 'Total visitas', 'País', 'Plataforma'], null, 'A1');
+        $sheet->getStyle('A1:D1')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle('A1:D1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('2563EB');
+
+        $rowNumber = 2;
+        foreach ($report['rows'] as $row) {
+            $sheet->fromArray([$row['date'], $row['visits'], $row['country'], $row['platform']], null, 'A'.$rowNumber++);
+        }
+        $sheet->getStyle('B2:B'.max(2, $rowNumber - 1))->getNumberFormat()->setFormatCode('#,##0');
+        foreach (range('A', 'D') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+        $sheet->setAutoFilter('A1:D'.max(1, $rowNumber - 1));
+        $sheet->freezePane('A2');
+
+        $writer = new Xlsx($spreadsheet);
+        ob_start();
+        $writer->save('php://output');
+        $contents = (string) ob_get_clean();
+        $spreadsheet->disconnectWorksheets();
+
+        return ['contents' => $contents, 'filename' => "visitas_detalles_{$report['filters']['start']}_{$report['filters']['end']}.xlsx"];
     }
 
     private function legacyRows(string $start, string $end): array

@@ -154,4 +154,23 @@ class ManagementReportController extends BaseController
 
         return $this->success($this->visitDetails->report($filters['startDate'], $filters['endDate'], $filters['country'] ?? 'GENERAL', $filters['platform'] ?? 'TODAS'), 'Reporte detallado de visitas obtenido');
     }
+
+    public function visitDetailsExport(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+        $filters = $request->validate([
+            'startDate' => ['required', 'date'], 'endDate' => ['required', 'date'],
+            'country' => ['nullable', 'string', 'max:7'],
+            'platform' => ['nullable', 'in:TODAS,WEB,APP-IOS,APP-ANDROID'],
+        ]);
+        $file = $this->visitDetails->export($filters['startDate'], $filters['endDate'], $filters['country'] ?? 'GENERAL', $filters['platform'] ?? 'TODAS');
+
+        return response($file['contents'], 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="'.$file['filename'].'"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+        ]);
+    }
 }

@@ -6,6 +6,7 @@ use App\Services\Dashboard\ManagementVisitDetailsReportService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class ManagementVisitDetailsReportServiceTest extends TestCase
@@ -67,5 +68,25 @@ class ManagementVisitDetailsReportServiceTest extends TestCase
         $this->assertSame('SV', $report['rows'][0]['countryCode']);
         $this->assertSame('APP-IOS', $report['rows'][0]['platform']);
         $this->assertSame([0, 0, 1], $report['chart']['series'][0]['data']);
+    }
+
+    public function test_excel_export_uses_the_filtered_table_columns_and_rows(): void
+    {
+        $file = app(ManagementVisitDetailsReportService::class)->export('2026-08-29', '2026-08-31', 'SV', 'APP-IOS');
+        $path = tempnam(sys_get_temp_dir(), 'visits_').'.xlsx';
+        file_put_contents($path, $file['contents']);
+
+        try {
+            $sheet = IOFactory::load($path)->getActiveSheet();
+            $this->assertSame(['Fecha', 'Total visitas', 'País', 'Plataforma'], $sheet->rangeToArray('A1:D1')[0]);
+            $row = $sheet->rangeToArray('A2:D2')[0];
+            $this->assertSame('2026-08-31', $row[0]);
+            $this->assertSame(1, (int) $row[1]);
+            $this->assertSame('El Salvador', $row[2]);
+            $this->assertSame('APP-IOS', $row[3]);
+            $this->assertSame('visitas_detalles_2026-08-29_2026-08-31.xlsx', $file['filename']);
+        } finally {
+            @unlink($path);
+        }
     }
 }
