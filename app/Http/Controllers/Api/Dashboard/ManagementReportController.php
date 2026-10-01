@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\BaseController;
 use App\Services\Dashboard\ManagementCyberMondayReportService;
 use App\Services\Dashboard\ManagementDailySalesReportService;
 use App\Services\Dashboard\ManagementPlatformSalesReportService;
+use App\Services\Dashboard\ManagementVisitDetailsReportService;
 use Illuminate\Http\Request;
 
 class ManagementReportController extends BaseController
@@ -14,6 +15,7 @@ class ManagementReportController extends BaseController
         private readonly ManagementDailySalesReportService $reports,
         private readonly ManagementCyberMondayReportService $cyberMonday,
         private readonly ManagementPlatformSalesReportService $platformSales,
+        private readonly ManagementVisitDetailsReportService $visitDetails,
     ) {}
 
     public function dailySales(Request $request)
@@ -137,5 +139,19 @@ class ManagementReportController extends BaseController
     private function platformRules(): array
     {
         return ['country' => ['required', 'string', 'max:3'], 'startDate' => ['required', 'date'], 'endDate' => ['required', 'date']];
+    }
+
+    public function visitDetails(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+        $filters = $request->validate([
+            'startDate' => ['required', 'date'], 'endDate' => ['required', 'date'],
+            'country' => ['nullable', 'string', 'max:7'],
+            'platform' => ['nullable', 'in:TODAS,WEB,APP-IOS,APP-ANDROID'],
+        ]);
+
+        return $this->success($this->visitDetails->report($filters['startDate'], $filters['endDate'], $filters['country'] ?? 'GENERAL', $filters['platform'] ?? 'TODAS'), 'Reporte detallado de visitas obtenido');
     }
 }
