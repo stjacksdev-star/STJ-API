@@ -399,6 +399,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/accounting/sales-by-store', [DashboardAccountingReportController::class, 'salesByStore']);
         Route::get('/reports/management/daily-sales', [DashboardManagementReportController::class, 'dailySales']);
         Route::get('/reports/management/daily-sales/export', [DashboardManagementReportController::class, 'dailySalesExport']);
+        Route::get('/reports/management/monthly-sales', [DashboardManagementReportController::class, 'monthlySales']);
+        Route::get('/reports/management/monthly-sales/export', [DashboardManagementReportController::class, 'monthlySalesExport']);
+        Route::get('/reports/management/cyber-monday', [DashboardManagementReportController::class, 'cyberMonday']);
+        Route::get('/reports/management/cyber-monday/export', [DashboardManagementReportController::class, 'cyberMondayExport']);
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
         Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);
         Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
