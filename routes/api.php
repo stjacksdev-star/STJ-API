@@ -403,6 +403,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/management/monthly-sales/export', [DashboardManagementReportController::class, 'monthlySalesExport']);
         Route::get('/reports/management/cyber-monday', [DashboardManagementReportController::class, 'cyberMonday']);
         Route::get('/reports/management/cyber-monday/export', [DashboardManagementReportController::class, 'cyberMondayExport']);
+        Route::get('/reports/management/platform-sales', [DashboardManagementReportController::class, 'platformSales']);
+        Route::get('/reports/management/platform-sales/orders', [DashboardManagementReportController::class, 'platformSalesOrders']);
         Route::get('/orders/reference', [DashboardOrderReferenceController::class, 'show']);
         Route::get('/orders/search', [DashboardOrderReferenceController::class, 'search']);
         Route::get('/orders/payment-attempts', [DashboardOrderReferenceController::class, 'paymentAttempts']);
