@@ -229,6 +229,25 @@ class OrderReferenceController extends BaseController
         );
     }
 
+    public function statusManagement(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) return $this->error('Token sin permiso dashboard', 403);
+        $validated = $request->validate(['search' => ['required', 'string', 'max:80'], 'actor' => ['required', 'array'], 'actor.permissions' => ['required', 'array']]);
+        return $this->success($this->orders->statusManagement($validated['search'], $validated['actor']), 'Pedido obtenido');
+    }
+
+    public function updateStatusManagement(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) return $this->error('Token sin permiso dashboard', 403);
+        $validated = $request->validate([
+            'search' => ['required', 'string', 'max:80'], 'status' => ['required', 'string', 'max:80'],
+            'reason' => ['required', 'string', 'max:500'], 'actor' => ['required', 'array'], 'actor.permissions' => ['required', 'array'],
+            'actor.id' => ['nullable'], 'actor.name' => ['nullable', 'string', 'max:150'], 'actor.email' => ['nullable', 'string', 'max:180'],
+            'actor.username' => ['nullable', 'string', 'max:100'], 'actor.ip' => ['nullable', 'string', 'max:45'], 'actor.userAgent' => ['nullable', 'string', 'max:500'],
+        ]);
+        return $this->success($this->orders->updateStatusManagement($validated['search'], $validated['status'], $validated['reason'], $validated['actor']), 'Estado actualizado');
+    }
+
     public function process(Request $request)
     {
         if (! $request->user()?->tokenCan('dashboard')) {

@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -523,6 +524,52 @@ class OrderReferenceService
             $updated = $this->shippingManagementOrder($reference);
 
             return $this->normalizeShippingManagement($updated);
+        });
+    }
+
+    public function statusManagement(string $search, array $actor = []): array
+    {
+        $this->ensureRootActor($actor);
+        $order = $this->statusManagementOrder($search);
+        if (! $order) throw ValidationException::withMessages(['search' => 'No se encontro un pedido con el ID o referencia STJ indicada.']);
+
+        return $this->normalizeStatusManagement($order);
+    }
+
+    public function updateStatusManagement(string $search, string $status, string $reason, array $actor = []): array
+    {
+        $this->ensureRootActor($actor);
+        $status = trim($status);
+        $reason = trim($reason);
+        if ($reason === '') throw ValidationException::withMessages(['reason' => 'El motivo del cambio es obligatorio.']);
+        if (! in_array($status, $this->orderStatusValues(), true)) {
+            throw ValidationException::withMessages(['status' => 'El estado seleccionado no pertenece al ENUM de ped_estatus.']);
+        }
+
+        return DB::transaction(function () use ($search, $status, $reason, $actor) {
+            $order = $this->statusManagementOrder($search, true);
+            if (! $order) throw ValidationException::withMessages(['search' => 'No se encontro un pedido con el ID o referencia STJ indicada.']);
+            $previous = DB::table('stj_pedidos')->where('ped_id', (int) $order->ped_id)->first();
+            if ((string) $previous->ped_estatus === $status) throw ValidationException::withMessages(['status' => 'El pedido ya se encuentra en el estado seleccionado.']);
+
+            DB::table('stj_pedidos')->where('ped_id', (int) $order->ped_id)->update(['ped_estatus' => $status]);
+            $updated = DB::table('stj_pedidos')->where('ped_id', (int) $order->ped_id)->first();
+            DB::table('stj_pedidos_gestiones_log')->insert([
+                'pgl_uuid' => (string) Str::uuid(), 'pgl_pedido_id' => (int) $order->ped_id,
+                'pgl_pago_id' => $order->ppa_id !== null ? (int) $order->ppa_id : null,
+                'pgl_referencia' => (string) ($order->ppa_ref ?: 'PED-'.$order->ped_id),
+                'pgl_pais_id' => $order->ped_id_pais !== null ? (int) $order->ped_id_pais : null,
+                'pgl_accion' => 'CAMBIO_ESTADO', 'pgl_entidad' => 'stj_pedidos', 'pgl_registro_id' => (int) $order->ped_id,
+                'pgl_estado_anterior' => (string) $previous->ped_estatus, 'pgl_estado_nuevo' => $status,
+                'pgl_datos_anteriores' => $this->json($previous), 'pgl_datos_nuevos' => $this->json($updated),
+                'pgl_motivo' => mb_substr($reason, 0, 500), 'pgl_usuario_id' => isset($actor['id']) ? (string) $actor['id'] : null,
+                'pgl_usuario_nombre' => $actor['name'] ?? $actor['username'] ?? null, 'pgl_usuario_correo' => $actor['email'] ?? null,
+                'pgl_usuario_permisos' => $this->json($actor['permissions'] ?? []), 'pgl_ip' => $actor['ip'] ?? Request::ip(),
+                'pgl_user_agent' => isset($actor['userAgent']) ? mb_substr((string) $actor['userAgent'], 0, 500) : null,
+                'pgl_origen' => 'stj-dashboard', 'pgl_fecha' => now(),
+            ]);
+
+            return $this->normalizeStatusManagement($this->statusManagementOrder((string) $order->ped_id));
         });
     }
 
@@ -1893,6 +1940,45 @@ class OrderReferenceService
         return $query->first();
     }
 
+    private function statusManagementOrder(string $search, bool $lock = false): ?object
+    {
+        $search = trim($search);
+        $query = DB::table('stj_pedidos as p')
+            ->leftJoin('stj_pedidos_pago as pay', function ($join) {
+                $join->on('pay.ppa_pedido', '=', 'p.ped_id')
+                    ->whereRaw('pay.ppa_id = (SELECT spp.ppa_id FROM stj_pedidos_pago spp WHERE spp.ppa_pedido = p.ped_id ORDER BY spp.ppa_id DESC LIMIT 1)');
+            })
+            ->leftJoin('stj_paises as country', 'country.pai_id', '=', 'p.ped_id_pais')
+            ->select(['p.ped_id', 'p.ped_id_pais', 'p.ped_estatus', 'p.ped_checkout', 'p.ped_fecha', 'pay.ppa_id', 'pay.ppa_ref', 'pay.ppa_estado'])
+            ->addSelect(DB::raw('country.pai_nombre AS country_name'));
+        if (ctype_digit($search)) $query->where('p.ped_id', (int) $search);
+        else $query->whereExists(function ($subquery) use ($search) {
+            $subquery->selectRaw('1')->from('stj_pedidos_pago as lookup_pay')
+                ->whereColumn('lookup_pay.ppa_pedido', 'p.ped_id')->where('lookup_pay.ppa_ref', $search);
+        });
+        if ($lock) $query->lockForUpdate();
+        return $query->first();
+    }
+
+    private function normalizeStatusManagement(object $order): array
+    {
+        return ['orderId' => (int) $order->ped_id, 'reference' => (string) ($order->ppa_ref ?? ''),
+            'countryId' => $order->ped_id_pais !== null ? (int) $order->ped_id_pais : null, 'country' => (string) ($order->country_name ?? ''),
+            'checkout' => (string) ($order->ped_checkout ?? ''), 'createdAt' => (string) ($order->ped_fecha ?? ''),
+            'paymentStatus' => (string) ($order->ppa_estado ?? ''), 'status' => (string) $order->ped_estatus,
+            'allowedStatuses' => $this->orderStatusValues()];
+    }
+
+    private function orderStatusValues(): array
+    {
+        if (DB::getDriverName() === 'mysql') {
+            $column = DB::selectOne("SHOW COLUMNS FROM `stj_pedidos` WHERE Field = 'ped_estatus'");
+            $type = (string) ($column->Type ?? $column->type ?? '');
+            if (preg_match_all("/'((?:[^'\\\\]|\\\\.)*)'/", $type, $matches)) return array_map(static fn ($value) => stripcslashes($value), $matches[1]);
+        }
+        return ['PENDIENTE_PAGO', 'RECIBIDO', 'RECIBIDO_ANOMALIA', 'PREPARADO', 'EMPACADO-ENTREGA', 'EN-RUTA', 'ENTREGADO', 'ANULADO-ERROR', 'ANULADO-PRUEBA', 'ANULADO-CLIENTE', 'ANULADO-INVENTARIO', 'ANULADO-EFECTIVO', 'DEVOLUCION'];
+    }
+
     private function normalizeShippingManagement(object $order): array
     {
         $checkout = strtoupper((string) ($order->ped_checkout ?? ''));
@@ -1971,7 +2057,7 @@ class OrderReferenceService
 
         if (! in_array('ROOT', $permissions, true)) {
             throw ValidationException::withMessages([
-                'actor' => 'Solo un usuario ROOT puede gestionar los datos de envio del pedido.',
+                'actor' => 'Solo un usuario ROOT puede realizar esta gestion sobre el pedido.',
             ]);
         }
     }
