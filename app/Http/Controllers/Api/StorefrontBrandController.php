@@ -18,6 +18,7 @@ class StorefrontBrandController extends BaseController
             'group' => $request->string('group')->toString(),
             'category' => $request->string('category')->toString(),
             'sort' => $request->string('sort')->toString(),
+            'store' => $request->string('store')->toString(),
             'page' => $request->integer('page', 1),
         ]);
 

@@ -21,36 +21,52 @@ class StorefrontBrandFeaturedRankingTest extends TestCase
         DB::table('stj_marcas')->insert(['mar_id' => 1, 'mar_nombre' => 'Jack & Co', 'mar_slug' => 'jackco', 'mar_codigo' => 'JACK & CO', 'mar_estado' => 'ACTIVA']);
         DB::table('stj_categorias')->insert(['cat_id' => 1, 'cat_nombre' => 'Juvenil']);
         DB::table('stj_productos')->insert([
-            'pro_id' => 10,
-            'pro_codigo' => 'SKU10',
-            'pro_nombre' => 'Producto más vendido',
-            'pro_marca' => 'JACK & CO',
-            'pro_categoria' => 1,
-            'pro_tallas' => 'S,M',
-            'pro_estatus' => 'INACTIVO',
-            'pro_registro' => now(),
+            [
+                'pro_id' => 10,
+                'pro_codigo' => 'SKU10',
+                'pro_nombre' => 'Producto más vendido disponible',
+                'pro_marca' => 'JACK & CO',
+                'pro_categoria' => 1,
+                'pro_tallas' => 'S,M',
+                'pro_estatus' => 'INACTIVO',
+                'pro_registro' => now(),
+            ],
+            [
+                'pro_id' => 11,
+                'pro_codigo' => 'SKU11',
+                'pro_nombre' => 'Producto sin existencia',
+                'pro_marca' => 'JACK & CO',
+                'pro_categoria' => 1,
+                'pro_tallas' => 'S,M',
+                'pro_estatus' => 'INACTIVO',
+                'pro_registro' => now(),
+            ],
         ]);
         DB::table('stj_producto_pais')->insert([
-            'ppa_producto' => 10,
-            'ppa_pais' => 1,
-            'ppa_estado' => 'ACTIVO',
-            'ppa_precio' => 20,
-            'ppa_es_popular' => 0,
+            ['ppa_producto' => 10, 'ppa_pais' => 1, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 20, 'ppa_es_popular' => 0],
+            ['ppa_producto' => 11, 'ppa_pais' => 1, 'ppa_estado' => 'ACTIVO', 'ppa_precio' => 30, 'ppa_es_popular' => 0],
         ]);
         DB::table('stj_producto_metricas')->insert([
-            'pme_producto' => 10,
-            'pme_pais' => 1,
-            'pme_periodo' => '30D',
-            'pme_ventas_unidades' => 15,
-            'pme_ranking_ventas' => 1,
+            ['pme_producto' => 10, 'pme_pais' => 1, 'pme_periodo' => '30D', 'pme_ventas_unidades' => 15, 'pme_ranking_ventas' => 1],
+            ['pme_producto' => 11, 'pme_pais' => 1, 'pme_periodo' => '30D', 'pme_ventas_unidades' => 10, 'pme_ranking_ventas' => 2],
         ]);
 
         $availability = $this->mock(ProductListAvailabilityService::class);
-        $availability->shouldReceive('summarize')->andReturn(['availabilityBySku' => []]);
+        $availability->shouldReceive('summarize')->andReturn([
+            'availabilityBySku' => [
+                'SKU10' => [
+                    'availableSizes' => ['M'],
+                    'hasStock' => true,
+                    'totalQuantity' => 1,
+                ],
+            ],
+        ]);
         $payload = (new StorefrontBrandService($availability))->show('sv', 'jackco');
 
-        $this->assertSame([10], array_column($payload['featured'], 'id'));
+        $this->assertSame([10, 11], array_column($payload['featured'], 'id'));
         $this->assertSame('#1', $payload['featured'][0]['badge']);
+        $this->assertTrue($payload['featured'][0]['hasStock']);
+        $this->assertFalse($payload['featured'][1]['hasStock']);
         $this->assertSame([], $payload['newArrivals']);
     }
 

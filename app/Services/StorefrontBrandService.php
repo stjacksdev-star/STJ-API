@@ -48,7 +48,8 @@ class StorefrontBrandService
         $query = trim((string) ($filters['q'] ?? ''));
         $group = trim((string) ($filters['group'] ?? ''));
         $category = trim((string) ($filters['category'] ?? ''));
-        $sort = trim((string) ($filters['sort'] ?? 'featured'));
+        $sort = trim((string) ($filters['sort'] ?? 'price_desc')) ?: 'price_desc';
+        $storeCode = trim((string) ($filters['store'] ?? ''));
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = max(6, min((int) ($filters['perPage'] ?? 12), 24));
         $slug = strtolower((string) $this->value($brand, 'mar_slug'));
@@ -77,9 +78,9 @@ class StorefrontBrandService
             ->forPage($page, $perPage)
             ->get();
 
-        $products = $this->mapProducts($rawProducts, $country, $slug);
-        $featured = $this->featuredProducts((int) $country->pai_id, $country, $slug);
-        $newArrivals = $this->newArrivalProducts((int) $country->pai_id, $country, $slug);
+        $products = $this->mapProducts($rawProducts, $country, $slug, $storeCode ?: null);
+        $featured = $this->featuredProducts((int) $country->pai_id, $country, $slug, $storeCode ?: null);
+        $newArrivals = $this->newArrivalProducts((int) $country->pai_id, $country, $slug, $storeCode ?: null);
 
         return [
             ...$this->normalizeBrand($brand),
@@ -206,11 +207,12 @@ class StorefrontBrandService
         ];
     }
 
-    private function mapProducts($rawProducts, object $country, string $brandSlug): array
+    private function mapProducts($rawProducts, object $country, string $brandSlug, ?string $storeCode = null): array
     {
         $availability = $this->productListAvailabilityService->summarize(
             strtolower((string) $country->pai_codigo),
             $rawProducts->map(fn ($product) => ['pro_codigo' => $product->pro_codigo])->all(),
+            $storeCode,
         );
         $commercial = ($this->promotionPresenter ?? app(StorefrontProductPromotionPresenter::class))->resolve(
             $rawProducts,
@@ -267,7 +269,7 @@ class StorefrontBrandService
             ->all();
     }
 
-    private function featuredProducts(int $countryId, object $country, string $brandSlug): array
+    private function featuredProducts(int $countryId, object $country, string $brandSlug, ?string $storeCode = null): array
     {
         $period = app(ProductBestSellerCalculator::class)->period(30);
         $query = DB::table('stj_producto_metricas as metrics')
@@ -285,24 +287,42 @@ class StorefrontBrandService
         StorefrontProductExclusions::apply($query, 'p');
         StorefrontBrandMap::applyProductBrandFilter($query, $brandSlug);
 
-        $rawProducts = $query
+        $rankedQuery = $query
             ->orderBy('metrics.pme_ranking_ventas')
             ->orderByDesc('metrics.pme_ventas_unidades')
             ->select([
                 ...$this->productSelects(),
                 'metrics.pme_ranking_ventas',
-            ])
-            ->limit(10)
-            ->get();
+            ]);
+        $available = collect();
+        $withoutStock = collect();
+        $page = 1;
+        $batchSize = 50;
 
-        if ($rawProducts->isEmpty()) {
-            return [];
-        }
+        do {
+            $rawProducts = (clone $rankedQuery)
+                ->forPage($page, $batchSize)
+                ->get();
 
-        return $this->mapProducts($rawProducts, $country, $brandSlug);
+            if ($rawProducts->isEmpty()) {
+                break;
+            }
+
+            collect($this->mapProducts($rawProducts, $country, $brandSlug, $storeCode))
+                ->each(function (array $product) use ($available, $withoutStock) {
+                    ($product['hasStock'] ? $available : $withoutStock)->push($product);
+                });
+            $page++;
+        } while ($available->count() < 10 && $rawProducts->count() === $batchSize);
+
+        return $available
+            ->take(10)
+            ->concat($withoutStock->take(max(0, 10 - $available->count())))
+            ->values()
+            ->all();
     }
 
-    private function newArrivalProducts(int $countryId, object $country, string $brandSlug): array
+    private function newArrivalProducts(int $countryId, object $country, string $brandSlug, ?string $storeCode = null): array
     {
         $query = $this->baseProductQuery($countryId);
         StorefrontBrandMap::applyProductBrandFilter($query, $brandSlug);
@@ -318,7 +338,7 @@ class StorefrontBrandService
             return [];
         }
 
-        return $this->mapProducts($rawProducts, $country, $brandSlug);
+        return $this->mapProducts($rawProducts, $country, $brandSlug, $storeCode);
     }
 
     private function groups($query): array
@@ -484,7 +504,7 @@ class StorefrontBrandService
                 'q' => trim((string) ($filters['q'] ?? '')),
                 'group' => trim((string) ($filters['group'] ?? '')),
                 'category' => trim((string) ($filters['category'] ?? '')),
-                'sort' => trim((string) ($filters['sort'] ?? 'featured')),
+                'sort' => trim((string) ($filters['sort'] ?? 'price_desc')) ?: 'price_desc',
             ],
             'groups' => [],
             'categories' => [],
