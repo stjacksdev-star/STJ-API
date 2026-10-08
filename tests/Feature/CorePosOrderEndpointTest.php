@@ -86,6 +86,11 @@ class CorePosOrderEndpointTest extends TestCase
             $table->unsignedBigInteger('car_promocion_id')->nullable();
             $table->string('car_promocion')->nullable();
         });
+        Schema::create('stj_pedidos_detalle_log', function (Blueprint $table) {
+            $table->id('pdl_id');
+            $table->unsignedBigInteger('pdl_detalle_id');
+            $table->string('pdl_ref');
+        });
 
         DB::table('stj_api_clientes')->insert([
             'apc_id' => 1,
@@ -153,6 +158,31 @@ class CorePosOrderEndpointTest extends TestCase
             ->getJson('/api/v1/sv/billing/orders/STJ-100')
             ->assertOk()
             ->assertJsonPath('data.items.0.promocion', 'PROMO PRUEBA');
+    }
+
+    public function test_it_recalculates_only_billing_totals_when_the_order_detail_was_edited(): void
+    {
+        DB::table('stj_pedidos_pago')->where('ppa_ref', 'STJ-100')->update([
+            'ppa_monto_sdesc' => 18.90, 'ppa_monto_senv' => 12.29, 'ppa_monto' => 12.29,
+        ]);
+        DB::table('stj_pedidos_detalle')->where('car_id', 50)->update([
+            'car_cantidad' => 0, 'car_precio' => 6.95, 'car_descuento' => 0,
+        ]);
+        DB::table('stj_productos')->insert(['pro_id' => 6, 'pro_codigo' => '3000183001']);
+        DB::table('stj_pedidos_detalle')->insert([
+            'car_id' => 51, 'car_producto' => 6, 'car_ref' => 'STJ-100', 'car_talla' => '4T',
+            'car_cantidad' => 1, 'car_precio' => 11.95, 'car_descuento' => 35,
+            'car_promocion_id' => null, 'car_promocion' => 'PROMO 35%',
+        ]);
+        DB::table('stj_pedidos_detalle_log')->insert(['pdl_detalle_id' => 50, 'pdl_ref' => 'STJ-100']);
+
+        $this->withToken($this->token)->getJson('/api/v1/sv/billing/orders/STJ-100')
+            ->assertOk()
+            ->assertJsonPath('data.totales.monto_sin_descuento', 18.9)
+            ->assertJsonPath('data.totales.total_sin_envio', 7.77)
+            ->assertJsonPath('data.totales.total', 7.77)
+            ->assertJsonCount(1, 'data.items')
+            ->assertJsonPath('data.items.0.subtotal', 7.77);
     }
 
     public function test_it_rejects_missing_tokens_and_does_not_expose_other_countries(): void

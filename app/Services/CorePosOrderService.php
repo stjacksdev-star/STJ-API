@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class CorePosOrderService
 {
@@ -90,6 +91,11 @@ class CorePosOrderService
             ])
             ->all();
 
+        $detailWasEdited = Schema::hasTable('stj_pedidos_detalle_log')
+            && DB::table('stj_pedidos_detalle_log')->where('pdl_ref', $header->ppa_ref)->exists();
+        $detailTotal = round(array_sum(array_column($items, 'subtotal')), 2);
+        $shipping = round((float) $header->ppa_monto - (float) $header->ppa_monto_senv, 2);
+
         return [
             'pedido' => [
                 'id' => $header->ped_id,
@@ -115,8 +121,8 @@ class CorePosOrderService
             ],
             'totales' => [
                 'monto_sin_descuento' => $header->ppa_monto_sdesc,
-                'total_sin_envio' => $header->ppa_monto_senv,
-                'total' => $header->ppa_monto,
+                'total_sin_envio' => $detailWasEdited ? $detailTotal : $header->ppa_monto_senv,
+                'total' => $detailWasEdited ? round($detailTotal + $shipping, 2) : $header->ppa_monto,
             ],
             'items' => $items,
         ];
