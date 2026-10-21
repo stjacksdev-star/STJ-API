@@ -711,11 +711,16 @@ class MobileProductService
         $this->applyCategory($query, $category, $filters);
         $this->applyDenimFit($query, trim((string) ($filters['fit'] ?? '')));
         $this->applyPriceAndSizeFilters($query, $filters);
-        $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
 
         // Compatibilidad temporal: las versiones publicadas de la app no envian
         // page/perPage y esperan el listado legado, limitado y solo con existencia.
         $usesPagination = array_key_exists('page', $filters) || array_key_exists('perPage', $filters);
+        $filterOptions = [];
+        if ($usesPagination) {
+            $filterOptions = $this->catalogFilterOptions(clone $query);
+            $this->applyCatalogFilters($query, $filters);
+        }
+        $this->applySort($query, (string) ($filters['ordenamiento'] ?? 'Más recientes'));
 
         if ($usesPagination) {
             $page = max(1, (int) ($filters['page'] ?? 1));
@@ -758,6 +763,7 @@ class MobileProductService
                 'id' => (int) $category->cat_id,
                 'name' => (string) $category->cat_nombre,
             ];
+            $response['filters'] = $filterOptions;
         }
 
         return $response;
@@ -983,6 +989,47 @@ class MobileProductService
         }
         if (trim((string) ($filters['talla'] ?? '')) !== '') {
             $query->where('p.pro_tallas', 'like', '%'.trim((string) $filters['talla']).'%');
+        }
+    }
+
+    private function catalogFilterOptions(Builder $query): array
+    {
+        return [
+            'genders' => $this->catalogOptions(clone $query, 'c.cat_nombre', 'cat_nombre'),
+            'categories' => $this->catalogOptions(clone $query, 'sc.sca_nombre', 'sca_nombre'),
+            'brands' => $this->catalogOptions(clone $query, 'p.pro_marca', 'pro_marca'),
+        ];
+    }
+
+    private function catalogOptions(Builder $query, string $column, string $alias): array
+    {
+        return $query
+            ->whereNotNull($column)
+            ->whereRaw("TRIM({$column}) <> ''")
+            ->select([$column, DB::raw('COUNT(DISTINCT p.pro_id) as total')])
+            ->groupBy($column)
+            ->orderBy($column)
+            ->get()
+            ->map(fn (object $row) => [
+                'value' => trim((string) $row->{$alias}),
+                'label' => trim((string) $row->{$alias}),
+                'count' => (int) $row->total,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function applyCatalogFilters(Builder $query, array $filters): void
+    {
+        foreach ([
+            'filterGender' => 'c.cat_nombre',
+            'filterCategory' => 'sc.sca_nombre',
+            'filterBrand' => 'p.pro_marca',
+        ] as $filter => $column) {
+            $value = trim((string) ($filters[$filter] ?? ''));
+            if ($value !== '') {
+                $query->whereRaw("UPPER(TRIM({$column})) = ?", [mb_strtoupper($value, 'UTF-8')]);
+            }
         }
     }
 

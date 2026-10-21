@@ -61,6 +61,8 @@ class StorefrontPromotionLandingService
         $scope = $this->promotionScope($promotion, $filters);
         $brand = trim((string) ($filters['brand'] ?? ''));
         $gender = trim((string) ($filters['gender'] ?? ''));
+        $catalogGender = trim((string) ($filters['catalogGender'] ?? ''));
+        $category = trim((string) ($filters['category'] ?? ''));
         $sort = trim((string) ($filters['sort'] ?? 'featured')) ?: 'featured';
         $perPage = (int) ($filters['perPage'] ?? 24);
         $page = (int) ($filters['page'] ?? 1);
@@ -69,6 +71,8 @@ class StorefrontPromotionLandingService
         $filterOptions = [
             'brands' => $this->options(clone $baseQuery, 'product.pro_marca'),
             'genders' => $this->options(clone $baseQuery, 'product.pro_oc_genero'),
+            'catalogGenders' => $this->options(clone $baseQuery, 'category.cat_nombre'),
+            'categories' => $this->options(clone $baseQuery, 'subcategory.sca_nombre'),
         ];
 
         if ($brand !== '') {
@@ -76,6 +80,12 @@ class StorefrontPromotionLandingService
         }
         if ($gender !== '') {
             $baseQuery->where('product.pro_oc_genero', $gender);
+        }
+        if ($catalogGender !== '') {
+            $baseQuery->where('category.cat_nombre', $catalogGender);
+        }
+        if ($category !== '') {
+            $baseQuery->where('subcategory.sca_nombre', $category);
         }
 
         if ($sort === 'featured') {
@@ -215,7 +225,7 @@ class StorefrontPromotionLandingService
                     ['value' => 'price_asc', 'label' => 'Precio menor'],
                     ['value' => 'price_desc', 'label' => 'Precio mayor'],
                 ],
-                'active' => compact('brand', 'gender', 'sort'),
+                'active' => compact('brand', 'gender', 'catalogGender', 'category', 'sort'),
             ],
             'pagination' => [
                 'currentPage' => $paginator->currentPage(),

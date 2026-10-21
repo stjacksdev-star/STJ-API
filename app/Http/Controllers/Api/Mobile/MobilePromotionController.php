@@ -40,6 +40,8 @@ class MobilePromotionController extends Controller
             'perPage' => ['nullable', 'integer', 'min:1', 'max:100'],
             'brand' => ['nullable', 'string', 'max:100'],
             'gender' => ['nullable', 'string', 'max:100'],
+            'catalogGender' => ['nullable', 'string', 'max:100'],
+            'category' => ['nullable', 'string', 'max:100'],
             'sort' => ['nullable', Rule::in(['featured', 'discount_desc', 'discount_asc', 'newest', 'price_asc', 'price_desc'])],
         ]);
         $countryCode = DB::table('stj_paises')->where('pai_id', $data['countryId'])->value('pai_codigo');
@@ -48,6 +50,8 @@ class MobilePromotionController extends Controller
             'perPage' => (int) ($data['perPage'] ?? 48),
             'brand' => $data['brand'] ?? '',
             'gender' => $data['gender'] ?? '',
+            'catalogGender' => $data['catalogGender'] ?? '',
+            'category' => $data['category'] ?? '',
             'sort' => $data['sort'] ?? 'featured',
             'checkoutType' => strtoupper((string) ($data['tipoServicio'] ?? 'DOMICILIO')),
             'storeCode' => (string) $data['codigoTienda'],
