@@ -600,17 +600,46 @@ class StorefrontCartService
         $customer ? $q->where('car_usu_id', $customer->getKey()) : $q->whereNull('car_usu_id')->where('car_visitante_id', $visitor->getKey());
         $cart = $q->lockForUpdate()->first();
         if ($hydrateContext && $cart && ! $cart->car_tienda_codigo_snapshot) {
-            $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, ['fulfillment_type' => 'DOMICILIO']);
+            $context = $this->fulfillment->resolve(
+                (int) $country->pai_id,
+                (string) $country->pai_codigo,
+                $this->initialFulfillment((int) $country->pai_id, (string) $country->pai_codigo),
+            );
             $cart->forceFill(['car_tipo' => $context['type'], 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource']])->save();
         }
         if ($cart || ! $create) {
             return $cart;
         } $now = now();
-        $context = $this->fulfillment->resolve((int) $country->pai_id, (string) $country->pai_codigo, ['fulfillment_type' => 'DOMICILIO']);
-        $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_usu_id' => $customer?->getKey(), 'car_pais_id' => $country->pai_id, 'car_tipo' => 'DOMICILIO', 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource'], 'car_estado' => 'ACTIVO', 'car_origen' => $this->promotionContext['channel'], 'car_moneda' => $this->currency(strtolower($country->pai_codigo)), 'car_version' => 1, 'car_ultima_actividad_en' => $now, 'car_expira_en' => $now->copy()->addDays(30), 'car_creado_en' => $now, 'car_actualizado_en' => $now]);
+        $context = $this->fulfillment->resolve(
+            (int) $country->pai_id,
+            (string) $country->pai_codigo,
+            $this->initialFulfillment((int) $country->pai_id, (string) $country->pai_codigo),
+        );
+        $cart = StorefrontCart::query()->create(['car_uuid' => (string) Str::uuid(), 'car_visitante_id' => $visitor->getKey(), 'car_usu_id' => $customer?->getKey(), 'car_pais_id' => $country->pai_id, 'car_tipo' => $context['type'], 'car_tienda_id' => $context['storeId'], 'car_tienda_codigo_snapshot' => $context['storeCode'], 'car_inventory_source' => $context['inventorySource'], 'car_estado' => 'ACTIVO', 'car_origen' => $this->promotionContext['channel'], 'car_moneda' => $this->currency(strtolower($country->pai_codigo)), 'car_version' => 1, 'car_ultima_actividad_en' => $now, 'car_expira_en' => $now->copy()->addDays(30), 'car_creado_en' => $now, 'car_actualizado_en' => $now]);
         $this->audit($cart, null, $visitor, $customer, 'CART_CREATED', null, ['state' => 'ACTIVO']);
 
         return $cart;
+    }
+
+    private function initialFulfillment(int $countryId, string $countryCode): array
+    {
+        if (filled(config('inventory.domicilio_store_by_country.'.strtolower($countryCode)))) {
+            return ['fulfillment_type' => 'DOMICILIO'];
+        }
+
+        $storeCode = DB::table('stj_tiendas')
+            ->where('tie_pais', $countryId)
+            ->where('tie_productos', 1)
+            ->orderBy('tie_id')
+            ->value('tie_codigo');
+
+        if (! filled($storeCode)) {
+            throw ValidationException::withMessages([
+                'store_code' => 'No existe una tienda habilitada para iniciar el carrito.',
+            ]);
+        }
+
+        return ['fulfillment_type' => 'TIENDA', 'store_code' => (string) $storeCode];
     }
 
     private function commercial(StorefrontCart $cart, array $input, string $inventoryScope = 'cart'): array
@@ -939,6 +968,7 @@ class StorefrontCartService
             'CRC' => '₡',
             'HNL' => 'L',
             'DOP' => 'RD$',
+            'VES' => 'Bs.',
             default => '$',
         };
     }
@@ -966,7 +996,7 @@ class StorefrontCartService
 
     private function currency(string $c): string
     {
-        return ['gt' => 'GTQ', 'cr' => 'CRC', 'pa' => 'USD', 'do' => 'DOP', 'hn' => 'HNL'][$c] ?? 'USD';
+        return ['gt' => 'GTQ', 'cr' => 'CRC', 'pa' => 'USD', 'do' => 'DOP', 'hn' => 'HNL', 've' => 'VES'][$c] ?? 'USD';
     }
 
     private function destinationHash(array $delivery): string

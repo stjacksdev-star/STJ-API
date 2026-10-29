@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Services\StorefrontStoreService;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -12,8 +11,6 @@ use Tests\TestCase;
 
 class StorefrontStoreServiceTest extends TestCase
 {
-    use RefreshDatabase;
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -51,6 +48,15 @@ class StorefrontStoreServiceTest extends TestCase
         config(['inventory.domicilio_store_by_country.sv' => '57']);
     }
 
+    protected function tearDown(): void
+    {
+        Schema::dropIfExists('stj_tiendas_horario');
+        Schema::dropIfExists('stj_tiendas');
+        Schema::dropIfExists('stj_paises');
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
     public function test_it_returns_delivery_and_product_stores_ordered_by_distance(): void
     {
         Carbon::setTestNow('2026-07-20 10:00:00');
@@ -61,5 +67,21 @@ class StorefrontStoreServiceTest extends TestCase
         $this->assertSame('2200-0001', $result['stores'][0]['phone']);
         $this->assertCount(2, $result['stores']);
         Carbon::setTestNow();
+    }
+
+    public function test_venezuela_exposes_store_pickup_without_delivery_until_activated(): void
+    {
+        DB::table('stj_paises')->insert(['pai_id' => 8, 'pai_codigo' => 'VE']);
+        DB::table('stj_tiendas')->insert([
+            'tie_codigo' => '01', 'tie_nombre' => 'Sambil', 'tie_direccion' => 'Caracas',
+            'tie_zona' => null, 'tie_latitud' => null, 'tie_longitud' => null,
+            'tie_horario' => null, 'tie_telefono' => null, 'tie_correo' => null,
+            'tie_pais' => 8, 'tie_productos' => 1,
+        ]);
+
+        $result = app(StorefrontStoreService::class)->forCountry('ve');
+
+        $this->assertSame([['type' => 'TIENDA', 'code' => null, 'name' => 'Recoger en tienda', 'headerLabel' => 'Seleccionar tienda', 'icon' => 'store']], $result['services']);
+        $this->assertSame('Sambil', $result['stores'][0]['name']);
     }
 }

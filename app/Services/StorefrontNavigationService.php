@@ -182,7 +182,7 @@ class StorefrontNavigationService
     public function supportedCountryCodes(): array
     {
         return DB::table('stj_paises')
-            ->whereIn('pai_codigo', ['SV', 'GT', 'CR', 'PA', 'HN'])
+            ->whereIn('pai_codigo', ['SV', 'GT', 'CR', 'PA', 'HN', 'VE'])
             ->orderBy('pai_id')
             ->pluck('pai_codigo')
             ->map(fn ($code) => strtolower((string) $code))

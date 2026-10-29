@@ -24,6 +24,9 @@ return [
         'sv_categories_url' => env('INVENTORY_SV_CATEGORIES_URL', env('STJ_API_NPOS', '') ? 'https://'.env('STJ_API_NPOS').'/api/existencias/categorias' : ''),
         'hn_detail_url' => env('INVENTORY_HN_DETAIL_URL', ''),
         'hn_categories_url' => env('INVENTORY_HN_CATEGORIES_URL', ''),
+        've_detail_url' => env('INVENTORY_VE_DETAIL_URL', ''),
+        've_categories_url' => env('INVENTORY_VE_CATEGORIES_URL', ''),
+        've_sku_url' => env('INVENTORY_VE_SKU_URL', ''),
         'generic_detail_url' => env('INVENTORY_GENERIC_DETAIL_URL', env('STJ_API', '') ? 'http://'.env('STJ_API').'/API-Inventario/api/articulos/existenciaPorTiendaDetalle' : ''),
         'generic_categories_url' => env('INVENTORY_GENERIC_CATEGORIES_URL', env('STJ_API', '') ? 'http://'.env('STJ_API').'/API-Inventario/api/articulos/existenciaPorTiendaDetalle' : ''),
         'sv_barcode_url' => env('INVENTORY_SV_BARCODE_URL', env('STJ_API_NPOS', '') ? 'https://'.env('STJ_API_NPOS').'/api/articulos/barcode/{barcode}' : ''),
@@ -76,6 +79,7 @@ return [
         'pa' => ['1'],
         'do' => ['1'],
         'hn' => ['001', '1'],
+        've' => ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22'],
     ],
 
     'default_store_by_country' => [
@@ -85,6 +89,7 @@ return [
         'pa' => '1',
         'do' => '1',
         'hn' => '001',
+        've' => '02',
     ],
 
     'domicilio_store_by_country' => [

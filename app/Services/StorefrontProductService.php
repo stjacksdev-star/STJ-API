@@ -244,7 +244,7 @@ class StorefrontProductService
             'cr' => 'CRC',
             'do' => 'DOP',
             'hn' => 'HNL',
-            've' => 'USD',
+            've' => 'VES',
             default => 'USD',
         };
     }
@@ -256,6 +256,7 @@ class StorefrontProductService
             'cr' => '₡',
             'hn' => 'L',
             'do' => 'RD$',
+            've' => 'Bs.',
             default => '$',
         };
     }

@@ -23,6 +23,7 @@ class OrderCurrencyTest extends TestCase
             'Costa Rica uses colones' => [3, 'CR', '₡'],
             'Panama uses dollars' => [5, 'PA', '$'],
             'Honduras uses lempiras' => [7, 'HN', 'L'],
+            'Venezuela uses bolivars' => [8, 'VE', 'Bs.'],
         ];
     }
 }

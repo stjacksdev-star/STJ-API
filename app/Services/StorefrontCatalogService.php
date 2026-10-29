@@ -254,7 +254,7 @@ class StorefrontCatalogService
             'cr' => 'CRC',
             'do' => 'DOP',
             'hn' => 'HNL',
-            've' => 'USD',
+            've' => 'VES',
             default => 'USD',
         };
     }

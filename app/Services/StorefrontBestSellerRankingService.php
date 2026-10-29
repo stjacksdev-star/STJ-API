@@ -194,6 +194,7 @@ class StorefrontBestSellerRankingService
             'CR' => 'CRC',
             'DO' => 'DOP',
             'HN' => 'HNL',
+            'VE' => 'VES',
             default => 'USD',
         };
     }

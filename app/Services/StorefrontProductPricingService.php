@@ -96,6 +96,6 @@ class StorefrontProductPricingService
     {
         $code = strtolower((string) DB::table('stj_paises')->where('pai_id', $countryId)->value('pai_codigo'));
 
-        return ['gt' => 'GTQ', 'cr' => 'CRC', 'pa' => 'USD', 'do' => 'DOP', 'hn' => 'HNL'][$code] ?? 'USD';
+        return ['gt' => 'GTQ', 'cr' => 'CRC', 'pa' => 'USD', 'do' => 'DOP', 'hn' => 'HNL', 've' => 'VES'][$code] ?? 'USD';
     }
 }

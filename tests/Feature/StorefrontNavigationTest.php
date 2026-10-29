@@ -65,6 +65,13 @@ class StorefrontNavigationTest extends TestCase
         $this->withHeader('If-None-Match', $etag)->get('/api/storefront/navigation/zz')->assertStatus(304);
     }
 
+    public function test_venezuela_is_a_supported_storefront_country(): void
+    {
+        DB::table('stj_paises')->insert(['pai_id' => 8, 'pai_codigo' => 'VE', 'pai_nombre' => 'Venezuela']);
+
+        $this->assertContains('ve', app(StorefrontNavigationService::class)->supportedCountryCodes());
+    }
+
     public function test_catalog_can_filter_by_stable_subcategory_id(): void
     {
         DB::table('stj_productos')->insert(['pro_id' => 4, 'pro_codigo' => 'P-4', 'pro_nombre' => 'Pijama', 'pro_categoria' => 5, 'pro_sub_categoria' => 20, 'pro_estatus' => 'ACTIVO']);

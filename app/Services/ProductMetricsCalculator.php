@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 class ProductMetricsCalculator
 {
-    public const COUNTRIES = [1, 2, 3, 5, 7];
+    public const COUNTRIES = [1, 2, 3, 5, 7, 8];
 
     public const PERIODS = [7, 14, 30, 365];
 

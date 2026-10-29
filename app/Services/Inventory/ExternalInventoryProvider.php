@@ -164,6 +164,7 @@ class ExternalInventoryProvider
         return match (strtolower($countryCode)) {
             'sv' => trim((string) config('inventory.external.sv_detail_url', '')),
             'hn' => trim((string) config('inventory.external.hn_detail_url', '')),
+            've' => trim((string) config('inventory.external.ve_detail_url', '')),
             default => trim((string) config('inventory.external.generic_detail_url', '')),
         };
     }
@@ -173,6 +174,7 @@ class ExternalInventoryProvider
         return match (strtolower($countryCode)) {
             'sv' => trim((string) config('inventory.external.sv_categories_url', '')),
             'hn' => trim((string) config('inventory.external.hn_categories_url', '')),
+            've' => trim((string) config('inventory.external.ve_categories_url', '')),
             default => trim((string) config('inventory.external.generic_categories_url', '')),
         };
     }
