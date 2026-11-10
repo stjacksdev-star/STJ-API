@@ -180,7 +180,7 @@ class PrismShipmentProcessorTest extends TestCase
                 $this->items = $request->data();
                 if ($this->failure === 'normalized_discount') {
                     foreach ($this->items as &$item) {
-                        $item['discount_amt'] = $item['manual_disc_value'];
+                        $item['discount_amt'] = $item['manual_disc_value'] * $item['quantity'];
                         $item['manual_disc_value'] = null;
                         $item['manual_disc_type'] = null;
                     }
@@ -374,6 +374,16 @@ class PrismShipmentProcessorTest extends TestCase
         $this->failure = 'normalized_discount';
         $this->assertSame('enviado', app(PrismShipmentProcessor::class)->process(1, true)['status']);
         $this->assertEquals(10, $this->items[0]['discount_amt']);
+    }
+
+    public function test_persisted_line_discount_is_normalized_to_unit_discount_for_multiple_quantity(): void
+    {
+        DB::table('stj_pedidos_detalle')->update(['car_cantidad' => 2, 'car_precio' => 50, 'car_descuento' => 10]);
+        $this->failure = 'normalized_discount';
+
+        $this->assertSame('enviado', app(PrismShipmentProcessor::class)->process(1, true)['status']);
+        $this->assertEquals(10, $this->items[0]['discount_amt']);
+        $this->assertEquals(2, $this->items[0]['quantity']);
     }
 
     public function test_existing_uncertain_items_with_null_manual_discount_resume_without_reposting(): void

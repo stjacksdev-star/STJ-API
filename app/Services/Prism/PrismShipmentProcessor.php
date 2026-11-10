@@ -341,13 +341,19 @@ class PrismShipmentProcessor
     private function itemDiscountCents(array $row): int
     {
         // Prism may clear the manual input fields after applying the discount.
-        // Its persisted discount_amt is authoritative in that response format.
-        $discount = $row['manual_disc_value'] ?? $row['discount_amt'] ?? null;
-        if (! is_numeric($discount)) {
+        // manual_disc_value is unitary, while persisted discount_amt is the
+        // discount for the complete line (unit discount multiplied by quantity).
+        if (is_numeric($row['manual_disc_value'] ?? null)) {
+            return PrismOrderSnapshot::cents($row['manual_disc_value']);
+        }
+
+        $discount = $row['discount_amt'] ?? null;
+        $quantity = $row['quantity'] ?? null;
+        if (! is_numeric($discount) || ! is_numeric($quantity) || (float) $quantity <= 0) {
             throw new RuntimeException('Artículo Prism sin descuento numérico verificable (manual_disc_value/discount_amt).');
         }
 
-        return PrismOrderSnapshot::cents($discount);
+        return (int) round(PrismOrderSnapshot::cents($discount) / (float) $quantity);
     }
 
     public static function one(array $rows): array
