@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CheckoutEventController;
+use App\Http\Controllers\Api\CitasStoreController;
 use App\Http\Controllers\Api\CorePosOrderController;
 use App\Http\Controllers\Api\Dashboard\AbandonedOrderReportController as DashboardAbandonedOrderReportController;
 use App\Http\Controllers\Api\Dashboard\AccountingReportController as DashboardAccountingReportController;
@@ -75,6 +76,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/v1/sv/billing/orders/{stj}', CorePosOrderController::class)
     ->where('stj', '[A-Za-z0-9_-]+')
+    ->middleware('throttle:120,1');
+Route::get('/integraciones/citas/tiendas', CitasStoreController::class)
     ->middleware('throttle:120,1');
 
 Route::post('/login', [AuthController::class, 'login']);
