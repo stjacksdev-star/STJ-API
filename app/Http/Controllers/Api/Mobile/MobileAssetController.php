@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Mobile;
 use App\Http\Controllers\Controller;
 use App\Services\Mobile\MobileBannerAssetService;
 use App\Services\Mobile\MobileLifestyleAssetService;
+use App\Services\Mobile\MobileModalAssetService;
 use App\Services\Mobile\MobileNewArrivalAssetService;
 use Illuminate\Http\Request;
 
@@ -37,5 +38,16 @@ class MobileAssetController extends Controller
         ]);
 
         return response()->json($assets->forCountry((int) $data['countryId']));
+    }
+
+    public function modals(Request $request, MobileModalAssetService $assets)
+    {
+        $data = $request->validate([
+            'countryId' => ['required', 'integer', 'exists:stj_paises,pai_id'],
+        ]);
+
+        return response()->json([
+            'records' => $assets->forCountry((int) $data['countryId']),
+        ]);
     }
 }

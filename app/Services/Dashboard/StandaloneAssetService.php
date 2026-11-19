@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class StandaloneAssetService
 {
-    private const LANDING_ACTIONS = [0, 5, 6, 8];
+    private const LANDING_ACTIONS = [0, 4, 5, 6, 8];
 
     public function __construct(private readonly ImageOptimizer $images) {}
 
@@ -20,6 +20,7 @@ class StandaloneAssetService
         return [
             'actionTypes' => [
                 ['id' => 0, 'label' => 'Sin acción'],
+                ['id' => 4, 'label' => 'Abrir enlace externo'],
                 ['id' => 5, 'label' => 'Landing Basiko'],
                 ['id' => 6, 'label' => 'Landing Jack & Co'],
                 ['id' => 8, 'label' => 'Landing Denim'],

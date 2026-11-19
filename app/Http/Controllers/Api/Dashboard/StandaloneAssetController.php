@@ -38,8 +38,8 @@ class StandaloneAssetController extends BaseController
             'platform' => ['nullable', Rule::in(['TODO', 'WEB', 'APP'])], 'position' => ['nullable', Rule::in(['DERECHA', 'IZQUIERDA', 'CENTRO'])],
             'order' => ['nullable', 'integer', 'min:0'], 'status' => ['nullable', Rule::in(['ACTIVO', 'PENDIENTE', 'CANCELADO', 'FINALIZADO'])],
             'startAt' => ['required', 'date'], 'endAt' => ['required', 'date', 'after_or_equal:startAt'],
-            'link' => ['nullable', 'string', 'max:1000'], 'title' => ['nullable', 'string', 'max:255'],
-            'actionType' => ['nullable', 'integer', Rule::in([0, 5, 6, 8])],
+            'link' => ['nullable', 'required_if:actionType,4', 'url:http,https', 'max:1000'], 'title' => ['nullable', 'string', 'max:255'],
+            'actionType' => ['nullable', 'integer', Rule::in([0, 4, 5, 6, 8])],
             'image' => [$imageRequired ? 'required' : 'nullable', 'image', 'max:5120'], 'mobileImage' => ['nullable', 'image', 'max:5120'],
         ];
     }

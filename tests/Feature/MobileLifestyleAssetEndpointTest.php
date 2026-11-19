@@ -31,6 +31,7 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             $table->integer('ast_tipo_accion')->nullable();
             $table->unsignedBigInteger('ast_idpromocion')->nullable();
             $table->string('ast_titulo')->nullable();
+            $table->string('ast_link')->nullable();
             $table->dateTime('ast_inicio')->nullable();
             $table->dateTime('ast_fin')->nullable();
         });
@@ -153,6 +154,32 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             ->assertJsonPath('records.0.title', 'Denim');
     }
 
+    public function test_it_returns_active_app_modals_and_preserves_internal_action_priority(): void
+    {
+        DB::table('stj_assets')->insert([
+            [...$this->asset(50, 1, 'APP', 1, '/appointment.jpg', 4, 0, 'Citas VIP'), 'ast_tipo' => 'MODAL', 'ast_link' => 'https://citas.stjacks.com/citas/citasvip-2026'],
+            [...$this->asset(51, 1, 'TODO', 2, '/promotion.jpg', 1, 700, 'Promocion interna'), 'ast_tipo' => 'MODAL', 'ast_link' => 'https://example.com/no-abrir'],
+            [...$this->asset(52, 1, 'WEB', 3, '/web.jpg', 4, 0, 'Solo web'), 'ast_tipo' => 'MODAL', 'ast_link' => 'https://example.com/web'],
+        ]);
+
+        $this->getJson('/api/mobile/v1/assets/modals?countryId=1&plataforma=IOS')
+            ->assertOk()
+            ->assertExactJson([
+                'records' => [
+                    [
+                        'id' => 50, 'image' => 'https://stjacks.com/appointment.jpg', 'accion' => true,
+                        'tipoAccion' => 4, 'promocion' => 0, 'title' => 'Citas VIP',
+                        'link' => 'https://citas.stjacks.com/citas/citasvip-2026',
+                    ],
+                    [
+                        'id' => 51, 'image' => 'https://stjacks.com/promotion.jpg', 'accion' => true,
+                        'tipoAccion' => 1, 'promocion' => 700, 'title' => 'Promocion interna',
+                        'link' => 'https://example.com/no-abrir',
+                    ],
+                ],
+            ]);
+    }
+
     /** @return array<string, mixed> */
     private function asset(int $id, int $country, string $platform, int $order, string $image, int $action, int $promotion, string $title): array
     {
@@ -161,6 +188,7 @@ class MobileLifestyleAssetEndpointTest extends TestCase
             'ast_plataforma' => $platform, 'ast_orden' => $order, 'ast_imagen' => '/desktop.jpg',
             'ast_imagen_movil' => $image, 'ast_tipo_accion' => $action, 'ast_idpromocion' => $promotion,
             'ast_titulo' => $title, 'ast_posicion' => null,
+            'ast_link' => null,
             'ast_inicio' => '2026-08-01 00:00:00', 'ast_fin' => '2026-08-31 23:59:59',
         ];
     }
