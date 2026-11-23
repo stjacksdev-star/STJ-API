@@ -53,4 +53,32 @@ class AppointmentController extends BaseController
             ], $exception->httpStatus);
         }
     }
+
+    public function export(Request $request)
+    {
+        if (! $request->user()?->tokenCan('dashboard')) {
+            return $this->error('Token sin permiso dashboard', 403);
+        }
+
+        $validated = $request->validate([
+            'country' => ['required', 'string', 'max:3'],
+            'store' => ['required', 'string', 'max:20'],
+        ]);
+
+        try {
+            $export = $this->appointments->export($validated);
+
+            return response($export['contents'], 200, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => 'attachment; filename="'.$export['filename'].'"',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            ]);
+        } catch (StjCitasIntegrationException $exception) {
+            return response()->json([
+                'ok' => false,
+                'message' => $exception->getMessage(),
+                'error' => $exception->errorCode,
+            ], $exception->httpStatus);
+        }
+    }
 }

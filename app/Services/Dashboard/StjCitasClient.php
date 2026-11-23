@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Http;
 class StjCitasClient
 {
     /** @return array{campaign: array<string, mixed>, rows: array<int, array<string, mixed>>} */
-    public function appointments(int $countryId, int $storeId, int $year): array
+    public function appointments(int $countryId, ?int $storeId, int $year): array
     {
         $url = rtrim(trim((string) config('services.stj_citas.url')), '/');
         $token = trim((string) config('services.stj_citas.token'));
@@ -25,13 +25,18 @@ class StjCitasClient
         }
 
         try {
+            $query = [
+                'country' => $countryId,
+                'year' => $year,
+            ];
+
+            if ($storeId !== null) {
+                $query['store'] = $storeId;
+            }
+
             $response = Http::baseUrl($url)->withToken($token)->acceptJson()
                 ->connectTimeout(min(3, $timeout))->timeout($timeout)
-                ->get('/api/integraciones/dashboard/citas', [
-                    'country' => $countryId,
-                    'store' => $storeId,
-                    'year' => $year,
-                ]);
+                ->get('/api/integraciones/dashboard/citas', $query);
         } catch (ConnectionException $exception) {
             $timedOut = str_contains(strtolower($exception->getMessage()), 'timed out')
                 || str_contains(strtolower($exception->getMessage()), 'timeout');
@@ -100,7 +105,7 @@ class StjCitasClient
         return new StjCitasIntegrationException('El servicio de citas devolvio una respuesta invalida.', 502, 'INTEGRATION_INVALID_RESPONSE');
     }
 
-    private function validRow(mixed $row, int $countryId, int $storeId): bool
+    private function validRow(mixed $row, int $countryId, ?int $storeId): bool
     {
         if (! is_array($row)) {
             return false;
@@ -117,7 +122,7 @@ class StjCitasClient
             && is_numeric($row['id'])
             && is_numeric($row['storeId'])
             && is_numeric($row['countryId'])
-            && (int) $row['storeId'] === $storeId
+            && ($storeId === null || (int) $row['storeId'] === $storeId)
             && (int) $row['countryId'] === $countryId
             && $row['status'] === 'CONFIRMADA'
             && array_key_exists('registeredAt', $row)

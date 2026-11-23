@@ -110,6 +110,26 @@ class AppointmentServiceIntegrationTest extends TestCase
         $this->assertSame([], $result['rows']);
     }
 
+    public function test_todas_las_tiendas_conserva_la_tienda_real_de_cada_cita(): void
+    {
+        Http::fake(fn () => Http::response($this->payload([
+            $this->row(['id' => 1, 'storeId' => 55]),
+            $this->row(['id' => 2, 'storeId' => 73]),
+        ]), 200));
+
+        $result = app(AppointmentService::class)->appointments(['country' => 'SV', 'store' => 'ALL']);
+
+        $this->assertSame(2, $result['summary']['appointments']);
+        $this->assertNull($result['filters']['store']);
+        $this->assertNull($result['filters']['storeId']);
+        $this->assertSame('Todas las tiendas', $result['filters']['storeName']);
+        $this->assertSame('Utz Ulew', $result['rows'][0]['store']['name']);
+        $this->assertSame(73, $result['rows'][1]['store']['id']);
+        $this->assertSame('ESC', $result['rows'][1]['store']['code']);
+
+        Http::assertSent(fn ($request) => ! isset($request['store']));
+    }
+
     public function test_endpoint_dashboard_conserva_contrato_de_error_controlado(): void
     {
         Sanctum::actingAs(new User, ['dashboard']);
@@ -126,6 +146,21 @@ class AppointmentServiceIntegrationTest extends TestCase
                 'message' => 'No existe una campana de citas para los filtros seleccionados.',
                 'error' => 'CAMPAIGN_NOT_FOUND',
             ]);
+    }
+
+    public function test_exporta_todas_las_citas_consultadas_a_xlsx(): void
+    {
+        Http::fake(fn () => Http::response($this->payload([
+            $this->row(['id' => 1, 'storeId' => 55]),
+            $this->row(['id' => 2, 'storeId' => 73]),
+        ]), 200));
+
+        $export = app(AppointmentService::class)->export(['country' => 'SV', 'store' => 'ALL']);
+
+        $this->assertMatchesRegularExpression('/^citas-1-todas-\d{8}-\d{6}\.xlsx$/', $export['filename']);
+        $this->assertStringStartsWith('PK', $export['contents']);
+        $this->assertGreaterThan(1000, strlen($export['contents']));
+        Http::assertSent(fn ($request) => ! isset($request['store']));
     }
 
     /** @param array<int, array<string, mixed>> $rows */

@@ -46,6 +46,23 @@ class StjCitasClientTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_consulta_todas_las_tiendas_sin_enviar_store(): void
+    {
+        Http::fake([
+            'stj-citas.test/*' => Http::response($this->payload([
+                $this->row(['storeId' => 55]),
+                $this->row(['id' => 2, 'storeId' => 73]),
+            ]), 200),
+        ]);
+
+        $data = app(StjCitasClient::class)->appointments(1, null, 2026);
+
+        $this->assertCount(2, $data['rows']);
+        Http::assertSent(fn ($request) => (int) $request['country'] === 1
+            && ! isset($request['store'])
+            && (int) $request['year'] === 2026);
+    }
+
     public function test_timeout_y_error_de_conexion_se_distinguen(): void
     {
         Http::fakeSequence()

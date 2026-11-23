@@ -376,6 +376,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/sales/orders', [DashboardSalesKpiController::class, 'orders']);
         Route::get('/appointments/catalog', [DashboardAppointmentController::class, 'catalog']);
         Route::get('/appointments', [DashboardAppointmentController::class, 'index']);
+        Route::get('/appointments/export', [DashboardAppointmentController::class, 'export']);
         Route::get('/claims', [DashboardClaimController::class, 'index']);
         Route::get('/claims/export', [DashboardClaimController::class, 'export']);
         Route::post('/claims', [DashboardClaimController::class, 'store']);
