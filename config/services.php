@@ -68,4 +68,10 @@ return [
         ],
     ],
 
+    'stj_citas' => [
+        'url' => env('STJ_CITAS_API_URL'),
+        'token' => env('STJ_CITAS_API_TOKEN'),
+        'timeout' => env('STJ_CITAS_API_TIMEOUT', 8),
+    ],
+
 ];

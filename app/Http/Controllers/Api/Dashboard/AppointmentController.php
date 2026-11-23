@@ -4,14 +4,14 @@ namespace App\Http\Controllers\Api\Dashboard;
 
 use App\Http\Controllers\Api\BaseController;
 use App\Services\Dashboard\AppointmentService;
+use App\Services\Dashboard\Exceptions\StjCitasIntegrationException;
 use Illuminate\Http\Request;
 
 class AppointmentController extends BaseController
 {
     public function __construct(
         private readonly AppointmentService $appointments,
-    ) {
-    }
+    ) {}
 
     public function catalog(Request $request)
     {
@@ -40,9 +40,17 @@ class AppointmentController extends BaseController
             'store' => ['required', 'string', 'max:20'],
         ]);
 
-        return $this->success(
-            $this->appointments->appointments($validated),
-            'Citas obtenidas'
-        );
+        try {
+            return $this->success(
+                $this->appointments->appointments($validated),
+                'Citas obtenidas'
+            );
+        } catch (StjCitasIntegrationException $exception) {
+            return response()->json([
+                'ok' => false,
+                'message' => $exception->getMessage(),
+                'error' => $exception->errorCode,
+            ], $exception->httpStatus);
+        }
     }
 }
