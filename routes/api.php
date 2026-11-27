@@ -82,7 +82,7 @@ Route::get('/integraciones/citas/tiendas', CitasStoreController::class)
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/mobile/v1/auth/login', [MobileAuthController::class, 'login'])
-    ->middleware('throttle:10,1');
+    ->middleware('throttle:10,1,mobile-login:');
 Route::post('/mobile/v1/auth/register', [MobileAuthController::class, 'register'])
     ->middleware('throttle:10,1');
 Route::post('/mobile/v1/auth/recovery', [MobileAuthController::class, 'recoverPassword'])
